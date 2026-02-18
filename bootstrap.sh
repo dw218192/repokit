@@ -62,18 +62,10 @@ fi
 # discovered at runtime by cli.py.
 
 SHIM="$ROOT/repo"
-cat > "$SHIM" <<'SHIMEOF'
+cat > "$SHIM" <<SHIMEOF
 #!/bin/bash
-FRAMEWORK_DIR="PLACEHOLDER_FRAMEWORK"
-PY="PLACEHOLDER_PY"
-ROOT="PLACEHOLDER_ROOT"
-PYTHONPATH="$FRAMEWORK_DIR${PYTHONPATH:+:$PYTHONPATH}" exec "$PY" -m repo_tools.cli --workspace-root "$ROOT" "$@"
+PYTHONPATH="$FRAMEWORK_DIR\${PYTHONPATH:+:\$PYTHONPATH}" exec "$PY" -m repo_tools.cli --workspace-root "$ROOT" "\$@"
 SHIMEOF
-
-# Replace placeholders with actual paths
-sed -i "s|PLACEHOLDER_FRAMEWORK|$FRAMEWORK_DIR|g" "$SHIM"
-sed -i "s|PLACEHOLDER_PY|$PY|g" "$SHIM"
-sed -i "s|PLACEHOLDER_ROOT|$ROOT|g" "$SHIM"
 chmod +x "$SHIM"
 
 echo "OK: $VENV"
