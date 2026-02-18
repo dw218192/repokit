@@ -67,7 +67,7 @@ cat > "$SHIM" <<SHIMEOF
 #!/bin/bash
 PYTHONPATH="$FRAMEWORK_DIR\${PYTHONPATH:+:\$PYTHONPATH}" exec "$PY" -m repo_tools.cli --workspace-root "$ROOT" "\$@"
 SHIMEOF
-chmod +x "$SHIM"
+chmod +x "$SHIM" 2>/dev/null || true
 
 echo "OK: $VENV"
 echo "Run ./repo --help to get started."
