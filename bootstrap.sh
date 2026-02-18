@@ -29,7 +29,7 @@ export UV_MANAGED_PYTHON="1"
 
 # ── Python venv ──────────────────────────────────────────────────────
 
-"$UV" python install
+"$UV" python install --no-bin
 if [[ ! -d "$VENV" ]]; then
     "$UV" venv "$VENV"
 fi
