@@ -29,7 +29,8 @@ export UV_MANAGED_PYTHON="1"
 
 # ── Python venv ──────────────────────────────────────────────────────
 
-"$UV" python install --no-bin
+# Download Python if not already present; ignore "already installed" exit code
+"$UV" python install --no-bin || true
 if [[ ! -d "$VENV" ]]; then
     "$UV" venv "$VENV"
 fi
