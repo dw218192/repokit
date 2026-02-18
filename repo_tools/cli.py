@@ -239,34 +239,33 @@ def _build_cli(
             help="Build configuration type (default: Debug)",
         )(cli)
 
-    # Discover framework tools
-    import repo_tools as rt_pkg
-
-    framework_tools = _discover_tools_from_path(
-        list(rt_pkg.__path__), rt_pkg.__name__
-    )
-
-    # Discover project tools (if sys.path includes project tool dirs)
-    project_tools: list[RepoTool] = []
+    # Add project tool dirs to sys.path BEFORE any imports so namespace
+    # package discovery sees both framework and project portions.
     if project_tool_dirs:
         for tool_dir in project_tool_dirs:
             tool_path = Path(tool_dir)
             if tool_path.exists() and str(tool_dir) not in sys.path:
                 sys.path.insert(0, str(tool_dir))
-        # Re-import to pick up namespace portions
         importlib.invalidate_caches()
-        import repo_tools as rt_refreshed
 
-        all_tools = _discover_tools_from_path(
-            list(rt_refreshed.__path__), rt_refreshed.__name__
-        )
-        # Separate: tools from project dirs vs framework
-        framework_modules = {t.__class__.__module__ for t in framework_tools}
-        for t in all_tools:
-            if t.__class__.__module__ not in framework_modules and t.name not in {
-                pt.name for pt in project_tools
-            }:
-                project_tools.append(t)
+    import repo_tools as rt_pkg
+
+    # Discover all tools from merged namespace package
+    all_tools = _discover_tools_from_path(
+        list(rt_pkg.__path__), rt_pkg.__name__
+    )
+
+    # Separate into framework vs project tools based on file location
+    framework_tools: list[RepoTool] = []
+    project_tools: list[RepoTool] = []
+    project_prefixes = tuple(str(Path(d).resolve()) for d in project_tool_dirs)
+    for t in all_tools:
+        mod = sys.modules.get(t.__class__.__module__)
+        mod_file = getattr(mod, "__file__", "") or ""
+        if project_prefixes and str(Path(mod_file).resolve()).startswith(project_prefixes):
+            project_tools.append(t)
+        else:
+            framework_tools.append(t)
 
     tools = _resolve_tools(framework_tools, project_tools)
 
