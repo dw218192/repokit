@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import os
 import pkgutil
 import sys
 from pathlib import Path
@@ -162,7 +163,7 @@ def _build_cli(
 ) -> click.Group:
     """Build the top-level click group with all discovered tools."""
 
-    @click.group()
+    @click.group(context_settings={"help_option_names": ["-h", "--help"]})
     @click.option(
         "--workspace-root",
         type=click.Path(exists=True),
@@ -333,7 +334,11 @@ def main() -> None:
         workspace_root=workspace_root,
         project_tool_dirs=project_tool_dirs,
     )
-    cli(standalone_mode=True)
+    if os.name != "nt" or os.environ.get("BASH_VERSION"):
+        prog = "./repo"
+    else:
+        prog = ".\\repo.cmd"
+    cli(prog_name=prog, standalone_mode=True)
 
 
 if __name__ == "__main__":
