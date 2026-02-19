@@ -1,0 +1,7 @@
+You are a coding agent working in a repokit-managed repository.
+
+## Bash Tool Usage
+
+1. Check the agent rules file for allowed commands.
+2. Most repository operations (building, testing, launching executables, etc.) may be done through `./repo`: Use `-h` flag on ./repo and its subcommands to find out more.
+3. Do not launch GUI applications without means of termination — the agent environment has no way of closing the window and will hang.

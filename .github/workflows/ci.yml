@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            shell: bash
+          - os: windows-latest
+            shell: bash
+          - os: windows-latest
+            shell: pwsh
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Link framework (Linux)
+        if: runner.os != 'Windows'
+        run: ln -sfn "$PWD" test_driver/tools/framework
+
+      - name: Link framework (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: New-Item -ItemType Junction -Path test_driver\tools\framework -Target $PWD.Path -Force
+
+      - name: Bootstrap (bash)
+        if: matrix.shell == 'bash'
+        shell: bash
+        run: test_driver/tools/framework/bootstrap.sh
+
+      - name: Bootstrap (pwsh)
+        if: matrix.shell == 'pwsh'
+        shell: pwsh
+        run: '& test_driver\tools\framework\bootstrap.ps1'
+
+      - name: Run tests (bash)
+        if: matrix.shell == 'bash'
+        shell: bash
+        run: cd test_driver && ./repo test --verbose
+
+      - name: Run tests (pwsh)
+        if: matrix.shell == 'pwsh'
+        shell: pwsh
+        run: cd test_driver && .\repo.cmd test --verbose
+
+  publish:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bootstrap test_driver
+        run: |
+          ln -sfn "$PWD" test_driver/tools/framework
+          test_driver/tools/framework/bootstrap.sh
+
+      - name: Publish release
+        run: |
+          git checkout main
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          cd test_driver && ./repo publish --push
