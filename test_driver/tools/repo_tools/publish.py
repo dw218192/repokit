@@ -18,7 +18,6 @@ DEFAULT_EXCLUDE = [
     r"^\.github/",
     r"^\.claude/",
     r"^\.vscode/",
-    r"^README\.md$",
     r"^CLAUDE\.md$",
 ]
 

@@ -35,7 +35,7 @@ Then run:
 ./repo clean --all
 ```
 
-To pin a specific version: `cd tools/framework && git checkout v1.0.0`
+To pin a specific repo kit framework version: `cd tools/framework && git checkout v1.0.0`
 
 ## Why
 
@@ -142,4 +142,4 @@ Framework dependencies (click, ruff, etc.) are installed automatically by bootst
 
 ## Versioning & Publishing
 
-The `release` branch is the published artifact — consumers point their submodule at it. To publish: bump `VERSION` and push to `main`. CI runs `./repo test`, then `./repo publish` syncs to `release` and tags as `v<version>`.
+Bump `VERSION` and push to `main`. CI runs tests, then syncs to the `release` branch and tags as `v<version>`. See [CONTRIBUTING.md](CONTRIBUTING.md) for details on the two-branch release model.
