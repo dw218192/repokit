@@ -1,0 +1,3 @@
+test:
+  command: "{repo} python -m pytest {workspace_root}/tests/"
+  verbose_flag: "-v"
