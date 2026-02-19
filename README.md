@@ -4,55 +4,12 @@ Repo tooling framework consumed as a git submodule. Provides a unified `./repo` 
 
 Inspired by [NVIDIA Omniverse repo_man](https://docs.omniverse.nvidia.com/kit/docs/repo_man/latest/index.html).
 
-## Use Cases
-
-**Cross-platform, cross-project dev commands and AI agent prompts.** Define build/test/format commands once in `config.yaml` with `@filter` for platform-specific variants — e.g. `./repo build` works on any OS and project. AI agents can run `./repo --help` to discover available operations immediately — no need to write CLAUDE.md files or agent rules from scratch. New contributors bootstrap once and are productive the same way.
-
-## Setup
+## Quick Start
 
 ```bash
 git submodule add -b release https://github.com/dw218192/repokit.git tools/framework
 tools/framework/bootstrap.sh   # or bootstrap.ps1 on Windows
 ```
-
-This tracks the tip of the `release` branch and creates a `./repo` shim (`repo.cmd` + `repo` bash shim on Windows) in your project root. Bootstrap installs framework deps automatically; add project-specific deps in `tools/requirements.txt`.
-
-To pin a specific version instead:
-
-```bash
-cd tools/framework && git checkout v1.0.0
-```
-
-## Usage
-
-```
-./repo --help
-./repo build
-./repo test --verbose
-./repo format
-./repo clean --all
-./repo context --json
-```
-
-Dimensions are auto-detected but can be overridden:
-
-```
-./repo --platform linux-x64 --build-type Release build
-```
-
-## Tools
-
-| Tool | Description |
-|---|---|
-| `build` | Run build command from config with token expansion |
-| `test` | Run test command with verbose flag support |
-| `format` | Format source (clang-format for C++, ruff for Python) |
-| `clean` | Remove build artifacts (`--build`, `--logs`, `--all`) |
-| `context` | Display resolved tokens and paths |
-| `python` | Run Python in the repo tooling venv |
-| `agent` | Launch coding agent with repo-aware auto-approval |
-
-## Configuration
 
 Create `config.yaml` in your project root:
 
@@ -69,7 +26,63 @@ test:
   command: "ctest --test-dir {build_dir} --build-config {build_type}"
 ```
 
-Tokens like `{build_dir}`, `{platform}`, `{build_type}` are resolved automatically. List-valued tokens become **dimensions** with CLI flags and auto-detection.
+Then run:
+
+```
+./repo build
+./repo test --verbose
+./repo format
+./repo clean --all
+```
+
+To pin a specific version: `cd tools/framework && git checkout v1.0.0`
+
+## Why
+
+Define build/test/format commands once in `config.yaml` with `@filter` for platform-specific variants — `./repo build` works on any OS and project. AI agents can run `./repo --help` to discover available operations immediately. New contributors bootstrap once and are productive the same way.
+
+## Built-in Tools
+
+| Tool | Description |
+|---|---|
+| `build` | Run build command from config with token expansion |
+| `test` | Run test command with verbose flag support |
+| `format` | Format source (clang-format for C++, ruff for Python) |
+| `clean` | Remove build artifacts (`--build`, `--logs`, `--all`) |
+| `context` | Display resolved tokens and paths |
+| `python` | Run Python in the repo tooling venv |
+| `agent` | Launch coding agent with repo-aware auto-approval |
+
+Platform and build type are auto-detected but can be overridden:
+
+```
+./repo --platform linux-x64 --build-type Release build
+```
+
+## Configuration
+
+**Tokens** are `{placeholders}` expanded in commands. Scalar tokens are simple substitutions; some (like `{build_dir}`, `{workspace_root}`, `{repo}`) are built-in.
+
+```yaml
+tokens:
+  build_root: _build        # scalar — just a value
+```
+
+**List-valued tokens** automatically become CLI flags with auto-detection. For example, listing platforms gives you `--platform`:
+
+```yaml
+tokens:
+  platform: [windows-x64, linux-x64, macos-arm64]   # becomes --platform flag
+  build_type: [Debug, Release]                        # becomes --build-type flag
+```
+
+Use `@filter` to vary config by the selected value:
+
+```yaml
+build:
+  command@windows-x64: "msbuild {build_dir}/project.sln /p:Configuration={build_type}"
+  command@linux-x64: "make -C {build_dir} -j$(nproc)"
+```
 
 The built-in `{repo}` token expands to a cross-platform CLI invocation, so commands can nest `./repo` tools:
 
@@ -78,45 +91,55 @@ test:
   command: "{repo} python -m pytest {workspace_root}/tests/"
 ```
 
-Use `@filter` syntax for dimension-specific values:
-
-```yaml
-build:
-  command@windows-x64: "msbuild {build_dir}/project.sln /p:Configuration={build_type}"
-  command@linux-x64: "make -C {build_dir} -j$(nproc)"
-```
-
 ## Extending
 
-Tools are discovered via the `repo_tools` [namespace package](https://packaging.python.org/en/latest/guides/packaging-namespace-packages/). Any directory containing a `repo_tools/` folder (without `__init__.py`) that's on the Python path will contribute tools. The default layout from bootstrap:
+Tools are discovered via the `repo_tools` [namespace package](https://packaging.python.org/en/latest/guides/packaging-namespace-packages/). Place project tools in `tools/repo_tools/` (no `__init__.py`):
 
 ```
 your-project/
   tools/
-    framework/      # repokit submodule — provides repo_tools/
+    framework/      # repokit submodule
     repo_tools/     # project tools — no __init__.py
       my_tool.py
 ```
 
-You can organize this however you like — the only requirement is that both `repo_tools/` directories are discoverable. The `tools/repo_tools/` path is checked by default.
-
-Each file should define a `RepoTool` subclass:
+Each file defines a `RepoTool` subclass:
 
 ```python
+import click
 from repo_tools.core import RepoTool, ToolContext, logger
 
 class MyTool(RepoTool):
     name = "my-tool"
     help = "Does something useful"
 
+    def setup(self, cmd: click.Command) -> click.Command:
+        cmd = click.option("--verbose", is_flag=True, help="Verbose output")(cmd)
+        return cmd
+
+    def default_args(self, tokens: dict[str, str]) -> dict[str, Any]:
+        return {"verbose": False}
+
     def execute(self, ctx: ToolContext, args: dict) -> None:
-        logger.info(f"workspace: {ctx.workspace_root}")
+        if args.get("verbose"):
+            logger.info(f"workspace: {ctx.workspace_root}")
 ```
 
-Project tools are auto-discovered and override framework tools of the same name.
+CLI flags map 1:1 to `config.yaml` fields under the tool name. For the tool above, you could set a default in config:
+
+```yaml
+my-tool:
+  verbose: true
+```
+
+Precedence: tool defaults < config values < CLI flags.
+
+Project tools override framework tools of the same name.
+
+## Dependencies
+
+Framework dependencies (click, ruff, etc.) are installed automatically by bootstrap. To add project-specific deps, create `tools/requirements.txt` and re-run bootstrap.
 
 ## Versioning & Publishing
 
-The `release` branch is the published artifact — consumers point their submodule at it. Each commit on `release` is a tagged version.
-
-To publish: bump the `VERSION` file and push to `main`. CI runs tests via `./repo test`, then automatically runs `./repo publish` to sync `main` to `release` (excluding dev-only files), commit, and tag as `v<version>`.
+The `release` branch is the published artifact — consumers point their submodule at it. To publish: bump `VERSION` and push to `main`. CI runs `./repo test`, then `./repo publish` syncs to `release` and tags as `v<version>`.

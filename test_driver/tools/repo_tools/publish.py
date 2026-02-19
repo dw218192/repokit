@@ -15,8 +15,11 @@ from repo_tools.core import RepoTool, ToolContext, logger
 # Override via config publish.exclude list.
 DEFAULT_EXCLUDE = [
     r"^test_driver/",
-    r"^REFACTOR_PLAN\.md$",
     r"^\.github/",
+    r"^\.claude/",
+    r"^\.vscode/",
+    r"^README\.md$",
+    r"^CLAUDE\.md$",
 ]
 
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$")
