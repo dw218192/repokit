@@ -3,3 +3,4 @@ pyyaml>=6.0
 colorama>=0.4
 bashlex>=0.18
 tomli>=2.0; python_version < "3.11"
+ruff>=0.4

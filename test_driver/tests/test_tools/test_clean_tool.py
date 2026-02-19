@@ -19,7 +19,12 @@ class TestCleanTool:
 
         ctx = make_tool_context(workspace_root=tmp_path / "ws")
         tool = CleanTool()
-        args = {"clean_all": True, "clean_build": False, "clean_logs": False, "dry_run": False}
+        args = {
+            "clean_all": True,
+            "clean_build": False,
+            "clean_logs": False,
+            "dry_run": False,
+        }
 
         tool.execute(ctx, args)
 
@@ -31,12 +36,18 @@ class TestCleanTool:
         ctx = make_tool_context(workspace_root=tmp_path / "ws")
         # Create the build_dir that the tool will resolve from tokens
         from pathlib import Path
+
         build_dir = Path(ctx.tokens["build_dir"])
         build_dir.mkdir(parents=True)
         (build_dir / "output.bin").touch()
 
         tool = CleanTool()
-        args = {"clean_build": True, "clean_all": False, "clean_logs": False, "dry_run": False}
+        args = {
+            "clean_build": True,
+            "clean_all": False,
+            "clean_logs": False,
+            "dry_run": False,
+        }
 
         tool.execute(ctx, args)
 
@@ -51,7 +62,12 @@ class TestCleanTool:
 
         ctx = make_tool_context(workspace_root=tmp_path / "ws")
         tool = CleanTool()
-        args = {"clean_all": True, "clean_build": False, "clean_logs": False, "dry_run": True}
+        args = {
+            "clean_all": True,
+            "clean_build": False,
+            "clean_logs": False,
+            "dry_run": True,
+        }
 
         tool.execute(ctx, args)
 
@@ -62,7 +78,12 @@ class TestCleanTool:
         """No clean flags set produces no error and no deletions."""
         ctx = make_tool_context()
         tool = CleanTool()
-        args = {"clean_all": False, "clean_build": False, "clean_logs": False, "dry_run": False}
+        args = {
+            "clean_all": False,
+            "clean_build": False,
+            "clean_logs": False,
+            "dry_run": False,
+        }
 
         # Should complete without error
         tool.execute(ctx, args)

@@ -24,7 +24,10 @@ SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$")
 
 def _git(*args: str, capture: bool = False) -> str:
     result = subprocess.run(
-        ["git", *args], check=True, text=True, capture_output=capture,
+        ["git", *args],
+        check=True,
+        text=True,
+        capture_output=capture,
     )
     return result.stdout.strip() if capture else ""
 
@@ -36,7 +39,9 @@ def _ensure_git_identity() -> None:
         ("user.email", "github-actions[bot]@users.noreply.github.com"),
     ]:
         ret = subprocess.run(
-            ["git", "config", key], capture_output=True, text=True,
+            ["git", "config", key],
+            capture_output=True,
+            text=True,
         )
         if ret.returncode != 0 or not ret.stdout.strip():
             _git("config", key, fallback)
@@ -48,7 +53,9 @@ class PublishTool(RepoTool):
 
     def setup(self, cmd: click.Command) -> click.Command:
         cmd = click.option(
-            "--dry-run", is_flag=True, help="Show what would happen without making changes"
+            "--dry-run",
+            is_flag=True,
+            help="Show what would happen without making changes",
         )(cmd)
         cmd = click.option(
             "--push", is_flag=True, help="Push release branch and tag to origin"

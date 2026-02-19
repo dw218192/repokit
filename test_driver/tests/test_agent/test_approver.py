@@ -17,10 +17,13 @@ from repo_tools.agent.runner import ToolRequest
 def _default_rules_path() -> Path:
     """Return the path to the default rules TOML shipped with the package."""
     from repo_tools.agent import approver
+
     return Path(approver.__file__).resolve().parent / "rules_default.toml"
 
 
-def _make_approver(rules_path: Path | None = None, project_root: Path | None = None) -> AutoApprover:
+def _make_approver(
+    rules_path: Path | None = None, project_root: Path | None = None
+) -> AutoApprover:
     """Build an AutoApprover with mocked backend and session."""
     backend = MagicMock()
     session = MagicMock()
@@ -82,7 +85,9 @@ class TestCheckRequest:
     def test_check_request_non_bash_allowed(self):
         """Non-Bash tool requests are always allowed regardless of rules."""
         approver = _make_approver()
-        allowed, reason = approver._check_request(ToolRequest(tool="Edit", command=None))
+        allowed, reason = approver._check_request(
+            ToolRequest(tool="Edit", command=None)
+        )
         assert allowed is True
         assert reason == ""
 
