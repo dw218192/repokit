@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import functools
 import logging
 import os
@@ -13,15 +14,13 @@ import string
 import subprocess
 import sys
 import time
-from collections.abc import Generator, Mapping
+from collections.abc import Generator
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import click
 import yaml
-from colorama import Fore, Style, init as colorama_init
-
-colorama_init()
+from colorama import Fore, Style
 
 
 # ── Logging ──────────────────────────────────────────────────────────
@@ -86,6 +85,11 @@ class TokenFormatter(string.Formatter):
         raise ValueError(f"Token expansion exceeded {self.MAX_DEPTH} iterations")
 
 
+def _fwd(p: str) -> str:
+    """Normalize path to forward slashes (safe for shlex.split on Windows)."""
+    return Path(p).as_posix()
+
+
 # Built-in tokens resolved from the runtime environment.
 def _builtin_tokens() -> dict[str, str]:
     system = platform.system()
@@ -96,6 +100,7 @@ def _builtin_tokens() -> dict[str, str]:
         "shell_ext": ".cmd" if is_win else ".sh",
         "lib_ext": ".dll" if is_win else (".dylib" if is_mac else ".so"),
         "path_sep": ";" if is_win else ":",
+        "repo": f'"{_fwd(sys.executable)}" -m repo_tools.cli --workspace-root "{{workspace_root}}"',
     }
 
 
@@ -128,9 +133,9 @@ def resolve_tokens(
                 _get_config_value(config, "repo_paths.logs_root",
                 _get_config_value(config, "paths.logs_root", "_logs"))
 
-    tokens["workspace_root"] = workspace_root
-    tokens["build_root"] = str(Path(workspace_root) / build_root)
-    tokens["logs_root"] = str(Path(workspace_root) / logs_root)
+    tokens["workspace_root"] = _fwd(workspace_root)
+    tokens["build_root"] = _fwd(str(Path(workspace_root) / build_root))
+    tokens["logs_root"] = _fwd(str(Path(workspace_root) / logs_root))
 
     # Dimension values override
     tokens.update(dimension_values)
@@ -148,9 +153,9 @@ def resolve_tokens(
             resolved[key] = str(value)
 
     # Computed compound tokens
-    resolved["build_dir"] = str(
+    resolved["build_dir"] = _fwd(str(
         Path(resolved["build_root"]) / resolved.get("platform", "default") / resolved.get("build_type", "Debug")
-    )
+    ))
 
     return resolved
 
@@ -180,14 +185,6 @@ def _get_config_value(config: dict, key_path: str, default: str = "") -> str:
         current = current[key]
     return str(current) if current is not None else default
 
-
-def _get_optional_config_value(config: dict, key_path: str) -> str | None:
-    current: Any = config
-    for key in key_path.split("."):
-        if not isinstance(current, dict) or key not in current:
-            return None
-        current = current[key]
-    return str(current) if current is not None else None
 
 
 def resolve_filters(config: dict[str, Any], dimension_values: dict[str, str]) -> dict[str, Any]:
@@ -279,9 +276,6 @@ def _match_filter(
                 if negate:
                     if value == dim_val:
                         return False, 0  # Negation failed
-                else:
-                    if value != dim_val and value != dim_name:
-                        return False, 0
                 break
 
         # Also check if value is a known dimension value (not current)
@@ -298,6 +292,21 @@ def _match_filter(
                     return False, 0
 
     return True, len(conditions)
+
+
+# ── ToolContext ───────────────────────────────────────────────────────
+
+
+@dataclasses.dataclass(frozen=True)
+class ToolContext:
+    """Immutable context passed to every tool execution."""
+
+    workspace_root: Path
+    tokens: dict[str, str]
+    config: dict[str, Any]
+    tool_config: dict[str, Any]
+    dimensions: dict[str, str]
+    passthrough_args: list[str]
 
 
 # ── RepoTool Base ────────────────────────────────────────────────────
@@ -321,8 +330,8 @@ class RepoTool:
         """Return default args dict before config/CLI merge."""
         return {}
 
-    def execute(self, args: dict[str, Any]) -> None:
-        """Execute the tool with merged args."""
+    def execute(self, ctx: ToolContext, args: dict[str, Any]) -> None:
+        """Execute the tool with context and tool-specific args."""
         raise NotImplementedError
 
 
@@ -345,6 +354,7 @@ def invoke_tool(
     name: str,
     tokens: dict[str, str],
     config: dict[str, Any],
+    dimensions: dict[str, str] | None = None,
     extra_args: dict[str, Any] | None = None,
 ) -> None:
     """Invoke a registered tool programmatically (e.g. prebuild/postbuild steps)."""
@@ -352,20 +362,25 @@ def invoke_tool(
     if tool is None:
         raise KeyError(f"Tool '{name}' is not registered.")
 
-    # Merge: defaults < tokens < tool config < extra_args
     tool_config = config.get(name, {})
     if not isinstance(tool_config, dict):
         tool_config = {}
 
-    args: dict[str, Any] = {}
-    args.update(tool.default_args(tokens))
-    args.update(tokens)
+    ctx = ToolContext(
+        workspace_root=Path(tokens.get("workspace_root", ".")),
+        tokens=tokens,
+        config=config,
+        tool_config=tool_config,
+        dimensions=dimensions or {},
+        passthrough_args=[],
+    )
+
+    args: dict[str, Any] = {**tool.default_args(tokens)}
     args.update(tool_config)
     if extra_args:
         args.update(extra_args)
-    args.setdefault("passthrough_args", [])
 
-    tool.execute(args)
+    tool.execute(ctx, args)
 
 
 # ── Platform Detection ───────────────────────────────────────────────
@@ -437,15 +452,6 @@ def _map_platform_identifier(os_val: str, arch_val: str) -> str:
     return f"{os_normalized}-{arch_normalized}"
 
 
-def is_platform_compatible(target_platform: str, host_platform: str | None = None) -> bool:
-    if host_platform is None:
-        host_platform = detect_platform_identifier()
-    if target_platform == host_platform:
-        return True
-    if target_platform == "emscripten":
-        return False
-    return False
-
 
 # ── Process Execution ────────────────────────────────────────────────
 
@@ -497,8 +503,8 @@ def find_venv_executable(name: str) -> str:
 
 def run_command(
     cmd: list[str],
-    log_file: Optional[Path] = None,
-    env_script: Optional[Path] = None,
+    log_file: Path | None = None,
+    env_script: Path | None = None,
 ) -> None:
     """Run a command and optionally tee output to a log file.
 
@@ -539,7 +545,10 @@ def run_command(
             if process.returncode != 0:
                 sys.exit(process.returncode)
     else:
-        subprocess.run(run_cmd, shell=use_shell, check=True)
+        try:
+            subprocess.run(run_cmd, shell=use_shell, check=True)
+        except subprocess.CalledProcessError as e:
+            sys.exit(e.returncode)
 
 
 def remove_tree_with_retries(
@@ -586,69 +595,5 @@ def normalize_build_type(value: str | None) -> str:
     return mapping.get(str(value).casefold(), str(value))
 
 
-def normalize_env_config(env_value: object) -> dict[str, object]:
-    if not env_value:
-        return {}
-    if isinstance(env_value, dict):
-        return dict(env_value)
-    if isinstance(env_value, str):
-        env_items = [env_value]
-    elif isinstance(env_value, list):
-        env_items = env_value
-    else:
-        logger.warning(f"Skipping env config with unsupported type: {type(env_value)}")
-        return {}
-
-    parsed: dict[str, object] = {}
-    for item in env_items:
-        if not isinstance(item, str):
-            logger.warning(f"Skipping env entry (not a string): {item!r}")
-            continue
-        text = item.strip()
-        if not text:
-            continue
-        if "=" in text:
-            key, value = text.split("=", 1)
-            parsed[key] = value
-        else:
-            parsed[text] = ""
-    return parsed
 
 
-def load_conan_env(build_dir: Path, preset_type: str = "test") -> dict[str, str]:
-    """Load environment variables from Conan-generated CMakePresets.json."""
-    import json
-
-    presets_path = build_dir / "CMakePresets.json"
-    if not presets_path.exists():
-        logger.warning(f"CMakePresets.json not found: {presets_path}")
-        return {}
-
-    presets = json.loads(presets_path.read_text(encoding="utf-8"))
-
-    key = {
-        "test": "testPresets",
-        "configure": "configurePresets",
-        "build": "buildPresets",
-    }.get(preset_type, f"{preset_type}Presets")
-
-    preset_list = presets.get(key, [])
-    if not preset_list:
-        logger.warning(f"No {key} found in {presets_path}")
-        return {}
-
-    env = preset_list[0].get("environment", {})
-    if not env:
-        return {}
-
-    resolved: dict[str, str] = {}
-    for var, value in env.items():
-        if not isinstance(value, str):
-            continue
-        result = re.sub(
-            r"\$penv\{([^}]+)\}",
-            lambda m: os.environ.get(m.group(1), ""),
-            value,
-        )
-        resolved[var] = result
-    return resolved

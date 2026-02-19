@@ -9,7 +9,7 @@ from typing import Any
 
 import click
 
-from ..core import RepoTool, logger
+from ..core import RepoTool, ToolContext, logger
 from .approver import AutoApprover
 from .claude import Claude
 from .runner import AgentCLITool
@@ -37,22 +37,16 @@ class AgentTool(RepoTool):
             default=False,
             help="Auto-approve tool permissions that match rules.toml",
         )(cmd)
-        cmd = click.argument("subcommand", default="run")(cmd)
         return cmd
 
     def default_args(self, tokens: dict[str, str]) -> dict[str, Any]:
         return {}
 
-    def execute(self, args: dict[str, Any]) -> None:
-        subcommand = args.get("subcommand", "run")
-        if subcommand != "run":
-            logger.error(f"Unknown agent subcommand: {subcommand}")
-            raise SystemExit(1)
-
+    def execute(self, ctx: ToolContext, args: dict[str, Any]) -> None:
         ensure_installed()
         backend_name = args.get("backend", "claude")
         backend = BACKENDS[backend_name]
-        cwd = args.get("workspace_root")
+        cwd = str(ctx.workspace_root)
         cmd = backend.build_command(cwd=cwd)
 
         session = PaneSession.spawn(cmd, cwd=cwd)
@@ -67,17 +61,16 @@ class AgentTool(RepoTool):
 
         # Find rules file: project-specific first, then framework default
         rules_file = None
-        if cwd:
-            project_rules = Path(cwd) / "tools" / "agent" / "rules.toml"
-            if project_rules.exists():
-                rules_file = project_rules
+        project_rules = ctx.workspace_root / "tools" / "agent" / "rules.toml"
+        if project_rules.exists():
+            rules_file = project_rules
 
         if rules_file is None:
             rules_file = Path(__file__).parent / "rules_default.toml"
 
         approver = AutoApprover(
             backend, session, rules_file,
-            project_root=Path(cwd) if cwd else None,
+            project_root=ctx.workspace_root,
         )
         approver.start()
 

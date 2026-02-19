@@ -6,32 +6,21 @@ from typing import Any
 
 import click
 
-from .core import RepoTool, TokenFormatter, logger, run_command
+from .command_runner import CommandRunnerTool
+from .core import ToolContext
 
 
-class TestTool(RepoTool):
+class TestTool(CommandRunnerTool):
     name = "test"
     help = "Run tests (runs command from config with token expansion)"
+    config_hint = 'test:\n    command: "ctest --test-dir {build_dir} --build-config {build_type}"'
 
     def setup(self, cmd: click.Command) -> click.Command:
-        cmd = click.option("--build-type", "-bt", default=None, help="Build type override")(cmd)
+        cmd = super().setup(cmd)
         cmd = click.option("-v", "--verbose", is_flag=True, help="Verbose test output")(cmd)
         return cmd
 
-    def default_args(self, tokens: dict[str, str]) -> dict[str, Any]:
-        return {}
-
-    def execute(self, args: dict[str, Any]) -> None:
-        command = args.get("command")
-        if not command:
-            logger.error(
-                "No test command configured. Add to config.yaml:\n"
-                "  test:\n"
-                '    command: "ctest --test-dir {build_dir} --build-config {build_type}"'
-            )
-            raise SystemExit(1)
-
-        formatter = TokenFormatter(args)
-        resolved = formatter.resolve(command)
-        logger.info(f"Running: {resolved}")
-        run_command(resolved.split())
+    def execute(self, ctx: ToolContext, args: dict[str, Any]) -> None:
+        if args.get("verbose") and args.get("command"):
+            args["command"] += " " + args.get("verbose_flag", "--output-on-failure")
+        super().execute(ctx, args)

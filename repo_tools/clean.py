@@ -7,7 +7,7 @@ from typing import Any
 
 import click
 
-from .core import RepoTool, logger, remove_tree_with_retries
+from .core import RepoTool, ToolContext, logger, remove_tree_with_retries
 
 
 class CleanTool(RepoTool):
@@ -29,11 +29,10 @@ class CleanTool(RepoTool):
             "dry_run": False,
         }
 
-    def execute(self, args: dict[str, Any]) -> None:
-        workspace_root = Path(args.get("workspace_root", "."))
-        build_root = Path(args.get("build_root", workspace_root / "_build"))
-        build_dir = Path(args.get("build_dir", build_root / "default" / "Debug"))
-        logs_root = Path(args.get("logs_root", workspace_root / "_logs"))
+    def execute(self, ctx: ToolContext, args: dict[str, Any]) -> None:
+        build_root = Path(ctx.tokens.get("build_root", str(ctx.workspace_root / "_build")))
+        build_dir = Path(ctx.tokens.get("build_dir", str(build_root / "default" / "Debug")))
+        logs_root = Path(ctx.tokens.get("logs_root", str(ctx.workspace_root / "_logs")))
         dry_run = args.get("dry_run", False)
 
         targets: list[Path] = []

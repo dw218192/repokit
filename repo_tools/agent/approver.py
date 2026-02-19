@@ -8,7 +8,11 @@ from __future__ import annotations
 
 import re
 import threading
-import tomllib
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib  # type: ignore[no-redef]
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING

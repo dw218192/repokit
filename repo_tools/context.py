@@ -7,7 +7,7 @@ from typing import Any
 
 import click
 
-from .core import RepoTool, logger
+from .core import RepoTool, ToolContext, logger
 
 
 class ContextTool(RepoTool):
@@ -21,10 +21,8 @@ class ContextTool(RepoTool):
     def default_args(self, tokens: dict[str, str]) -> dict[str, Any]:
         return {"as_json": False}
 
-    def execute(self, args: dict[str, Any]) -> None:
-        # Filter to only show meaningful tokens (not the full args dict)
-        skip_keys = {"passthrough_args", "as_json", "command", "backends"}
-        tokens = {k: v for k, v in sorted(args.items()) if k not in skip_keys and isinstance(v, str)}
+    def execute(self, ctx: ToolContext, args: dict[str, Any]) -> None:
+        tokens = dict(sorted(ctx.tokens.items()))
 
         if args.get("as_json"):
             print(json.dumps(tokens, indent=2))

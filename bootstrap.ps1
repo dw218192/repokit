@@ -47,19 +47,33 @@ if (Test-Path $ProjectReqs) {
     & $Uv pip install --python $Py -r $ProjectReqs
 }
 
-# ── Generate ./repo shim ─────────────────────────────────────────────
+# ── Generate ./repo shims ────────────────────────────────────────────
 
-# Convert Windows paths to Git Bash compatible paths for the shim
+$VenvBin = Split-Path -Parent $Py
+
+# repo.cmd — native Windows shim (PowerShell / cmd)
+$CmdShim = "$Root\repo.cmd"
+$CmdContent = @"
+@echo off
+set "PATH=$VenvBin;%PATH%"
+set "PYTHONPATH=$FrameworkDir;%PYTHONPATH%"
+"$Py" -m repo_tools.cli --workspace-root "$Root" %*
+"@
+[System.IO.File]::WriteAllText($CmdShim, $CmdContent.Replace("`r`n", "`r`n"))
+
+# repo — bash shim (Git Bash)
 $FrameworkDirBash = $FrameworkDir -replace '\\','/'
 $PyBash = $Py -replace '\\','/'
 $RootBash = $Root -replace '\\','/'
+$VenvBinBash = $VenvBin -replace '\\','/'
 
-$ShimPath = "$Root\repo"
-$ShimContent = @"
+$BashShim = "$Root\repo"
+$BashContent = @"
 #!/bin/bash
+export PATH="${VenvBinBash}:`$PATH"
 PYTHONPATH="$FrameworkDirBash`${PYTHONPATH:+:`$PYTHONPATH}" exec "$PyBash" -m repo_tools.cli --workspace-root "$RootBash" "`$@"
 "@
-[System.IO.File]::WriteAllText($ShimPath, $ShimContent.Replace("`r`n", "`n"))
+[System.IO.File]::WriteAllText($BashShim, $BashContent.Replace("`r`n", "`n"))
 
 Write-Host "OK: $Venv"
-Write-Host "Run ./repo --help to get started."
+Write-Host "Run .\repo --help to get started."

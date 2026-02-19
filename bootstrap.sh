@@ -29,8 +29,14 @@ export UV_MANAGED_PYTHON="1"
 
 # ── Python venv ──────────────────────────────────────────────────────
 
-# Download Python if not already present; ignore "already installed" exit code
-"$UV" python install --no-bin || true
+# Download Python if not already present
+if ! "$UV" python install --no-bin; then
+    # Install failed — verify Python is still usable (e.g. already installed)
+    if ! "$UV" python find >/dev/null 2>&1; then
+        echo "ERROR: uv python install failed and no usable Python found"
+        exit 1
+    fi
+fi
 if [[ ! -d "$VENV" ]]; then
     "$UV" venv "$VENV"
 fi
@@ -61,10 +67,14 @@ fi
 # The shim sets PYTHONPATH so that repo_tools is importable as a
 # namespace package, then runs it as a module.  Project tool dirs are
 # discovered at runtime by cli.py.
+# PATH is prepended with the venv bin dir so subprocess calls
+# (e.g. "python -m pytest") find venv Python, not the system one.
 
+VENV_BIN="$(dirname "$PY")"
 SHIM="$ROOT/repo"
 cat > "$SHIM" <<SHIMEOF
 #!/bin/bash
+export PATH="$VENV_BIN:\$PATH"
 PYTHONPATH="$FRAMEWORK_DIR\${PYTHONPATH:+:\$PYTHONPATH}" exec "$PY" -m repo_tools.cli --workspace-root "$ROOT" "\$@"
 SHIMEOF
 chmod +x "$SHIM" 2>/dev/null || true

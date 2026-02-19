@@ -13,6 +13,7 @@ import click
 
 from .core import (
     RepoTool,
+    ToolContext,
     detect_platform_identifier,
     load_config,
     logger,
@@ -33,10 +34,13 @@ def _discover_tools_from_path(
     tools: list[RepoTool] = []
     for module_info in pkgutil.iter_modules(namespace_path):
         name = module_info.name
-        if name.startswith("_") or name in ("cli", "core"):
+        if name.startswith("_") or name in ("cli", "core", "command_runner"):
             continue
         try:
             module = importlib.import_module(f"{package_name}.{name}")
+        except ImportError as exc:
+            logger.debug(f"Could not import {package_name}.{name}: {exc}")
+            continue
         except Exception as exc:
             logger.warning(f"Failed to import {package_name}.{name}: {exc}")
             continue
@@ -52,6 +56,11 @@ def _discover_tools_from_path(
                 continue
             try:
                 tool = cls()
+            except ImportError as exc:
+                logger.debug(
+                    f"Skipping tool '{cls.__name__}' (missing dependency): {exc}"
+                )
+                continue
             except Exception as exc:
                 logger.warning(
                     f"Skipping tool '{cls.__name__}' due to init error: {exc}"
@@ -107,29 +116,29 @@ def _make_tool_command(
         tokens = ctx.obj["tokens"]
         config = ctx.obj["config"]
 
-        # Merge: defaults < tokens < config < CLI
         tool_config = config.get(tool.name, {})
         if not isinstance(tool_config, dict):
             tool_config = {}
 
-        defaults = tool.default_args(tokens)
-        args: dict[str, Any] = {**defaults}
-        args.update(tokens)
+        context = ToolContext(
+            workspace_root=Path(ctx.obj["workspace_root"]),
+            tokens=tokens,
+            config=config,
+            tool_config=tool_config,
+            dimensions=ctx.obj["dimensions"],
+            passthrough_args=list(ctx.args) if ctx.args else [],
+        )
 
-        # Config values as defaults
+        # Merge: defaults < tool_config < CLI kwargs
+        args: dict[str, Any] = {**tool.default_args(tokens)}
         for k, v in tool_config.items():
             if k not in kwargs or kwargs[k] is None:
                 args[k] = v
-
-        # CLI values override
         for k, v in kwargs.items():
             if v is not None:
                 args[k] = v
 
-        # Passthrough args
-        args["passthrough_args"] = list(ctx.args) if ctx.args else []
-
-        tool.execute(args)
+        tool.execute(context, args)
 
     cmd = click.Command(
         name=tool.name,
@@ -167,7 +176,11 @@ def _build_cli(
         if workspace_root is None:
             workspace_root = str(Path.cwd())
 
-        config = load_config(workspace_root)
+        # Reuse early config if workspace hasn't changed
+        if workspace_root == ws:
+            config = early_config
+        else:
+            config = load_config(workspace_root)
 
         # Resolve dimension values from config tokens or fallback defaults
         dimensions = _get_dimension_tokens(config)
@@ -210,8 +223,8 @@ def _build_cli(
 
     # Load config early to get dimensions for global flags
     ws = workspace_root or str(Path.cwd())
-    config = load_config(ws)
-    dimensions = _get_dimension_tokens(config)
+    early_config = load_config(ws)
+    dimensions = _get_dimension_tokens(early_config)
 
     # Add dimension flags to the group
     for dim_name, choices in dimensions.items():
@@ -258,7 +271,7 @@ def _build_cli(
     # Separate into framework vs project tools based on file location
     framework_tools: list[RepoTool] = []
     project_tools: list[RepoTool] = []
-    project_prefixes = tuple(str(Path(d).resolve()) for d in project_tool_dirs)
+    project_prefixes = tuple(str(Path(d).resolve()) for d in (project_tool_dirs or []))
     for t in all_tools:
         mod = sys.modules.get(t.__class__.__module__)
         mod_file = getattr(mod, "__file__", "") or ""
@@ -285,6 +298,9 @@ def main() -> None:
 
         python -m repo_tools.cli --workspace-root /path/to/project ...
     """
+    from colorama import init as colorama_init
+    colorama_init()
+
     # --workspace-root can come from argv or be derived from this script's location
     workspace_root = None
 
@@ -309,8 +325,8 @@ def main() -> None:
     # Discover project tool dirs
     project_tool_dirs: list[str] = []
     if workspace_root:
-        project_tools_dir = Path(workspace_root) / "tools" / "project_tools"
-        if project_tools_dir.exists():
+        project_tools_dir = Path(workspace_root) / "tools"
+        if (project_tools_dir / "repo_tools").exists():
             project_tool_dirs.append(str(project_tools_dir))
 
     cli = _build_cli(
