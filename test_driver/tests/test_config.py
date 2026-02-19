@@ -26,12 +26,7 @@ class TestLoadConfig:
 
     def test_load_config_valid(self, tmp_path: Path):
         """A well-formed YAML mapping is parsed correctly."""
-        yaml_text = (
-            "tokens:\n"
-            "  greeting: hello\n"
-            "build:\n"
-            "  command: cmake --build .\n"
-        )
+        yaml_text = "tokens:\n  greeting: hello\nbuild:\n  command: cmake --build .\n"
         (tmp_path / "config.yaml").write_text(yaml_text, encoding="utf-8")
         cfg = load_config(str(tmp_path))
 

@@ -47,7 +47,8 @@ def make_workspace(tmp_path: Path):
 
         if config_yaml is not None:
             (ws / "config.yaml").write_text(
-                textwrap.dedent(config_yaml), encoding="utf-8",
+                textwrap.dedent(config_yaml),
+                encoding="utf-8",
             )
 
         if project_tool_files:
@@ -55,7 +56,8 @@ def make_workspace(tmp_path: Path):
             pt_dir.mkdir(parents=True)
             for filename, content in project_tool_files.items():
                 (pt_dir / filename).write_text(
-                    textwrap.dedent(content), encoding="utf-8",
+                    textwrap.dedent(content),
+                    encoding="utf-8",
                 )
 
         return ws

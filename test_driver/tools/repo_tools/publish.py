@@ -15,8 +15,10 @@ from repo_tools.core import RepoTool, ToolContext, logger
 # Override via config publish.exclude list.
 DEFAULT_EXCLUDE = [
     r"^test_driver/",
-    r"^REFACTOR_PLAN\.md$",
     r"^\.github/",
+    r"^\.claude/",
+    r"^\.vscode/",
+    r"^CLAUDE\.md$",
 ]
 
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$")
@@ -24,7 +26,10 @@ SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$")
 
 def _git(*args: str, capture: bool = False) -> str:
     result = subprocess.run(
-        ["git", *args], check=True, text=True, capture_output=capture,
+        ["git", *args],
+        check=True,
+        text=True,
+        capture_output=capture,
     )
     return result.stdout.strip() if capture else ""
 
@@ -36,7 +41,9 @@ def _ensure_git_identity() -> None:
         ("user.email", "github-actions[bot]@users.noreply.github.com"),
     ]:
         ret = subprocess.run(
-            ["git", "config", key], capture_output=True, text=True,
+            ["git", "config", key],
+            capture_output=True,
+            text=True,
         )
         if ret.returncode != 0 or not ret.stdout.strip():
             _git("config", key, fallback)
@@ -48,7 +55,9 @@ class PublishTool(RepoTool):
 
     def setup(self, cmd: click.Command) -> click.Command:
         cmd = click.option(
-            "--dry-run", is_flag=True, help="Show what would happen without making changes"
+            "--dry-run",
+            is_flag=True,
+            help="Show what would happen without making changes",
         )(cmd)
         cmd = click.option(
             "--push", is_flag=True, help="Push release branch and tag to origin"
@@ -83,10 +92,28 @@ class PublishTool(RepoTool):
         tag = f"v{version}"
         logger.info(f"Version: {version} -> tag: {tag}")
 
-        # Already published — skip gracefully.
-        ret = subprocess.run(["git", "rev-parse", tag], capture_output=True)
-        if ret.returncode == 0:
-            logger.info(f"Tag '{tag}' already exists. Nothing to do.")
+        # Already published — skip gracefully, but only if the release branch also
+        # contains the tag (handles the case where a previous run pushed the tag
+        # but failed to push the release branch).
+        ret = subprocess.run(["git", "rev-parse", tag], capture_output=True, text=True)
+        tag_already_exists = ret.returncode == 0
+        if tag_already_exists:
+            tag_commit = ret.stdout.strip()
+            release_has_tag = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", tag_commit, "origin/release"],
+                capture_output=True,
+            )
+            if release_has_tag.returncode == 0:
+                logger.info(f"Tag '{tag}' already exists and release branch is up to date. Nothing to do.")
+                return
+            # Tag exists but release branch is behind (e.g. previous push was
+            # interrupted).  Just push the existing tagged commit to the branch.
+            logger.info(f"Tag '{tag}' exists but release branch is missing it — pushing now.")
+            if push:
+                _git("push", "origin", f"{tag_commit}:refs/heads/release", tag)
+                logger.info("Done.")
+            else:
+                logger.info(f"To publish:  git push origin {tag_commit}:refs/heads/release {tag}")
             return
 
         # ── Verify preconditions ──────────────────────────────────

@@ -23,18 +23,22 @@ class TestTokenFormatterResolve:
 
     def test_cross_reference(self):
         """A token whose value contains another {token} is resolved recursively."""
-        fmt = TokenFormatter({
-            "base": "/opt",
-            "full": "{base}/lib",
-        })
+        fmt = TokenFormatter(
+            {
+                "base": "/opt",
+                "full": "{base}/lib",
+            }
+        )
         assert fmt.resolve("{full}") == "/opt/lib"
 
     def test_cycle_detection(self):
         """Circular references like {a}->{b}->{a} raise ValueError."""
-        fmt = TokenFormatter({
-            "a": "{b}",
-            "b": "{a}",
-        })
+        fmt = TokenFormatter(
+            {
+                "a": "{b}",
+                "b": "{a}",
+            }
+        )
         with pytest.raises(ValueError, match="[Cc]ircular|exceeded"):
             fmt.resolve("{a}")
 
@@ -42,7 +46,7 @@ class TestTokenFormatterResolve:
         """A chain deeper than MAX_DEPTH raises ValueError."""
         # Build a chain: t0 -> {t1} -> {t2} -> ... -> {tN}
         n = TokenFormatter.MAX_DEPTH + 5
-        tokens = {f"t{i}": f"{{t{i+1}}}" for i in range(n)}
+        tokens = {f"t{i}": f"{{t{i + 1}}}" for i in range(n)}
         tokens[f"t{n}"] = "end"
         fmt = TokenFormatter(tokens)
         with pytest.raises(ValueError):

@@ -25,8 +25,12 @@ class TestFormatTool:
 
         with (
             patch("repo_tools.format.subprocess.run") as mock_run,
-            patch("repo_tools.format.shutil.which", return_value="/usr/bin/clang-format"),
-            patch("repo_tools.format.find_venv_executable", return_value="clang-format"),
+            patch(
+                "repo_tools.format.shutil.which", return_value="/usr/bin/clang-format"
+            ),
+            patch(
+                "repo_tools.format.find_venv_executable", return_value="clang-format"
+            ),
         ):
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
             tool.execute(ctx, args)
@@ -35,8 +39,7 @@ class TestFormatTool:
             # At least one call should contain clang-format with -i (in-place formatting)
             calls = mock_run.call_args_list
             clang_calls = [
-                c for c in calls
-                if any("clang-format" in str(a) for a in c[0][0][:1])
+                c for c in calls if any("clang-format" in str(a) for a in c[0][0][:1])
             ]
             assert len(clang_calls) > 0
 
@@ -61,8 +64,7 @@ class TestFormatTool:
             # Verify ruff was called with "format" subcommand
             calls = mock_run.call_args_list
             ruff_calls = [
-                c for c in calls
-                if "ruff" in str(c[0][0][0]) and "format" in c[0][0]
+                c for c in calls if "ruff" in str(c[0][0][0]) and "format" in c[0][0]
             ]
             assert len(ruff_calls) > 0
 
@@ -79,7 +81,9 @@ class TestFormatTool:
 
         with (
             patch("repo_tools.format.shutil.which", return_value=None),
-            patch("repo_tools.format.find_venv_executable", return_value="clang-format"),
+            patch(
+                "repo_tools.format.find_venv_executable", return_value="clang-format"
+            ),
             pytest.raises(SystemExit),
         ):
             tool.execute(ctx, args)
@@ -97,8 +101,12 @@ class TestFormatTool:
 
         with (
             patch("repo_tools.format.subprocess.run") as mock_run,
-            patch("repo_tools.format.shutil.which", return_value="/usr/bin/clang-format"),
-            patch("repo_tools.format.find_venv_executable", return_value="clang-format"),
+            patch(
+                "repo_tools.format.shutil.which", return_value="/usr/bin/clang-format"
+            ),
+            patch(
+                "repo_tools.format.find_venv_executable", return_value="clang-format"
+            ),
         ):
             # First call tests whether --dry-run is supported; return 0 means supported
             # Second call is the actual verify check; return 0 means all files pass
@@ -109,8 +117,7 @@ class TestFormatTool:
             calls = mock_run.call_args_list
             # At least one call should contain --dry-run or compare file contents
             dry_run_calls = [
-                c for c in calls
-                if "--dry-run" in c[0][0] or "--Werror" in c[0][0]
+                c for c in calls if "--dry-run" in c[0][0] or "--Werror" in c[0][0]
             ]
             assert len(dry_run_calls) > 0, (
                 "verify mode should use --dry-run/--Werror or per-file comparison"
