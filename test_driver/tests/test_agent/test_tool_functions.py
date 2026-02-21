@@ -117,11 +117,12 @@ class TestRegisterPane:
 
 
 class TestAgentRunSolo:
+    @patch("repo_tools.agent.tool.activate_pane")
     @patch("repo_tools.agent.tool.PaneSession")
     @patch("repo_tools.agent.tool.spawn_in_workspace")
     @patch("repo_tools.agent.tool._backend")
     @patch("repo_tools.agent.tool.ensure_installed")
-    def test_solo_spawns_and_returns(self, mock_ensure, mock_backend, mock_spawn, mock_pane_cls, tool_ctx):
+    def test_solo_spawns_and_returns(self, mock_ensure, mock_backend, mock_spawn, mock_pane_cls, mock_activate, tool_ctx):
         session = MagicMock()
         session.pane_id = 42
         mock_pane_cls.spawn.return_value = session
@@ -132,11 +133,12 @@ class TestAgentRunSolo:
         mock_pane_cls.spawn.assert_called_once()
         session.is_alive.assert_not_called()
 
+    @patch("repo_tools.agent.tool.activate_pane")
     @patch("repo_tools.agent.tool.PaneSession")
     @patch("repo_tools.agent.tool.spawn_in_workspace")
     @patch("repo_tools.agent.tool._backend")
     @patch("repo_tools.agent.tool.ensure_installed")
-    def test_solo_with_workspace_uses_spawn_in_workspace(self, mock_ensure, mock_backend, mock_spawn, mock_pane_cls, tool_ctx):
+    def test_solo_with_workspace_uses_spawn_in_workspace(self, mock_ensure, mock_backend, mock_spawn, mock_pane_cls, mock_activate, tool_ctx):
         session = MagicMock()
         session.pane_id = 10
         mock_spawn.return_value = session
@@ -147,10 +149,11 @@ class TestAgentRunSolo:
         mock_spawn.assert_called_once()
         assert mock_spawn.call_args[0][1] == "my-ws"
 
+    @patch("repo_tools.agent.tool.activate_pane")
     @patch("repo_tools.agent.tool.PaneSession")
     @patch("repo_tools.agent.tool._backend")
     @patch("repo_tools.agent.tool.ensure_installed")
-    def test_solo_spawn_failure_exits(self, mock_ensure, mock_backend, mock_pane_cls, tool_ctx):
+    def test_solo_spawn_failure_exits(self, mock_ensure, mock_backend, mock_pane_cls, mock_activate, tool_ctx):
         mock_pane_cls.spawn.return_value = None
         mock_backend.build_command.return_value = ["claude"]
 
@@ -162,12 +165,13 @@ class TestAgentRunSolo:
 
 
 class TestAgentRunTeam:
+    @patch("repo_tools.agent.tool.activate_pane")
     @patch("repo_tools.agent.tool._setup_worktree")
     @patch("repo_tools.agent.tool._register_pane")
     @patch("repo_tools.agent.tool.spawn_in_workspace")
     @patch("repo_tools.agent.tool._backend")
     @patch("repo_tools.agent.tool.ensure_installed")
-    def test_spawns_and_returns_immediately(self, mock_ensure, mock_backend, mock_spawn, mock_register, mock_worktree, tool_ctx):
+    def test_spawns_and_returns_immediately(self, mock_ensure, mock_backend, mock_spawn, mock_register, mock_worktree, mock_activate, tool_ctx):
         """_agent_run spawns the pane and returns without blocking."""
         mock_worktree.return_value = tool_ctx.workspace_root / "wt"
         session = MagicMock()
@@ -181,12 +185,13 @@ class TestAgentRunTeam:
         session.is_alive.assert_not_called()
         session.kill.assert_not_called()
 
+    @patch("repo_tools.agent.tool.activate_pane")
     @patch("repo_tools.agent.tool._setup_worktree")
     @patch("repo_tools.agent.tool._register_pane")
     @patch("repo_tools.agent.tool.spawn_in_workspace")
     @patch("repo_tools.agent.tool._backend")
     @patch("repo_tools.agent.tool.ensure_installed")
-    def test_worker_registers_pane_with_mcp_server(self, mock_ensure, mock_backend, mock_spawn, mock_register, mock_worktree, tool_ctx):
+    def test_worker_registers_pane_with_mcp_server(self, mock_ensure, mock_backend, mock_spawn, mock_register, mock_worktree, mock_activate, tool_ctx):
         """Worker panes are registered with the MCP server after spawn."""
         mock_worktree.return_value = tool_ctx.workspace_root / "wt"
         session = MagicMock()
@@ -201,12 +206,13 @@ class TestAgentRunTeam:
 
         mock_register.assert_called_once_with(18042, 99, "worker", "ws1", "G1_1")
 
+    @patch("repo_tools.agent.tool.activate_pane")
     @patch("repo_tools.agent.tool._setup_worktree")
     @patch("repo_tools.agent.tool._register_pane")
     @patch("repo_tools.agent.tool.spawn_in_workspace")
     @patch("repo_tools.agent.tool._backend")
     @patch("repo_tools.agent.tool.ensure_installed")
-    def test_orchestrator_not_registered(self, mock_ensure, mock_backend, mock_spawn, mock_register, mock_worktree, tool_ctx):
+    def test_orchestrator_not_registered(self, mock_ensure, mock_backend, mock_spawn, mock_register, mock_worktree, mock_activate, tool_ctx):
         """Orchestrator panes are NOT registered (not subject to idle kill)."""
         session = MagicMock()
         session.pane_id = 5
@@ -221,10 +227,11 @@ class TestAgentRunTeam:
 
         mock_register.assert_not_called()
 
+    @patch("repo_tools.agent.tool.activate_pane")
     @patch("repo_tools.agent.tool.spawn_in_workspace")
     @patch("repo_tools.agent.tool._backend")
     @patch("repo_tools.agent.tool.ensure_installed")
-    def test_team_renders_role_prompt(self, mock_ensure, mock_backend, mock_spawn, tool_ctx):
+    def test_team_renders_role_prompt(self, mock_ensure, mock_backend, mock_spawn, mock_activate, tool_ctx):
         session = MagicMock()
         session.pane_id = 42
         session.is_alive.return_value = False
@@ -237,12 +244,13 @@ class TestAgentRunTeam:
         assert call_kwargs["role"] == "orchestrator"
         assert call_kwargs["role_prompt"] is not None
 
+    @patch("repo_tools.agent.tool.activate_pane")
     @patch("repo_tools.agent.tool._setup_worktree")
     @patch("repo_tools.agent.tool._register_pane")
     @patch("repo_tools.agent.tool.spawn_in_workspace")
     @patch("repo_tools.agent.tool._backend")
     @patch("repo_tools.agent.tool.ensure_installed")
-    def test_mcp_port_read_from_port_file(self, mock_ensure, mock_backend, mock_spawn, mock_register, mock_worktree, tool_ctx):
+    def test_mcp_port_read_from_port_file(self, mock_ensure, mock_backend, mock_spawn, mock_register, mock_worktree, mock_activate, tool_ctx):
         """When mcp_port not given, _agent_run reads it from _agent/{ws}/mcp.port."""
         mock_worktree.return_value = tool_ctx.workspace_root / "wt"
         port_file = tool_ctx.workspace_root / "_agent" / "ws1" / "mcp.port"

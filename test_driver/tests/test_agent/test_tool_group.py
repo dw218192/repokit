@@ -33,16 +33,14 @@ class TestAgentHelp:
         assert result.exit_code == 0
         assert "run" in result.output
         assert "team" in result.output
-        # send is gone — replaced by MCP send_message tool
         assert "send" not in result.output
 
-    def test_team_help(self):
+    def test_team_is_command(self):
+        """team is a command (not a group) — no sub-subcommands."""
         runner = CliRunner()
         cli = _wrap_agent_group()
-        result = runner.invoke(cli, ["agent", "team", "--help"])
+        result = runner.invoke(cli, ["agent", "--help"])
         assert result.exit_code == 0
-        assert "new" in result.output
-        assert "attach" in result.output
-        assert "status" in result.output
-        # kill is gone — Ctrl+C on the blocking team new/attach handles teardown
-        assert "kill" not in result.output
+        assert "team" in result.output
+        assert "attach" not in result.output
+        assert "status" not in result.output

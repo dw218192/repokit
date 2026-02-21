@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import textwrap
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -29,14 +28,14 @@ def team_ctx(tmp_path):
     )
 
 
-class TestTeamNew:
+class TestTeamStart:
     @patch("repo_tools.agent.team.TeamMCPServer")
     @patch("repo_tools.agent.team._agent_run")
     @patch("repo_tools.agent.team.ensure_installed")
     def test_creates_directory_structure(self, mock_ensure, mock_run, mock_server_cls, team_ctx):
         mock_server_cls.return_value.run.return_value = None
         mgr = TeamManager(team_ctx)
-        mgr.new("test1")
+        mgr.start("test1")
 
         ws_dir = team_ctx.workspace_root / "_agent" / "test1"
         assert ws_dir.exists()
@@ -49,24 +48,10 @@ class TestTeamNew:
     def test_creates_default_plan(self, mock_ensure, mock_run, mock_server_cls, team_ctx):
         mock_server_cls.return_value.run.return_value = None
         mgr = TeamManager(team_ctx)
-        mgr.new("ws1")
+        mgr.start("ws1")
 
         plan = (team_ctx.workspace_root / "_agent" / "ws1" / "plan.toml").read_text()
         assert 'id = "ws1"' in plan
-
-    @patch("repo_tools.agent.team.TeamMCPServer")
-    @patch("repo_tools.agent.team._agent_run")
-    @patch("repo_tools.agent.team.ensure_installed")
-    def test_copies_plan_file(self, mock_ensure, mock_run, mock_server_cls, team_ctx):
-        mock_server_cls.return_value.run.return_value = None
-        plan_src = team_ctx.workspace_root / "my_plan.toml"
-        plan_src.write_text('[workstream]\nid = "custom"\n', encoding="utf-8")
-
-        mgr = TeamManager(team_ctx)
-        mgr.new("ws2", plan_path=str(plan_src))
-
-        plan = (team_ctx.workspace_root / "_agent" / "ws2" / "plan.toml").read_text()
-        assert 'id = "custom"' in plan
 
     @patch("repo_tools.agent.team.TeamMCPServer")
     @patch("repo_tools.agent.team._agent_run")
@@ -75,7 +60,7 @@ class TestTeamNew:
         """Orchestrator is spawned before the MCP server blocks."""
         mock_server_cls.return_value.run.return_value = None
         mgr = TeamManager(team_ctx)
-        mgr.new("ws3")
+        mgr.start("ws3")
 
         mock_run.assert_called_once()
         call_kwargs = mock_run.call_args[1]
@@ -89,7 +74,7 @@ class TestTeamNew:
         """mcp.port is written so _agent_run can read it for worker registration."""
         mock_server_cls.return_value.run.return_value = None
         mgr = TeamManager(team_ctx)
-        mgr.new("ws4")
+        mgr.start("ws4")
 
         port_file = team_ctx.workspace_root / "_agent" / "ws4" / "mcp.port"
         assert port_file.exists()
@@ -104,89 +89,24 @@ class TestTeamNew:
         mock_server = MagicMock()
         mock_server_cls.return_value = mock_server
         mgr = TeamManager(team_ctx)
-        mgr.new("ws5")
+        mgr.start("ws5")
 
         mock_server.run.assert_called_once()
 
     @patch("repo_tools.agent.team.TeamMCPServer")
     @patch("repo_tools.agent.team._agent_run")
     @patch("repo_tools.agent.team.ensure_installed")
-    def test_duplicate_workstream_error(self, mock_ensure, mock_run, mock_server_cls, team_ctx, capsys):
-        ws_dir = team_ctx.workspace_root / "_agent" / "dup"
-        ws_dir.mkdir(parents=True)
-
-        mgr = TeamManager(team_ctx)
-        mgr.new("dup")
-
-        mock_run.assert_not_called()
-        mock_server_cls.return_value.run.assert_not_called()
-
-
-class TestTeamAttach:
-    @patch("repo_tools.agent.team.TeamMCPServer")
-    @patch("repo_tools.agent.team.ensure_installed")
-    def test_attach_starts_mcp_server(self, mock_ensure, mock_server_cls, team_ctx):
-        """attach() starts the MCP server (blocks) without spawning a new orchestrator."""
-        mock_server = MagicMock()
-        mock_server_cls.return_value = mock_server
-        ws_dir = team_ctx.workspace_root / "_agent" / "ws1"
-        ws_dir.mkdir(parents=True)
-        (ws_dir / "mcp.port").write_text("18042", encoding="utf-8")
-
-        mgr = TeamManager(team_ctx)
-        mgr.attach("ws1")
-
-        mock_server.run.assert_called_once()
-
-    @patch("repo_tools.agent.team.TeamMCPServer")
-    @patch("repo_tools.agent.team.ensure_installed")
-    def test_attach_uses_existing_port(self, mock_ensure, mock_server_cls, team_ctx):
+    def test_resumes_existing_workstream(self, mock_ensure, mock_run, mock_server_cls, team_ctx):
+        """start() on an existing workstream resumes — spawns orchestrator and MCP server."""
         mock_server_cls.return_value.run.return_value = None
-        ws_dir = team_ctx.workspace_root / "_agent" / "ws1"
+        ws_dir = team_ctx.workspace_root / "_agent" / "resume1"
         ws_dir.mkdir(parents=True)
-        (ws_dir / "mcp.port").write_text("19876", encoding="utf-8")
 
         mgr = TeamManager(team_ctx)
-        mgr.attach("ws1")
+        mgr.start("resume1")
 
-        # Server was constructed with the port from the file
-        args = mock_server_cls.call_args
-        assert args[0][1] == 19876  # positional: (workstream, port, ...)
-
-    @patch("repo_tools.agent.team.TeamMCPServer")
-    @patch("repo_tools.agent.team.ensure_installed")
-    def test_attach_nonexistent_error(self, mock_ensure, mock_server_cls, team_ctx):
-        mgr = TeamManager(team_ctx)
-        mgr.attach("nonexistent")
-        mock_server_cls.return_value.run.assert_not_called()
-
-
-class TestTeamStatus:
-    @patch("repo_tools.agent.team.ensure_installed")
-    @patch("repo_tools.agent.team.list_workspace")
-    def test_status_with_tickets(self, mock_list, mock_ensure, team_ctx, capsys):
-        ws_dir = team_ctx.workspace_root / "_agent" / "ws1"
-        tickets_dir = ws_dir / "tickets"
-        tickets_dir.mkdir(parents=True)
-        (tickets_dir / "G1_1.toml").write_text(
-            textwrap.dedent("""\
-            [ticket]
-            id = "G1_1"
-            title = "Implement feature A"
-            status = "verify"
-            """),
-            encoding="utf-8",
-        )
-        mock_list.return_value = [{"pane_id": 10, "title": "orchestrator"}]
-
-        mgr = TeamManager(team_ctx)
-        mgr.status("ws1")
-
-        captured = capsys.readouterr()
-        assert "ws1" in captured.out
-        assert "G1_1" in captured.out
-        assert "verify" in captured.out
-        assert "Implement feature A" in captured.out
+        mock_run.assert_called_once()
+        mock_server_cls.return_value.run.assert_called_once()
 
 
 class TestTeamConfig:
@@ -209,7 +129,7 @@ class TestTeamConfig:
             passthrough_args=[],
         )
         mgr = TeamManager(ctx)
-        mgr.new("ws_cfg")
+        mgr.start("ws_cfg")
 
         args, kwargs = mock_server_cls.call_args
         # TeamMCPServer(workstream, port, interval, limit)
@@ -229,6 +149,7 @@ class TestRenderRolePrompt:
             branch="agent/ws1",
             project_root="/tmp/project",
             repo_cmd="./repo",
+            framework_root="/tmp/framework",
         )
         assert "ws1" in text
         assert "orchestrator" in text.lower() or "ORCHESTRATOR" in text
@@ -244,6 +165,7 @@ class TestRenderRolePrompt:
             branch="agent/ws1/G1_1",
             project_root="/tmp/project",
             repo_cmd="./repo",
+            framework_root="/tmp/framework",
         )
         assert "G1_1" in text
         assert "worker" in text.lower() or "WORKER" in text
@@ -259,6 +181,7 @@ class TestRenderRolePrompt:
             branch="agent/ws1/G1_1",
             project_root="/tmp/project",
             repo_cmd="./repo",
+            framework_root="/tmp/framework",
         )
         assert "G1_1" in text
         assert "reviewer" in text.lower() or "REVIEWER" in text
@@ -274,6 +197,7 @@ class TestRenderRolePrompt:
             branch="",
             project_root="",
             repo_cmd="",
+            framework_root="",
         )
         assert text == ""
 
@@ -288,6 +212,7 @@ class TestRenderRolePrompt:
             branch="agent/ws1",
             project_root="/tmp/project",
             repo_cmd="./repo",
+            framework_root="/tmp/framework",
         )
         assert "--auto-approve" not in text
 
@@ -302,6 +227,7 @@ class TestRenderRolePrompt:
             branch="agent/ws1/G1_1",
             project_root="/tmp/project",
             repo_cmd="./repo",
+            framework_root="/tmp/framework",
         )
         assert "send_message" in text
         assert "status=verify" in text
@@ -318,6 +244,7 @@ class TestRenderRolePrompt:
             branch="agent/ws1/G1_1",
             project_root="/tmp/project",
             repo_cmd="./repo",
+            framework_root="/tmp/framework",
         )
         assert "send_message" in text
         assert "status=closed" in text
