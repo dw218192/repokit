@@ -1,3 +1,0 @@
-#!/bin/bash
-export PATH="/home/runner/work/repokit/repokit/test_driver/_tools/venv/bin:$PATH"
-PYTHONPATH="/home/runner/work/repokit/repokit/test_driver/tools/framework${PYTHONPATH:+:$PYTHONPATH}" exec "/home/runner/work/repokit/repokit/test_driver/_tools/venv/bin/python" -m repo_tools.cli --workspace-root "/home/runner/work/repokit/repokit/test_driver" "$@"
