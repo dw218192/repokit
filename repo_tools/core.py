@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import functools
+import glob
 import logging
 import os
 import platform
@@ -628,6 +629,89 @@ def resolve_path(root: Path, template: str, tokens: dict[str, str]) -> Path:
     if not path.is_absolute():
         path = root / path
     return path
+
+
+# ── Path Utilities ───────────────────────────────────────────────────
+
+
+def glob_paths(pattern: Path | str) -> list[Path]:
+    """Expand a glob pattern to a sorted list of matching file paths.
+
+    Returns a single-element list for non-glob paths.
+    """
+    pattern_text = str(pattern)
+    if any(char in pattern_text for char in ("*", "?", "[")):
+        return sorted(Path(match) for match in glob.glob(pattern_text, recursive=True))
+    return [Path(pattern_text)]
+
+
+# ── Command Group ────────────────────────────────────────────────────
+
+
+class CommandGroup:
+    """A labeled unit of work that runs commands and reports results.
+
+    Usage::
+
+        with CommandGroup("Building") as g:
+            g.run(["cmake", "--build", "build"])
+            g.run(["cmake", "--install", "build"])
+
+    Features:
+    - Labels each phase with a clear header
+    - Tracks pass/fail per group
+    - Dimmed subprocess output, summary on completion
+    - Optional per-group log file
+    - CI fold markers (``::group::``) in GitHub Actions
+    """
+
+    def __init__(
+        self,
+        label: str,
+        log_file: Path | None = None,
+        env_script: Path | None = None,
+    ) -> None:
+        self.label = label
+        self.log_file = log_file
+        self.env_script = env_script
+        self._commands_run = 0
+        self._failed = False
+
+    def __enter__(self) -> CommandGroup:
+        if _is_ci():
+            print(f"::group::{self.label}", flush=True)
+        else:
+            logger.info(f"── {self.label} ──")
+        return self
+
+    def __exit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any) -> None:
+        if _is_ci():
+            print("::endgroup::", flush=True)
+        if exc_type is not None:
+            return  # let the exception propagate
+        if self._failed:
+            logger.error(f"  ✗ {self.label} failed")
+        else:
+            logger.info(f"  ✓ {self.label} ({self._commands_run} command(s))")
+
+    def run(
+        self,
+        cmd: list[str],
+        log_file: Path | None = None,
+        env_script: Path | None = None,
+    ) -> None:
+        """Run a command within this group.
+
+        Per-call *log_file* and *env_script* override the group defaults.
+        """
+        lf = log_file or self.log_file
+        es = env_script or self.env_script
+        try:
+            run_command(cmd, log_file=lf, env_script=es)
+            self._commands_run += 1
+        except SystemExit:
+            self._failed = True
+            raise
 
 
 # ── Normalization Helpers ────────────────────────────────────────────
