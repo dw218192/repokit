@@ -75,7 +75,7 @@ SHIM="$ROOT/repo"
 cat > "$SHIM" <<SHIMEOF
 #!/bin/bash
 export PATH="$VENV_BIN:\$PATH"
-PYTHONPATH="$FRAMEWORK_DIR\${PYTHONPATH:+:\$PYTHONPATH}" exec "$PY" -m repo_tools.cli --workspace-root "$ROOT" "\$@"
+PYTHONPATH="$FRAMEWORK_DIR" exec "$PY" -m repo_tools.cli --workspace-root "$ROOT" "\$@"
 SHIMEOF
 chmod +x "$SHIM" 2>/dev/null || true
 

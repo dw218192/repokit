@@ -71,14 +71,23 @@ Framework tools with non-trivial logic:
 tokens:
   build_root: _build                         # scalar value
   build_dir: "{build_root}/{platform}/{build_type}"  # cross-reference
+  install_dir:                               # path-valued token
+    value: "{build_dir}/install"
+    path: true                               # normalized to forward slashes
 ```
 
-Two tokens are always injected by the framework and **cannot** be overridden in `tokens:`:
+Tokens with `path: true` are normalized to POSIX paths (forward slashes), which is safe for `shlex.split()` on Windows and consistent across platforms.
+
+The framework injects several built-in tokens that are **always available** and **cannot** be overridden in `tokens:`:
 
 | Token | Expands to |
 |---|---|
 | `{workspace_root}` | Absolute POSIX path to the project root |
 | `{repo}` | Cross-platform invocation of the `./repo` CLI (`python -m repo_tools.cli …`) |
+| `{exe_ext}` | `.exe` on Windows, empty on other platforms |
+| `{shell_ext}` | `.cmd` on Windows, `.sh` on other platforms |
+| `{lib_ext}` | `.dll` (Windows), `.dylib` (macOS), `.so` (Linux) |
+| `{path_sep}` | `;` on Windows, `:` on other platforms |
 
 Using `{repo}` in a command lets tools call other `./repo` subcommands portably — no hardcoded `./repo` or `./repo.cmd` needed:
 
@@ -112,8 +121,13 @@ your-project/
   tools/
     framework/      # repokit submodule
     repo_tools/     # project tools — no __init__.py
-      my_tool.py
+      my_tool.py    # simple tool (single file)
+      my_tool/      # complex tool (package)
+        __init__.py  # must define or re-export the RepoTool subclass
+        helpers.py
 ```
+
+A tool can be a single `.py` file or a package directory with `__init__.py`. For packages, the `RepoTool` subclass must be defined in (or re-exported from) `__init__.py`.
 
 Each file defines a `RepoTool` subclass:
 
@@ -147,6 +161,20 @@ my-tool:
 Precedence: tool defaults < config values < CLI flags.
 
 Project tools override framework tools of the same name.
+
+### Utilities
+
+`repo_tools.core` provides helpers for tool implementations:
+
+| Function / Class | Purpose |
+|---|---|
+| `run_command(cmd, log_file=, env_script=)` | Run a subprocess, optionally tee to log file and source an env script first |
+| `CommandGroup(label)` | Context manager that labels a build phase, tracks pass/fail, and emits CI fold markers. Use `g.run()` to execute commands within the group |
+| `find_venv_executable(name)` | Find an executable in the venv, fallback to system PATH |
+| `invoke_tool(name, tokens, config, ...)` | Call another registered tool programmatically |
+| `logger` | Shared logger (`logging.getLogger("repo_tools")`) with colored output |
+| `is_windows()` | Platform check |
+| `glob_paths(pattern)` | Glob with recursive support, returns sorted `Path` list |
 
 ## Dependencies
 
