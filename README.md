@@ -1,6 +1,6 @@
 # Repokit
 
-Repo tooling framework consumed as a git submodule. Provides a unified `./repo` CLI for build, test, format, clean, and more — configured per-project via `config.yaml`.
+Repo tooling framework consumed as a git submodule. Provides a unified `./repo` CLI configured per-project via `config.yaml`.
 
 Inspired by [NVIDIA Omniverse repo_man](https://docs.omniverse.nvidia.com/kit/docs/repo_man/latest/index.html).
 
@@ -18,6 +18,7 @@ tokens:
   platform: [windows-x64, linux-x64, macos-arm64]
   build_type: [Debug, Release]
   build_root: _build
+  build_dir: "{build_root}/{platform}/{build_type}"
 
 build:
   command: "cmake --build {build_dir} --config {build_type}"
@@ -30,9 +31,9 @@ Then run:
 
 ```
 ./repo build
-./repo test --verbose
+./repo build --dry-run      # print resolved command without executing
+./repo test
 ./repo format
-./repo clean --all
 ```
 
 To pin a specific repo kit framework version: `cd tools/framework && git checkout v1.0.0`
@@ -41,34 +42,52 @@ To pin a specific repo kit framework version: `cd tools/framework && git checkou
 
 Define build/test/format commands once in `config.yaml` with `@filter` for platform-specific variants — `./repo build` works on any OS and project. AI agents can run `./repo --help` to discover available operations immediately. New contributors bootstrap once and are productive the same way.
 
-## Built-in Tools
+## Tools
+
+Any `config.yaml` section whose keys are **only** `command` (and `command@<filter>` variants) is automatically registered as a `./repo <name>` command — no Python required. Sections with extra keys are skipped with a warning; move shared values to `tokens:` or write a `RepoTool` subclass.
+
+Every auto-generated command supports:
+- `--dry-run` — print the resolved command without executing
+
+Dimension tokens (platform, build type, etc.) are set at the group level and apply to all tools:
+```
+./repo --build-type Release build --dry-run
+```
+
+Framework tools with non-trivial logic:
 
 | Tool | Description |
 |---|---|
-| `build` | Run build command from config with token expansion |
-| `test` | Run test command with verbose flag support |
 | `format` | Format source (clang-format for C++, ruff for Python) |
-| `clean` | Remove build artifacts (`--build`, `--logs`, `--all`) |
 | `context` | Display resolved tokens and paths |
 | `python` | Run Python in the repo tooling venv |
 | `agent` | Launch coding agent with repo-aware auto-approval |
 
-Platform and build type are auto-detected but can be overridden:
-
-```
-./repo --platform linux-x64 --build-type Release build
-```
-
 ## Configuration
 
-**Tokens** are `{placeholders}` expanded in commands. Scalar tokens are simple substitutions; some (like `{build_dir}`, `{workspace_root}`, `{repo}`) are built-in.
+**Tokens** are `{placeholders}` expanded in commands. Everything else is user-defined — define paths, flags, or any values you need:
 
 ```yaml
 tokens:
-  build_root: _build        # scalar — just a value
+  build_root: _build                         # scalar value
+  build_dir: "{build_root}/{platform}/{build_type}"  # cross-reference
 ```
 
-**List-valued tokens** automatically become CLI flags with auto-detection. For example, listing platforms gives you `--platform`:
+Two tokens are always injected by the framework and **cannot** be overridden in `tokens:`:
+
+| Token | Expands to |
+|---|---|
+| `{workspace_root}` | Absolute POSIX path to the project root |
+| `{repo}` | Cross-platform invocation of the `./repo` CLI (`python -m repo_tools.cli …`) |
+
+Using `{repo}` in a command lets tools call other `./repo` subcommands portably — no hardcoded `./repo` or `./repo.cmd` needed:
+
+```yaml
+test:
+  command: "{repo} python -m pytest {workspace_root}/tests/"
+```
+
+**List-valued tokens** automatically become CLI flags. For example, listing platforms gives you `--platform`:
 
 ```yaml
 tokens:
@@ -82,13 +101,6 @@ Use `@filter` to vary config by the selected value:
 build:
   command@windows-x64: "msbuild {build_dir}/project.sln /p:Configuration={build_type}"
   command@linux-x64: "make -C {build_dir} -j$(nproc)"
-```
-
-The built-in `{repo}` token expands to a cross-platform CLI invocation, so commands can nest `./repo` tools:
-
-```yaml
-test:
-  command: "{repo} python -m pytest {workspace_root}/tests/"
 ```
 
 ## Extending
@@ -139,6 +151,11 @@ Project tools override framework tools of the same name.
 ## Dependencies
 
 Framework dependencies (click, ruff, etc.) are installed automatically by bootstrap. To add project-specific deps, create `tools/requirements.txt` and re-run bootstrap.
+
+## Future Improvements
+
+- **Per-tool dependency isolation**: Currently all tools share a single venv and their dependencies are merged into it. A future improvement would be strongly isolated per-tool environments to avoid conflicts between tool dependencies.
+- **uv-based dependency management**: `uv` is currently used only to provision the Python runtime. Extending it to manage tool dependencies would be straightforward, but requires solving how to merge dependencies from consumer tools (project-side `tools/requirements.txt`) with framework dependencies cleanly.
 
 ## Versioning & Publishing
 

@@ -47,3 +47,25 @@ class TestCommandRunnerTool:
             mock_run.assert_called_once()
             resolved_cmd = mock_run.call_args[0][0]
             assert resolved_cmd == ["deploy", "--env", "staging"]
+
+    def test_dry_run_skips_execution(self, make_tool_context):
+        """dry_run=True logs the resolved command without calling run_command."""
+        ctx = make_tool_context(dimensions={"platform": "linux-x64", "build_type": "Debug"})
+        tool = CommandRunnerTool()
+        args = {"command": "cmake --build . --config {build_type}", "dry_run": True}
+
+        with patch("repo_tools.command_runner.run_command") as mock_run:
+            tool.execute(ctx, args)
+            mock_run.assert_not_called()
+
+    def test_dimension_tokens_from_context(self, make_tool_context):
+        """Dimension tokens set at group level (build_type, platform) flow through to command."""
+        ctx = make_tool_context(dimensions={"platform": "linux-x64", "build_type": "Release"})
+        tool = CommandRunnerTool()
+        args = {"command": "cmake --config {build_type} --target {platform}"}
+
+        with patch("repo_tools.command_runner.run_command") as mock_run:
+            tool.execute(ctx, args)
+            resolved_cmd = mock_run.call_args[0][0]
+            assert "Release" in resolved_cmd
+            assert any("Release" in part for part in resolved_cmd)

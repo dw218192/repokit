@@ -40,15 +40,20 @@ jobs:
         shell: pwsh
         run: '& test_driver\tools\framework\bootstrap.ps1'
 
-      - name: Run tests (bash)
-        if: matrix.shell == 'bash'
+      - name: Run tests (bash, Linux)
+        if: matrix.shell == 'bash' && runner.os == 'Linux'
         shell: bash
-        run: cd test_driver && ./repo test --verbose
+        run: cd test_driver && ./repo test-cov
+
+      - name: Run tests (bash, Windows)
+        if: matrix.shell == 'bash' && runner.os == 'Windows'
+        shell: bash
+        run: cd test_driver && ./repo test
 
       - name: Run tests (pwsh)
         if: matrix.shell == 'pwsh'
         shell: pwsh
-        run: cd test_driver && .\repo.cmd test --verbose
+        run: cd test_driver && .\repo.cmd test
 
   publish:
     needs: test

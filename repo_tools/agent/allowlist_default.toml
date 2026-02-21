@@ -1,9 +1,15 @@
-# Default agent command rules for repokit-managed repositories.
-# Project-specific rules go in tools/agent/rules.toml and extend these.
+# Default agent command allowlist for repokit-managed repositories.
+# Override with agent.allowlist in config.yaml.
 
 default_reason = "try another approach"
 
 # ── Deny rules ───────────────────────────────────────────────────────
+
+[[deny]]
+name = "agent_dir"
+patterns = ["\\b_agent[/\\\\]"]
+roles = ["worker", "reviewer"]
+reason = "subagents cannot modify _agent/ — relay updates to the orchestrator via ./repo agent send"
 
 [[deny]]
 name = "destructive"

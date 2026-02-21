@@ -1,3 +1,11 @@
+tokens:
+  coverage_flags: "--cov=repo_tools --cov-report=term-missing --cov-report=markdown:{workspace_root}/coverage.md"
+
 test:
   command: "{repo} python -m pytest {workspace_root}/tests/"
-  verbose_flag: "-v"
+
+test-cov:
+  command: "{repo} python -m pytest {workspace_root}/tests/ {coverage_flags}"
+
+agent:
+  debug_hooks: true
