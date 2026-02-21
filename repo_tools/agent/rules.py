@@ -43,6 +43,15 @@ class RuleSet:
 def _compile_rule_list(entries: list, section: str, role: str | None = None) -> list[Rule]:
     """Validate and compile a list of raw rule dicts into :class:`Rule` objects.
 
+    Each rule must have at least one of ``commands`` or ``patterns``:
+
+    * ``commands`` — list of literal command names; each is compiled to
+      ``^<re.escape(name)>\\b`` so that ``"rm"`` matches ``rm -rf`` but
+      not ``rmdir``.
+    * ``patterns`` — list of raw regex strings for complex matches.
+
+    Both may be present on the same rule (their compiled patterns are merged).
+
     Raises :class:`ValueError` with the offending section index, rule name,
     and pattern when a required key is missing or a regex is invalid.
 
@@ -54,15 +63,23 @@ def _compile_rule_list(entries: list, section: str, role: str | None = None) -> 
         if "name" not in r:
             raise ValueError(f"{section}[{i}]: missing required key 'name'")
         name = r["name"]
-        if "patterns" not in r:
-            raise ValueError(f"{section}[{i}] ({name!r}): missing required key 'patterns'")
-        if isinstance(r["patterns"], str) or not isinstance(r["patterns"], (list, tuple)):
-            raise ValueError(f"{section}[{i}] ({name!r}): 'patterns' must be a list, got {type(r['patterns']).__name__}")
+        has_commands = "commands" in r
+        has_patterns = "patterns" in r
+        if not has_commands and not has_patterns:
+            raise ValueError(f"{section}[{i}] ({name!r}): must have 'commands' and/or 'patterns'")
+        if has_patterns:
+            if isinstance(r["patterns"], str) or not isinstance(r["patterns"], (list, tuple)):
+                raise ValueError(f"{section}[{i}] ({name!r}): 'patterns' must be a list, got {type(r['patterns']).__name__}")
+        if has_commands:
+            if isinstance(r["commands"], str) or not isinstance(r["commands"], (list, tuple)):
+                raise ValueError(f"{section}[{i}] ({name!r}): 'commands' must be a list, got {type(r['commands']).__name__}")
         rule_roles = r.get("roles")
         if rule_roles is not None and role not in rule_roles:
             continue  # rule doesn't apply to this role
         compiled: list[re.Pattern[str]] = []
-        for pat in r["patterns"]:
+        for cmd_name in r.get("commands", []):
+            compiled.append(re.compile(rf"^{re.escape(cmd_name)}\b"))
+        for pat in r.get("patterns", []):
             try:
                 compiled.append(re.compile(pat))
             except re.error as exc:

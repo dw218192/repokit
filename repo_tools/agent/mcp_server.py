@@ -1,6 +1,6 @@
 """HTTP MCP server for multi-agent team coordination.
 
-Started by ``agent team new/attach``; blocks until Ctrl+C.  On exit it
+Started by ``agent team``; blocks until Ctrl+C.  On exit it
 kills all registered agent panes (workers and reviewers — not the
 orchestrator, which is user-managed).
 

@@ -46,6 +46,12 @@ def _run_cli(
     return result
 
 
+def activate_pane(pane_id: int) -> bool:
+    """Activate (bring to focus) a WezTerm pane by its ID."""
+    result = _run_cli("activate-pane", "--pane-id", str(pane_id))
+    return result.returncode == 0
+
+
 def spawn_in_workspace(
     cmd: list[str], workspace: str, cwd: str | None = None,
 ) -> PaneSession | None:

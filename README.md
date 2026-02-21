@@ -4,6 +4,15 @@ Repo tooling framework consumed as a git submodule. Provides a unified `./repo` 
 
 Inspired by [NVIDIA Omniverse repo_man](https://docs.omniverse.nvidia.com/kit/docs/repo_man/latest/index.html).
 
+## Why
+
+Think of `./repo` as a **local MCP server you get for free** — no daemon, no transport layer, no client integration. A human types `./repo build`; an AI agent calls the same command. Both get platform-aware token expansion, consistent error handling, and exactly the operations the project author intended.
+
+- **One config, every platform.** Define commands once with `@filter` variants — `./repo build` resolves to the right toolchain on Windows, Linux, and macOS.
+- **Discoverable by design.** `./repo --help` lists every operation. Agents don't need project-specific prompts to find the build command.
+- **Safe agent automation.** The `agent` tool launches Claude Code sessions with a command allowlist that funnels operations through `./repo`, blocking shell escapes, network exfiltration, and env snooping.
+- **Zero infrastructure.** `git submodule add` + bootstrap. Works offline and in CI.
+
 ## Quick Start
 
 ```bash
@@ -31,28 +40,13 @@ Then run:
 
 ```
 ./repo build
-./repo build --dry-run      # print resolved command without executing
 ./repo test
 ./repo format
 ```
 
-To pin a specific repo kit framework version: `cd tools/framework && git checkout v1.0.0`
-
-## Why
-
-Define build/test/format commands once in `config.yaml` with `@filter` for platform-specific variants — `./repo build` works on any OS and project. AI agents can run `./repo --help` to discover available operations immediately. New contributors bootstrap once and are productive the same way.
-
 ## Tools
 
-Any `config.yaml` section whose keys are **only** `command` (and `command@<filter>` variants) is automatically registered as a `./repo <name>` command — no Python required. Sections with extra keys are skipped with a warning; move shared values to `tokens:` or write a `RepoTool` subclass.
-
-Every auto-generated command supports:
-- `--dry-run` — print the resolved command without executing
-
-Dimension tokens (platform, build type, etc.) are set at the group level and apply to all tools:
-```
-./repo --build-type Release build --dry-run
-```
+Any `config.yaml` section with only `command` keys is automatically registered as a `./repo <name>` command — no Python required. All auto-generated commands support `--dry-run`.
 
 Framework tools with non-trivial logic:
 
@@ -61,73 +55,87 @@ Framework tools with non-trivial logic:
 | `format` | Format source (clang-format for C++, ruff for Python) |
 | `context` | Display resolved tokens and paths |
 | `python` | Run Python in the repo tooling venv |
-| `agent` | Launch coding agent with repo-aware auto-approval |
+| `agent` | Launch coding agents with repo-aware guardrails |
+
+## Agent
+
+The `agent` tool launches [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions in [WezTerm](https://wezfurlong.org/wezterm/) panes with pre-approved tools and a Bash command allowlist.
+
+```
+./repo agent run                              # solo session
+./repo agent team my-workstream               # multi-agent workstream
+```
+
+**Solo mode** opens a single Claude Code session. Bash calls are checked against `allowlist_default.toml` (deny-first, then allow). Hooks and MCP configs are written to `_agent/plugin/` via `--plugin-dir`, keeping user settings untouched.
+
+**Team mode** creates `_agent/<workstream_id>/` (plan, tickets, worktrees), spawns an orchestrator, and starts an MCP server that provides `send_message` and `coderabbit_review` tools. The orchestrator reads `plan.toml`, creates tickets, and dispatches worker/reviewer agents — each in its own git worktree. Sub-agents communicate via the MCP server and cannot write to `_agent/` directly. Ctrl+C stops the server and kills all agent panes.
+
+```
+_agent/<workstream_id>/
+    plan.toml           ← goals and acceptance criteria
+    mcp.port            ← MCP server port (written at session start)
+    tickets/            ← one TOML file per ticket
+    worktrees/          ← git worktrees for workers and reviewers
+```
+
+Agent settings in `config.yaml`:
+
+```yaml
+agent:
+  allowlist: "path/to/custom_rules.toml"    # override default command allowlist
+  debug_hooks: true                          # log hook decisions to _agent/hooks.log
+  idle_reminder_interval: 120                # seconds between idle pings (team mode)
+  idle_reminder_limit: 3                     # max idle pings before killing a pane
+```
 
 ## Configuration
 
-**Tokens** are `{placeholders}` expanded in commands. Everything else is user-defined — define paths, flags, or any values you need:
+**Tokens** are `{placeholders}` expanded in commands:
 
 ```yaml
 tokens:
-  build_root: _build                         # scalar value
-  build_dir: "{build_root}/{platform}/{build_type}"  # cross-reference
-  install_dir:                               # path-valued token
+  build_root: _build
+  build_dir: "{build_root}/{platform}/{build_type}"   # cross-references other tokens
+  install_dir:
     value: "{build_dir}/install"
-    path: true                               # normalized to forward slashes
+    path: true                                         # normalized to forward slashes
 ```
 
-Tokens with `path: true` are normalized to POSIX paths (forward slashes), which is safe for `shlex.split()` on Windows and consistent across platforms.
-
-The framework injects several built-in tokens that are **always available** and **cannot** be overridden in `tokens:`:
-
-| Token | Expands to |
-|---|---|
-| `{workspace_root}` | Absolute POSIX path to the project root |
-| `{repo}` | Cross-platform invocation of the `./repo` CLI (`python -m repo_tools.cli …`) |
-| `{exe_ext}` | `.exe` on Windows, empty on other platforms |
-| `{shell_ext}` | `.cmd` on Windows, `.sh` on other platforms |
-| `{lib_ext}` | `.dll` (Windows), `.dylib` (macOS), `.so` (Linux) |
-| `{path_sep}` | `;` on Windows, `:` on other platforms |
-
-Using `{repo}` in a command lets tools call other `./repo` subcommands portably — no hardcoded `./repo` or `./repo.cmd` needed:
-
-```yaml
-test:
-  command: "{repo} python -m pytest {workspace_root}/tests/"
-```
-
-**List-valued tokens** automatically become CLI flags. For example, listing platforms gives you `--platform`:
+**List-valued tokens** become CLI dimension flags (`--platform`, `--build-type`). Use `@filter` to vary commands by dimension:
 
 ```yaml
 tokens:
-  platform: [windows-x64, linux-x64, macos-arm64]   # becomes --platform flag
-  build_type: [Debug, Release]                        # becomes --build-type flag
-```
+  platform: [windows-x64, linux-x64, macos-arm64]
+  build_type: [Debug, Release]
 
-Use `@filter` to vary config by the selected value:
-
-```yaml
 build:
   command@windows-x64: "msbuild {build_dir}/project.sln /p:Configuration={build_type}"
   command@linux-x64: "make -C {build_dir} -j$(nproc)"
 ```
 
+Built-in tokens (always available, cannot be overridden):
+
+| Token | Expands to |
+|---|---|
+| `{workspace_root}` | Absolute POSIX path to the project root |
+| `{repo}` | Cross-platform `./repo` invocation (use in commands to call other tools portably) |
+| `{framework_root}` | Absolute POSIX path to the framework submodule directory |
+| `{exe_ext}` | `.exe` on Windows, empty otherwise |
+| `{shell_ext}` | `.cmd` on Windows, `.sh` otherwise |
+| `{lib_ext}` | `.dll` / `.dylib` / `.so` |
+| `{path_sep}` | `;` on Windows, `:` otherwise |
+
 ## Extending
 
-Tools are discovered via the `repo_tools` [namespace package](https://packaging.python.org/en/latest/guides/packaging-namespace-packages/). Place project tools in `tools/repo_tools/` (no `__init__.py`):
+Place project tools in `tools/repo_tools/` (no `__init__.py` — it's a [namespace package](https://packaging.python.org/en/latest/guides/packaging-namespace-packages/)):
 
 ```
 your-project/
   tools/
     framework/      # repokit submodule
-    repo_tools/     # project tools — no __init__.py
-      my_tool.py    # simple tool (single file)
-      my_tool/      # complex tool (package)
-        __init__.py  # must define or re-export the RepoTool subclass
-        helpers.py
+    repo_tools/     # project tools
+      my_tool.py
 ```
-
-A tool can be a single `.py` file or a package directory with `__init__.py`. For packages, the `RepoTool` subclass must be defined in (or re-exported from) `__init__.py`.
 
 Each file defines a `RepoTool` subclass:
 
@@ -140,7 +148,7 @@ class MyTool(RepoTool):
     help = "Does something useful"
 
     def setup(self, cmd: click.Command) -> click.Command:
-        cmd = click.option("--verbose", is_flag=True, help="Verbose output")(cmd)
+        cmd = click.option("--verbose", is_flag=True)(cmd)
         return cmd
 
     def default_args(self, tokens: dict[str, str]) -> dict[str, Any]:
@@ -151,40 +159,23 @@ class MyTool(RepoTool):
             logger.info(f"workspace: {ctx.workspace_root}")
 ```
 
-CLI flags map 1:1 to `config.yaml` fields under the tool name. For the tool above, you could set a default in config:
-
-```yaml
-my-tool:
-  verbose: true
-```
-
-Precedence: tool defaults < config values < CLI flags.
-
-Project tools override framework tools of the same name.
+CLI flags map 1:1 to `config.yaml` fields under the tool name. Precedence: tool defaults < config values < CLI flags. Project tools override framework tools of the same name.
 
 ### Utilities
 
-`repo_tools.core` provides helpers for tool implementations:
-
 | Function / Class | Purpose |
 |---|---|
-| `run_command(cmd, log_file=, env_script=)` | Run a subprocess, optionally tee to log file and source an env script first |
-| `CommandGroup(label)` | Context manager that labels a build phase, tracks pass/fail, and emits CI fold markers. Use `g.run()` to execute commands within the group |
-| `find_venv_executable(name)` | Find an executable in the venv, fallback to system PATH |
+| `run_command(cmd, log_file=, env_script=)` | Run a subprocess, optionally tee to log and source an env script |
+| `CommandGroup(label)` | Context manager for build phases with pass/fail tracking and CI fold markers |
+| `find_venv_executable(name)` | Find executable in the venv, fallback to system PATH |
 | `invoke_tool(name, tokens, config, ...)` | Call another registered tool programmatically |
-| `logger` | Shared logger (`logging.getLogger("repo_tools")`) with colored output |
-| `is_windows()` | Platform check |
-| `glob_paths(pattern)` | Glob with recursive support, returns sorted `Path` list |
+| `logger` | Shared colored logger (`logging.getLogger("repo_tools")`) |
+| `glob_paths(pattern)` | Recursive glob returning sorted `Path` list |
 
 ## Dependencies
 
-Framework dependencies (click, ruff, etc.) are installed automatically by bootstrap. To add project-specific deps, create `tools/requirements.txt` and re-run bootstrap.
-
-## Future Improvements
-
-- **Per-tool dependency isolation**: Currently all tools share a single venv and their dependencies are merged into it. A future improvement would be strongly isolated per-tool environments to avoid conflicts between tool dependencies.
-- **uv-based dependency management**: `uv` is currently used only to provision the Python runtime. Extending it to manage tool dependencies would be straightforward, but requires solving how to merge dependencies from consumer tools (project-side `tools/requirements.txt`) with framework dependencies cleanly.
+Framework dependencies (click, ruff, etc.) are installed by bootstrap. For project-specific deps, create `tools/requirements.txt` and re-run bootstrap.
 
 ## Versioning & Publishing
 
-Bump `VERSION` and push to `main`. CI runs tests, then syncs to the `release` branch and tags as `v<version>`. See [CONTRIBUTING.md](CONTRIBUTING.md) for details on the two-branch release model.
+Bump `VERSION` and push to `main`. CI syncs to the `release` branch and tags `v<version>`. See [CONTRIBUTING.md](CONTRIBUTING.md).

@@ -2,7 +2,7 @@
 
 Provides the ``agent`` Click group with subcommands:
   run   — launch a single agent (solo or team role)
-  team  — manage multi-agent workstreams (new/attach/status)
+  team  — start a multi-agent workstream (creates if new, resumes if existing)
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ import click
 from ..cli import _build_tool_context
 from ..core import RepoTool, ToolContext, logger
 from .claude import Claude
-from .wezterm import PaneSession, ensure_installed, list_workspace, spawn_in_workspace
+from .wezterm import PaneSession, activate_pane, ensure_installed, list_workspace, spawn_in_workspace
 
 _backend = Claude()
 
@@ -44,13 +44,22 @@ def _find_rules_file(workspace_root: Path, configured: str | None = None) -> Pat
 
 
 def _render_role_prompt(role: str, **kwargs: str) -> str:
-    """Load prompt template for a role and format placeholders."""
+    """Load prompt template for a role and format placeholders.
+
+    If ``prompts/common.txt`` exists it is prepended to the role template
+    so that every role receives shared context (framework overview, filesystem
+    boundaries, etc.).
+    """
     prompts_dir = Path(__file__).parent / "prompts"
     template_file = prompts_dir / f"{role}.txt"
     if not template_file.exists():
         return ""
-    template = template_file.read_text(encoding="utf-8")
-    return template.format_map(kwargs)
+    parts: list[str] = []
+    common_file = prompts_dir / "common.txt"
+    if common_file.exists():
+        parts.append(common_file.read_text(encoding="utf-8"))
+    parts.append(template_file.read_text(encoding="utf-8"))
+    return "\n".join(parts).format_map(kwargs)
 
 
 _SAFE_AGENT_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -125,8 +134,11 @@ def _agent_run(
     ticket: str | None = None,
     debug_hooks: bool = False,
     mcp_port: int | None = None,
-) -> None:
-    """Launch an agent — solo mode (original) or team mode (with role/workspace)."""
+) -> PaneSession | None:
+    """Launch an agent — solo mode (original) or team mode (with role/workspace).
+
+    Returns the PaneSession so callers can activate/manage the pane.
+    """
     ensure_installed()
     cwd = str(tool_ctx.workspace_root)
     repo_cmd = tool_ctx.tokens.get("repo", "./repo")
@@ -166,6 +178,7 @@ def _agent_run(
             branch=branch,
             project_root=str(tool_ctx.workspace_root),
             repo_cmd=repo_cmd,
+            framework_root=tool_ctx.tokens.get("framework_root", ""),
         )
 
     rules_path = _find_rules_file(
@@ -193,10 +206,13 @@ def _agent_run(
         sys.exit(1)
 
     logger.info(f"Agent running in WezTerm pane {session.pane_id}")
+    activate_pane(session.pane_id)
 
     # Register worker/reviewer panes with the MCP server for idle tracking
     if mcp_port and role in ("worker", "reviewer") and workstream and ticket:
         _register_pane(mcp_port, session.pane_id, role, workstream, ticket)
+
+    return session
 
 
 # ── Click Group ──────────────────────────────────────────────────────
@@ -237,43 +253,15 @@ def _make_agent_group() -> click.Group:
 
     # ── team ──
 
-    @agent.group()
-    @click.pass_context
-    def team(ctx: click.Context) -> None:
-        """Manage multi-agent workstreams."""
-        pass
-
-    @team.command("new")
-    @click.argument("workstream_id")
-    @click.option("--plan", "plan_path", default=None, type=click.Path(exists=True),
-                  help="Path to initial plan file")
-    @click.pass_context
-    def team_new(ctx: click.Context, workstream_id: str, plan_path: str | None) -> None:
-        """Create a new workstream, spawn orchestrator, and start MCP server (blocks)."""
-        from .team import TeamManager
-        tool_ctx = _ctx_from_click(ctx)
-        mgr = TeamManager(tool_ctx)
-        mgr.new(workstream_id, plan_path=plan_path)
-
-    @team.command("attach")
+    @agent.command()
     @click.argument("workstream_id")
     @click.pass_context
-    def team_attach(ctx: click.Context, workstream_id: str) -> None:
-        """Re-attach to a workstream by restarting the MCP server (blocks)."""
+    def team(ctx: click.Context, workstream_id: str) -> None:
+        """Start a multi-agent workstream (creates if new, resumes if existing)."""
         from .team import TeamManager
         tool_ctx = _ctx_from_click(ctx)
         mgr = TeamManager(tool_ctx)
-        mgr.attach(workstream_id)
-
-    @team.command("status")
-    @click.argument("workstream_id", required=False, default=None)
-    @click.pass_context
-    def team_status(ctx: click.Context, workstream_id: str | None) -> None:
-        """Show workstream status (panes and tickets)."""
-        from .team import TeamManager
-        tool_ctx = _ctx_from_click(ctx)
-        mgr = TeamManager(tool_ctx)
-        mgr.status(workstream_id)
+        mgr.start(workstream_id)
 
     return agent
 

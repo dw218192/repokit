@@ -300,6 +300,14 @@ def _build_cli(
     if project_tool_dirs:
         for tool_dir in project_tool_dirs:
             tool_path = Path(tool_dir)
+            bad_init = tool_path / "repo_tools" / "__init__.py"
+            if bad_init.exists():
+                logger.error(
+                    f"Remove {bad_init} — it breaks namespace package "
+                    f"merging and hides framework tools.  "
+                    f"See README.md § Extending."
+                )
+                sys.exit(1)
             if tool_path.exists() and str(tool_dir) not in sys.path:
                 sys.path.insert(0, str(tool_dir))
         importlib.invalidate_caches()

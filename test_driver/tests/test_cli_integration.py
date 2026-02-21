@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from click.testing import CliRunner
 
 from repo_tools.cli import _build_cli
@@ -156,3 +157,20 @@ def test_auto_generated_tool_exposes_dry_run(make_workspace):
     result = CliRunner().invoke(cli, ["build", "--help"])
     assert result.exit_code == 0
     assert "--dry-run" in result.output
+
+
+# ── 9. __init__.py in project repo_tools/ is rejected ────────────────
+
+
+def test_init_py_in_project_repo_tools_rejected(make_workspace):
+    """An __init__.py in tools/repo_tools/ exits with an error."""
+    ws = make_workspace()
+    init_file = ws / "tools" / "repo_tools" / "__init__.py"
+    init_file.parent.mkdir(parents=True, exist_ok=True)
+    init_file.write_text("")
+
+    with pytest.raises(SystemExit):
+        _build_cli(
+            workspace_root=str(ws),
+            project_tool_dirs=[str(ws / "tools")],
+        )

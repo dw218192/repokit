@@ -1,0 +1,22 @@
+## Repo Tooling Framework
+
+This repository uses the **repokit** framework — a unified `{repo_cmd}` CLI
+configured per-project via `config.yaml`. All building, testing, formatting,
+and repository operations should go through it rather than being invoked
+directly.
+
+Run `{repo_cmd} --help` to discover available commands. Common operations:
+
+- `{repo_cmd} build` — build the project
+- `{repo_cmd} test` — run the test suite
+- `{repo_cmd} format` — format source code
+
+Commands resolve platform-specific variants, paths, and tokens automatically.
+See `{framework_root}/README.md` for full details on configuration, token
+expansion, and extending the framework with custom tools.
+
+## Filesystem Boundary
+
+Only the orchestrator reads and writes files under `_agent/` (plan, tickets,
+workstream state). Workers and reviewers must not access `_agent/` — relay
+updates to the orchestrator via the **send_message** MCP tool instead.
