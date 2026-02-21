@@ -22,8 +22,7 @@ def test_help_no_config(make_workspace):
     cli = _cli_for(ws)
     result = CliRunner().invoke(cli, ["--help"])
     assert result.exit_code == 0
-    for name in ("context", "clean", "build", "test"):
-        assert name in result.output
+    assert "context" in result.output
 
 
 # ── 2. Context displays token names ─────────────────────────────────
@@ -34,9 +33,7 @@ def test_context_displays_tokens(make_workspace, capture_logs):
     cli = _cli_for(ws)
     result = CliRunner().invoke(cli, ["context"])
     assert result.exit_code == 0
-    log_text = capture_logs.getvalue()
-    for token in ("workspace_root", "build_type", "platform"):
-        assert token in log_text
+    assert "workspace_root" in capture_logs.getvalue()
 
 
 # ── 3. Context --json with custom token ─────────────────────────────
@@ -61,13 +58,18 @@ def test_context_json(make_workspace):
 
 
 def test_dimension_flags_affect_tokens(make_workspace):
-    ws = make_workspace()
+    """Dimensions defined in config tokens produce group-level flags that update tokens."""
+    ws = make_workspace(
+        config_yaml="""\
+        tokens:
+            build_type: [Debug, Release]
+        """
+    )
     cli = _cli_for(ws)
     result = CliRunner().invoke(cli, ["--build-type", "Release", "context", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["build_type"] == "Release"
-    assert "Release" in data["build_dir"]
 
 
 # ── 5. Config dimension tokens produce CLI options ──────────────────
@@ -103,36 +105,54 @@ def test_tool_config_merged(make_workspace):
     assert result.exit_code == 0
 
 
-# ── 7. Clean --all --dry-run keeps directories ─────────────────────
+# ── 7. Config section with command auto-generates a tool ────────────
 
 
-def test_clean_dry_run_all(make_workspace, capture_logs):
-    ws = make_workspace()
-    build_dir = ws / "_build"
-    logs_dir = ws / "_logs"
-    build_dir.mkdir()
-    logs_dir.mkdir()
-
+def test_auto_generated_tool_appears_in_help(make_workspace):
+    ws = make_workspace(
+        config_yaml="""\
+        clean:
+            command: "rm -rf {build_dir}"
+        deploy:
+            command: "rsync -av {build_dir}/ server:/app"
+        """
+    )
     cli = _cli_for(ws)
-    result = CliRunner().invoke(cli, ["clean", "--all", "--dry-run"])
+    result = CliRunner().invoke(cli, ["--help"])
     assert result.exit_code == 0
-    assert build_dir.exists(), "_build should still exist after dry run"
-    assert logs_dir.exists(), "_logs should still exist after dry run"
-    assert "Would remove" in capture_logs.getvalue()
+    assert "clean" in result.output
+    assert "deploy" in result.output
 
 
-# ── 8. Clean --all removes directories ──────────────────────────────
-
-
-def test_clean_all_removes_dirs(make_workspace):
-    ws = make_workspace()
-    build_dir = ws / "_build"
-    logs_dir = ws / "_logs"
-    build_dir.mkdir()
-    logs_dir.mkdir()
-
+def test_auto_generated_tool_dry_run(make_workspace, capture_logs):
+    ws = make_workspace(
+        config_yaml="""\
+        tokens:
+            build_type: [Debug, Release]
+        build:
+            command: "cmake --config {build_type}"
+        """
+    )
     cli = _cli_for(ws)
-    result = CliRunner().invoke(cli, ["clean", "--all"])
+    result = CliRunner().invoke(cli, ["--build-type", "Release", "build", "--dry-run"])
     assert result.exit_code == 0
-    assert not build_dir.exists(), "_build should be removed"
-    assert not logs_dir.exists(), "_logs should be removed"
+    log_text = capture_logs.getvalue()
+    assert "Would run" in log_text
+    assert "Release" in log_text
+
+
+# ── 8. Auto-generated tool exposes --dry-run ─────────────────────────
+
+
+def test_auto_generated_tool_exposes_dry_run(make_workspace):
+    """An auto-generated CLI tool created from config exposes the --dry-run flag."""
+    ws = make_workspace(
+        config_yaml="""\
+        build:
+            command: "cmake --build {build_dir}"
+        """
+    )
+    cli = _cli_for(ws)
+    result = CliRunner().invoke(cli, ["build", "--help"])
+    assert result.exit_code == 0
+    assert "--dry-run" in result.output

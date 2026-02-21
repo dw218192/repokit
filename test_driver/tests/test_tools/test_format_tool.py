@@ -55,6 +55,7 @@ class TestFormatTool:
 
         with (
             patch("repo_tools.format.subprocess.run") as mock_run,
+            patch("repo_tools.format.shutil.which", return_value="/usr/bin/ruff"),
             patch("repo_tools.format.find_venv_executable", return_value="ruff"),
         ):
             mock_run.return_value = MagicMock(returncode=0)

@@ -1,14 +1,12 @@
-"""Tests for the approval logic in repo_tools.agent.approver."""
+"""Tests for rule-based permission checking in repo_tools.agent.rules."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
-from repo_tools.agent.approver import AutoApprover, _extract_commands, load_rules
-from repo_tools.agent.runner import ToolRequest
+from repo_tools.agent.rules import _extract_commands, check_command, load_rules
 
 
 # ── Helpers ────────────────────────────────────────────────────────────
@@ -16,24 +14,13 @@ from repo_tools.agent.runner import ToolRequest
 
 def _default_rules_path() -> Path:
     """Return the path to the default rules TOML shipped with the package."""
-    from repo_tools.agent import approver
+    from repo_tools.agent import rules as rules_mod
 
-    return Path(approver.__file__).resolve().parent / "rules_default.toml"
+    return Path(rules_mod.__file__).resolve().parent / "allowlist_default.toml"
 
 
-def _make_approver(
-    rules_path: Path | None = None, project_root: Path | None = None
-) -> AutoApprover:
-    """Build an AutoApprover with mocked backend and session."""
-    backend = MagicMock()
-    session = MagicMock()
-    path = rules_path or _default_rules_path()
-    return AutoApprover(
-        backend=backend,
-        session=session,
-        rules_path=path,
-        project_root=project_root,
-    )
+def _default_rules():
+    return load_rules(_default_rules_path())
 
 
 # ── load_rules ─────────────────────────────────────────────────────────
@@ -41,8 +28,8 @@ def _make_approver(
 
 class TestLoadRules:
     def test_load_rules_default(self):
-        """Loading rules_default.toml yields deny rules, allow rules, and a default_reason."""
-        rules = load_rules(_default_rules_path())
+        """Loading allowlist_default.toml yields deny rules, allow rules, and a default_reason."""
+        rules = _default_rules()
 
         assert rules.default_reason, "default_reason should be a non-empty string"
         assert len(rules.deny) > 0, "expected at least one deny rule"
@@ -78,57 +65,93 @@ class TestExtractCommands:
         assert result == ["echo hello"]
 
 
-# ── AutoApprover._check_request ───────────────────────────────────────
+# ── check_command ─────────────────────────────────────────────────────
 
 
-class TestCheckRequest:
-    def test_check_request_non_bash_allowed(self):
-        """Non-Bash tool requests are always allowed regardless of rules."""
-        approver = _make_approver()
-        allowed, reason = approver._check_request(
-            ToolRequest(tool="Edit", command=None)
-        )
-        assert allowed is True
-        assert reason == ""
-
+class TestCheckCommand:
     def test_deny_rule_matches(self):
         """A command matching a deny rule (e.g. sudo) is denied."""
-        approver = _make_approver()
-        allowed, reason = approver._check_request(
-            ToolRequest(tool="Bash", command="sudo apt install foo"),
-        )
+        rules = _default_rules()
+        allowed, reason = check_command("sudo apt install foo", rules)
         assert allowed is False
         assert "privilege" in reason.lower() or "not permitted" in reason.lower()
 
     def test_allow_rule_matches(self):
         """A command matching an allow rule (e.g. git) is allowed."""
-        approver = _make_approver()
-        allowed, reason = approver._check_request(
-            ToolRequest(tool="Bash", command="git status"),
-        )
+        rules = _default_rules()
+        allowed, reason = check_command("git status", rules)
         assert allowed is True
         assert reason == ""
 
     def test_unknown_command_denied(self):
         """A command that matches no allow rule is denied."""
-        approver = _make_approver()
-        allowed, reason = approver._check_request(
-            ToolRequest(tool="Bash", command="malicious_tool --evil"),
-        )
+        rules = _default_rules()
+        allowed, reason = check_command("malicious_tool --evil", rules)
         assert allowed is False
 
     def test_empty_command_denied(self):
-        """A Bash request with no command is denied."""
-        approver = _make_approver()
-        allowed, reason = approver._check_request(
-            ToolRequest(tool="Bash", command=None),
-        )
+        """A None command is denied."""
+        rules = _default_rules()
+        allowed, reason = check_command(None, rules)
         assert allowed is False
 
     def test_empty_string_command_denied(self):
-        """A Bash request with an empty-string command is denied."""
-        approver = _make_approver()
-        allowed, reason = approver._check_request(
-            ToolRequest(tool="Bash", command=""),
-        )
+        """An empty-string command is denied."""
+        rules = _default_rules()
+        allowed, reason = check_command("", rules)
         assert allowed is False
+
+
+# ── Role-filtered rules ────────────────────────────────────────────────
+
+
+class TestRoleFilteredRules:
+    def test_agent_dir_denied_for_worker(self):
+        """agent_dir deny rule blocks _agent/ access when role=worker."""
+        rules = load_rules(_default_rules_path(), role="worker")
+        # Commands touching _agent/ should be denied
+        allowed, reason = check_command("cat _agent/ws1/tickets/G1_1.toml", rules)
+        assert allowed is False
+        assert "_agent/" in reason or "relay" in reason
+
+    def test_agent_dir_denied_for_reviewer(self):
+        """agent_dir deny rule blocks _agent/ access when role=reviewer."""
+        rules = load_rules(_default_rules_path(), role="reviewer")
+        allowed, reason = check_command("cat _agent/ws1/tickets/G1_1.toml", rules)
+        assert allowed is False
+
+    def test_agent_dir_allowed_for_orchestrator(self):
+        """agent_dir deny rule is filtered out for orchestrator — _agent/ writes are permitted."""
+        rules = load_rules(_default_rules_path(), role="orchestrator")
+        # The agent_dir deny rule has roles=["worker","reviewer"], so it won't apply to orchestrator.
+        # The cat command itself must still match an allow rule.
+        allowed, reason = check_command("cat _agent/ws1/tickets/G1_1.toml", rules)
+        assert allowed is True  # allowed by file_inspection rule; agent_dir deny skipped
+
+    def test_roles_field_filters_rules(self, tmp_path):
+        """load_rules skips rules whose roles list excludes the given role."""
+        rules_toml = tmp_path / "rules.toml"
+        rules_toml.write_text(
+            '[default_reason]\n'
+            'default_reason = "blocked"\n\n'
+            '[[deny]]\n'
+            'name = "worker_only"\n'
+            'patterns = ["^secret"]\n'
+            'roles = ["worker"]\n'
+            'reason = "worker deny"\n\n'
+            '[[allow]]\n'
+            'name = "all"\n'
+            'patterns = [".+"]\n',
+            encoding="utf-8",
+        )
+        # For role=worker: deny rule applies
+        worker_rules = load_rules(rules_toml, role="worker")
+        assert any(r.name == "worker_only" for r in worker_rules.deny)
+
+        # For role=orchestrator: deny rule is filtered out
+        orch_rules = load_rules(rules_toml, role="orchestrator")
+        assert not any(r.name == "worker_only" for r in orch_rules.deny)
+
+        # Without role: deny rule is filtered out (role=None not in ["worker"])
+        no_role_rules = load_rules(rules_toml, role=None)
+        assert not any(r.name == "worker_only" for r in no_role_rules.deny)
