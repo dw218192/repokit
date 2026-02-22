@@ -30,10 +30,12 @@ tokens:
   build_dir: "{build_root}/{platform}/{build_type}"
 
 build:
-  command: "cmake --build {build_dir} --config {build_type}"
+  steps:
+    - "cmake --build {build_dir} --config {build_type}"
 
 test:
-  command: "ctest --test-dir {build_dir} --build-config {build_type}"
+  steps:
+    - "ctest --test-dir {build_dir} --build-config {build_type}"
 ```
 
 Then run:
@@ -46,7 +48,19 @@ Then run:
 
 ## Tools
 
-Any `config.yaml` section with only `command` keys is automatically registered as a `./repo <name>` command — no Python required. All auto-generated commands support `--dry-run`.
+Any `config.yaml` section with a `steps` key is automatically registered as a `./repo <name>` command — no Python required. All auto-generated commands support `--dry-run`.
+
+`steps` is always a list. Each item is either a **string** (shorthand) or an **object** with the keys `command`, `cwd`, `env_script`, and `env`:
+
+```yaml
+deploy:
+  steps:
+    - command: "docker build -t myapp ."
+      env:
+        - "DOCKER_BUILDKIT=1"
+    - command: "docker push myapp"
+      cwd: "{build_dir}"
+```
 
 Framework tools with non-trivial logic:
 
@@ -179,8 +193,8 @@ CLI flags map 1:1 to `config.yaml` fields under the tool name. Precedence: tool 
 
 | Function / Class | Purpose |
 |---|---|
-| `run_command(cmd, log_file=, env_script=)` | Run a subprocess, optionally tee to log and source an env script |
-| `CommandGroup(label)` | Context manager for build phases with pass/fail tracking and CI fold markers |
+| `run_command(cmd, log_file=, env_script=, cwd=, env=)` | Run a subprocess, optionally tee to log and source an env script |
+| `CommandGroup(label, log_file=, env_script=, cwd=, env=)` | Context manager for build phases with pass/fail tracking and CI fold markers |
 | `find_venv_executable(name)` | Find executable in the venv, fallback to system PATH |
 | `invoke_tool(name, tokens, config, ...)` | Call another registered tool programmatically |
 | `logger` | Shared colored logger (`logging.getLogger("repo_tools")`) |
