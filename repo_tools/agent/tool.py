@@ -211,7 +211,7 @@ def _agent_run(
                     "status": "in_progress",
                     "notes": "Agent exhausted turn limit",
                 }
-                update_result = _tool_update_ticket(tool_ctx.workspace_root, update_args)
+                update_result = _tool_update_ticket(tool_ctx.workspace_root, update_args, role="worker")
                 if update_result.get("isError"):
                     logger.error(f"Ticket update failed: {update_result['text']}")
                 else:
@@ -242,7 +242,7 @@ def _agent_run(
             if field in output:
                 update_args[field] = output[field]
 
-        update_result = _tool_update_ticket(tool_ctx.workspace_root, update_args)
+        update_result = _tool_update_ticket(tool_ctx.workspace_root, update_args, role=role)
         if update_result.get("isError"):
             logger.error(f"Ticket update failed: {update_result['text']}")
         else:

@@ -8,6 +8,9 @@ from pathlib import Path
 import pytest
 
 from repo_tools.agent.ticket_mcp import (
+    _ROLE_ALLOWED_TOOLS,
+    _ROLE_ALLOWED_TRANSITIONS,
+    _ROLE_UPDATE_FIELDS,
     _dispatch,
     _tool_create_ticket,
     _tool_delete_ticket,
@@ -25,7 +28,7 @@ def project(tmp_path):
     return tmp_path
 
 
-def _call_tool(root: Path, name: str, arguments: dict) -> dict:
+def _call_tool(root: Path, name: str, arguments: dict, *, role: str | None = None) -> dict:
     """Simulate a tools/call JSON-RPC request and return the parsed result."""
     req = {
         "jsonrpc": "2.0",
@@ -33,7 +36,7 @@ def _call_tool(root: Path, name: str, arguments: dict) -> dict:
         "method": "tools/call",
         "params": {"name": name, "arguments": arguments},
     }
-    raw = _dispatch(root, req)
+    raw = _dispatch(root, req, role=role)
     assert raw is not None
     resp = json.loads(raw)
     result = resp["result"]
@@ -151,16 +154,16 @@ class TestStatusTransitions:
             "review": {"result": result, "feedback": "f"},
         }
 
-    @pytest.mark.parametrize("current,target,result,met", [
-        ("todo", "in_progress", "", True),
-        ("todo", "verify", "", True),
-        ("in_progress", "verify", "", True),
-        ("verify", "closed", "pass", True),
-        ("verify", "todo", "fail", True),
+    @pytest.mark.parametrize("current,target,result,met,role", [
+        ("todo", "in_progress", "", True, "worker"),
+        ("todo", "verify", "", True, "worker"),
+        ("in_progress", "verify", "", True, "worker"),
+        ("verify", "closed", "pass", True, "reviewer"),
+        ("verify", "todo", "fail", True, "reviewer"),
     ])
-    def test_valid_transitions(self, current, target, result, met):
+    def test_valid_transitions(self, current, target, result, met, role):
         data = self._make_data(status=current, result=result, criteria_met=met)
-        assert _validate_transition(current, target, data) is None
+        assert _validate_transition(current, target, data, role=role) is None
 
     @pytest.mark.parametrize("current,target", [
         ("todo", "closed"),
@@ -230,7 +233,7 @@ class TestStatusTransitions:
 
         _tool_update_ticket(project, {
             "ticket_id": "G1_1", "status": "closed", "result": "pass",
-        })
+        }, role="reviewer")
         # Now try to reopen — should fail
         result = _tool_update_ticket(project, {
             "ticket_id": "G1_1", "status": "todo",
@@ -422,7 +425,7 @@ class TestUpdateTicket:
         result = _tool_update_ticket(project, {
             "ticket_id": "G1_1",
             "status": "closed", "result": "pass", "feedback": "Looks good",
-        })
+        }, role="reviewer")
         assert not result.get("isError")
 
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -774,3 +777,139 @@ class TestRequiredCriteria:
         path = project / "_agent" / "tickets" / "T1.json"
         data = json.loads(path.read_text(encoding="utf-8"))
         assert all(c["met"] is False for c in data["criteria"])
+
+
+# ── RBAC enforcement ─────────────────────────────────────────────
+
+
+class TestRoleEnforcement:
+    """Test role-based access control at tool, field, and transition levels."""
+
+    # ── Tool access ──────────────────────────────────────────────
+
+    @pytest.mark.parametrize("role,tool", [
+        ("worker", "create_ticket"),
+        ("worker", "reset_ticket"),
+        ("worker", "mark_criteria"),
+        ("worker", "delete_ticket"),
+        ("reviewer", "create_ticket"),
+        ("reviewer", "reset_ticket"),
+        ("reviewer", "delete_ticket"),
+    ])
+    def test_tool_denied(self, project, role, tool):
+        result = _call_tool(project, tool, {"ticket_id": "T1"}, role=role)
+        assert result["isError"]
+        assert "cannot use tool" in result["text"]
+
+    @pytest.mark.parametrize("role", ["orchestrator", "worker", "reviewer"])
+    def test_read_tools_always_allowed(self, project, role):
+        _tool_create_ticket(project, {"id": "T1", "title": "t", "description": "d"})
+        for tool in ("list_tickets", "get_ticket"):
+            args = {"ticket_id": "T1"} if tool == "get_ticket" else {}
+            result = _call_tool(project, tool, args, role=role)
+            assert not result["isError"]
+
+    def test_orchestrator_can_create(self, project):
+        result = _call_tool(project, "create_ticket", {
+            "id": "T1", "title": "t", "description": "d",
+        }, role="orchestrator")
+        assert not result["isError"]
+
+    def test_reviewer_can_mark_criteria(self, project):
+        _tool_create_ticket(project, {"id": "T1", "title": "t", "description": "d", "criteria": ["c1"]})
+        result = _call_tool(project, "mark_criteria", {
+            "ticket_id": "T1", "indices": [0],
+        }, role="reviewer")
+        assert not result["isError"]
+
+    # ── Field access ─────────────────────────────────────────────
+
+    @pytest.mark.parametrize("role,field,value", [
+        ("worker", "result", "pass"),
+        ("worker", "feedback", "looks good"),
+        ("orchestrator", "result", "pass"),
+        ("orchestrator", "feedback", "ok"),
+        ("reviewer", "notes", "progress note"),
+    ])
+    def test_field_denied(self, project, role, field, value):
+        _tool_create_ticket(project, {"id": "T1", "title": "t", "description": "d"})
+        result = _tool_update_ticket(project, {
+            "ticket_id": "T1", field: value,
+        }, role=role)
+        assert result.get("isError")
+        assert "cannot update fields" in result["text"]
+
+    def test_worker_can_set_notes(self, project):
+        _tool_create_ticket(project, {"id": "T1", "title": "t", "description": "d"})
+        result = _tool_update_ticket(project, {
+            "ticket_id": "T1", "notes": "progress",
+        }, role="worker")
+        assert not result.get("isError")
+
+    def test_reviewer_can_set_result_and_feedback(self, project):
+        _tool_create_ticket(project, {"id": "T1", "title": "t", "description": "d"})
+        _advance_ticket(project, "T1", "verify")
+        result = _tool_update_ticket(project, {
+            "ticket_id": "T1", "result": "pass", "feedback": "All good",
+        }, role="reviewer")
+        assert not result.get("isError")
+
+    # ── Transition access ────────────────────────────────────────
+
+    def test_orchestrator_cannot_close(self, project):
+        _tool_create_ticket(project, {"id": "T1", "title": "t", "description": "d"})
+        _advance_ticket(project, "T1", "verify")
+        data = self._make_review_ready(project, "T1")
+        result = _tool_update_ticket(project, {
+            "ticket_id": "T1", "status": "closed",
+        }, role="orchestrator")
+        assert result.get("isError")
+        assert "cannot transition" in result["text"]
+
+    def test_worker_cannot_close(self, project):
+        _tool_create_ticket(project, {"id": "T1", "title": "t", "description": "d"})
+        _advance_ticket(project, "T1", "verify")
+        result = _tool_update_ticket(project, {
+            "ticket_id": "T1", "status": "closed",
+        }, role="worker")
+        assert result.get("isError")
+        assert "cannot transition" in result["text"]
+
+    @pytest.mark.parametrize("current,target", [
+        ("todo", "in_progress"),
+        ("in_progress", "verify"),
+    ])
+    def test_reviewer_cannot_do_work_transitions(self, project, current, target):
+        _tool_create_ticket(project, {"id": "T1", "title": "t", "description": "d"})
+        _advance_ticket(project, "T1", current)
+        result = _tool_update_ticket(project, {
+            "ticket_id": "T1", "status": target,
+        }, role="reviewer")
+        assert result.get("isError")
+        assert "cannot transition" in result["text"]
+
+    def test_reviewer_can_close(self, project):
+        _tool_create_ticket(project, {"id": "T1", "title": "t", "description": "d"})
+        _advance_ticket(project, "T1", "verify")
+        result = _tool_update_ticket(project, {
+            "ticket_id": "T1", "status": "closed", "result": "pass",
+        }, role="reviewer")
+        assert not result.get("isError")
+
+    def test_no_role_bypasses_rbac(self, project):
+        """When role is None, all operations are allowed (backward compat)."""
+        _tool_create_ticket(project, {"id": "T1", "title": "t", "description": "d"})
+        _advance_ticket(project, "T1", "verify")
+        result = _tool_update_ticket(project, {
+            "ticket_id": "T1", "status": "closed", "result": "pass",
+        })
+        assert not result.get("isError")
+
+    @staticmethod
+    def _make_review_ready(project, ticket_id):
+        """Set review.result='pass' on a ticket (for testing close attempts)."""
+        path = project / "_agent" / "tickets" / f"{ticket_id}.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["review"]["result"] = "pass"
+        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        return data

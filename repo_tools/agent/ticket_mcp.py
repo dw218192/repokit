@@ -37,6 +37,38 @@ _ALLOWED_TRANSITIONS = {
     "closed":      set(),
 }
 
+_ROLE_ALLOWED_TOOLS: dict[str, set[str]] = {
+    "orchestrator": {
+        "list_tickets", "get_ticket", "create_ticket", "update_ticket",
+        "reset_ticket", "mark_criteria", "delete_ticket",
+    },
+    "worker": {"list_tickets", "get_ticket", "update_ticket"},
+    "reviewer": {"list_tickets", "get_ticket", "update_ticket", "mark_criteria"},
+}
+
+_ROLE_UPDATE_FIELDS: dict[str, set[str]] = {
+    "orchestrator": {"status", "notes"},
+    "worker": {"status", "notes"},
+    "reviewer": {"status", "result", "feedback"},
+}
+
+_ROLE_ALLOWED_TRANSITIONS: dict[str, set[tuple[str, str]]] = {
+    "orchestrator": {
+        ("todo", "in_progress"),
+        ("todo", "verify"),
+        ("in_progress", "verify"),
+    },
+    "worker": {
+        ("todo", "in_progress"),
+        ("todo", "verify"),
+        ("in_progress", "verify"),
+    },
+    "reviewer": {
+        ("verify", "closed"),
+        ("verify", "todo"),
+    },
+}
+
 _TOOLS = [
     {
         "name": "list_tickets",
@@ -231,7 +263,9 @@ def _validate_ticket(data: dict) -> str | None:
     return None
 
 
-def _validate_transition(current: str, target: str, data: dict) -> str | None:
+def _validate_transition(
+    current: str, target: str, data: dict, *, role: str | None = None,
+) -> str | None:
     """Return error if current->target is not an allowed status transition.
 
     Also enforces cross-field constraints:
@@ -244,6 +278,11 @@ def _validate_transition(current: str, target: str, data: dict) -> str | None:
             f"invalid transition: {current!r} -> {target!r} "
             f"(allowed: {sorted(allowed)})"
         )
+
+    if role is not None:
+        role_allowed = _ROLE_ALLOWED_TRANSITIONS.get(role, set())
+        if (current, target) not in role_allowed:
+            return f"role {role!r} cannot transition {current!r} -> {target!r}"
 
     if target == "closed":
         review_result = data.get("review", {}).get("result", "")
@@ -291,7 +330,7 @@ def _load_required_criteria(root: Path) -> list[str]:
 # ── Tool implementations ─────────────────────────────────────────────────────
 
 
-def _tool_list_tickets(root: Path, args: dict) -> dict:
+def _tool_list_tickets(root: Path, args: dict, *, role: str | None = None) -> dict:
     tdir = _tickets_dir(root)
     if not tdir.is_dir():
         tdir.mkdir(parents=True, exist_ok=True)
@@ -316,7 +355,7 @@ def _tool_list_tickets(root: Path, args: dict) -> dict:
     return {"text": json.dumps(tickets)}
 
 
-def _tool_get_ticket(root: Path, args: dict) -> dict:
+def _tool_get_ticket(root: Path, args: dict, *, role: str | None = None) -> dict:
     tid = args.get("ticket_id", "").strip()
     if err := _validate_id(tid, "ticket_id"):
         return {"isError": True, "text": err}
@@ -336,7 +375,7 @@ def _tool_get_ticket(root: Path, args: dict) -> dict:
     return {"text": content}
 
 
-def _tool_create_ticket(root: Path, args: dict) -> dict:
+def _tool_create_ticket(root: Path, args: dict, *, role: str | None = None) -> dict:
     tid = args.get("id", "").strip()
     if err := _validate_id(tid, "id"):
         return {"isError": True, "text": err}
@@ -380,7 +419,7 @@ def _tool_create_ticket(root: Path, args: dict) -> dict:
     return {"text": f"Ticket '{tid}' created"}
 
 
-def _tool_update_ticket(root: Path, args: dict) -> dict:
+def _tool_update_ticket(root: Path, args: dict, *, role: str | None = None) -> dict:
     tid = args.get("ticket_id", "").strip()
     if err := _validate_id(tid, "ticket_id"):
         return {"isError": True, "text": err}
@@ -396,6 +435,12 @@ def _tool_update_ticket(root: Path, args: dict) -> dict:
     if not updates:
         return {"text": "No fields to update"}
 
+    if role is not None:
+        allowed_fields = _ROLE_UPDATE_FIELDS.get(role, set())
+        forbidden = set(updates.keys()) - allowed_fields
+        if forbidden:
+            return {"isError": True, "text": f"role {role!r} cannot update fields: {sorted(forbidden)}"}
+
     # Apply non-status fields first so transition checks see the new state
     if "notes" in updates:
         data["progress"]["notes"] = updates["notes"]
@@ -409,7 +454,7 @@ def _tool_update_ticket(root: Path, args: dict) -> dict:
         current_status = data.get("ticket", {}).get("status", "todo")
         target_status = updates["status"]
         if current_status != target_status:
-            if err := _validate_transition(current_status, target_status, data):
+            if err := _validate_transition(current_status, target_status, data, role=role):
                 return {"isError": True, "text": err}
             data["ticket"]["status"] = target_status
 
@@ -420,7 +465,7 @@ def _tool_update_ticket(root: Path, args: dict) -> dict:
     return {"text": f"Ticket '{tid}' updated: {', '.join(updates.keys())}"}
 
 
-def _tool_reset_ticket(root: Path, args: dict) -> dict:
+def _tool_reset_ticket(root: Path, args: dict, *, role: str | None = None) -> dict:
     tid = args.get("ticket_id", "").strip()
     if err := _validate_id(tid, "ticket_id"):
         return {"isError": True, "text": err}
@@ -440,7 +485,7 @@ def _tool_reset_ticket(root: Path, args: dict) -> dict:
     return {"text": f"Ticket '{tid}' reset to todo"}
 
 
-def _tool_mark_criteria(root: Path, args: dict) -> dict:
+def _tool_mark_criteria(root: Path, args: dict, *, role: str | None = None) -> dict:
     tid = args.get("ticket_id", "").strip()
     if err := _validate_id(tid, "ticket_id"):
         return {"isError": True, "text": err}
@@ -477,7 +522,7 @@ def _tool_mark_criteria(root: Path, args: dict) -> dict:
     return {"text": f"Ticket '{tid}' criteria updated: indices {indices} -> met={met}"}
 
 
-def _tool_delete_ticket(root: Path, args: dict) -> dict:
+def _tool_delete_ticket(root: Path, args: dict, *, role: str | None = None) -> dict:
     tid = args.get("ticket_id", "").strip()
     if err := _validate_id(tid, "ticket_id"):
         return {"isError": True, "text": err}
@@ -513,7 +558,7 @@ def _respond(req_id, result=None, error=None) -> str:
     return json.dumps(msg)
 
 
-def _dispatch(root: Path, req: dict) -> str | None:
+def _dispatch(root: Path, req: dict, *, role: str | None = None) -> str | None:
     req_id = req.get("id")
     method = req.get("method", "")
 
@@ -544,8 +589,10 @@ def _dispatch(root: Path, req: dict) -> str | None:
         handler = _TOOL_DISPATCH.get(name)
         if handler is None:
             outcome = {"isError": True, "text": f"Unknown tool: {name!r}"}
+        elif role is not None and name not in _ROLE_ALLOWED_TOOLS.get(role, set()):
+            outcome = {"isError": True, "text": f"role {role!r} cannot use tool {name!r}"}
         else:
-            outcome = handler(root, tool_args)
+            outcome = handler(root, tool_args, role=role)
 
         result = {
             "content": [{"type": "text", "text": outcome["text"]}],
@@ -562,6 +609,8 @@ def _dispatch(root: Path, req: dict) -> str | None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Ticket MCP stdio server")
     parser.add_argument("--project-root", required=True, help="Project root directory")
+    parser.add_argument("--role", default=None, choices=["orchestrator", "worker", "reviewer"],
+                        help="Agent role for access control")
     args = parser.parse_args()
     root = Path(args.project_root)
 
@@ -575,7 +624,7 @@ def main() -> None:
             continue
 
         try:
-            response = _dispatch(root, req)
+            response = _dispatch(root, req, role=args.role)
         except Exception as exc:
             print(f"ticket_mcp: dispatch error: {exc}", file=sys.stderr)
             req_id = req.get("id") if isinstance(req, dict) else None

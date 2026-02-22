@@ -101,6 +101,13 @@ def _write_plugin(
     )
 
     # -- MCP servers --
+    ticket_args = [
+        "-m", "repo_tools.agent.ticket_mcp",
+        "--project-root", project_root.as_posix(),
+    ]
+    if role:
+        ticket_args.extend(["--role", role])
+
     mcp_config: dict = {
         "mcpServers": {
             "coderabbit": {
@@ -111,10 +118,7 @@ def _write_plugin(
             "tickets": {
                 "type": "stdio",
                 "command": posix_path(sys.executable),
-                "args": [
-                    "-m", "repo_tools.agent.ticket_mcp",
-                    "--project-root", project_root.as_posix(),
-                ],
+                "args": ticket_args,
             },
         }
     }

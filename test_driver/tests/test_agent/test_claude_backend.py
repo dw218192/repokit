@@ -310,6 +310,43 @@ class TestBuildCommand:
         root_idx = ts_args.index("--project-root")
         assert tmp_path.as_posix() in ts_args[root_idx + 1]
 
+    def test_role_forwarded_to_ticket_mcp(self, tmp_path):
+        """When role is provided, --role appears in ticket MCP args."""
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        claude = Claude()
+        claude.build_command(
+            role="worker",
+            rules_path=rules,
+            project_root=tmp_path,
+        )
+        mcp = json.loads(
+            (tmp_path / "_agent" / "plugin" / ".mcp.json").read_text()
+        )
+
+        ts_args = mcp["mcpServers"]["tickets"]["args"]
+        assert "--role" in ts_args
+        role_idx = ts_args.index("--role")
+        assert ts_args[role_idx + 1] == "worker"
+
+    def test_no_role_no_role_in_ticket_mcp(self, tmp_path):
+        """When no role is given, --role is absent from ticket MCP args."""
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        claude = Claude()
+        claude.build_command(
+            rules_path=rules,
+            project_root=tmp_path,
+        )
+        mcp = json.loads(
+            (tmp_path / "_agent" / "plugin" / ".mcp.json").read_text()
+        )
+
+        ts_args = mcp["mcpServers"]["tickets"]["args"]
+        assert "--role" not in ts_args
+
     def test_max_turns_in_headless(self, tmp_path):
         """max_turns adds --max-turns flag in headless mode."""
         rules = tmp_path / "rules.toml"
