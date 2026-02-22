@@ -88,14 +88,11 @@ def _auto_register_config_tools(
 ) -> list[RepoTool]:
     """Create CommandRunnerTools for eligible config sections.
 
-    A section is eligible when **every** key (ignoring ``@filter`` suffixes)
-    belongs to the known runner key set: ``command``, ``env_script``, ``cwd``.
-    At least one ``command`` or ``command@*`` key must be present.
+    A section is eligible when it contains a ``steps`` or ``steps@*`` key.
     """
     from .command_runner import CommandRunnerTool
 
     _skip_sections = {"tokens"}
-    _known_prefixes = {"command", "env_script", "cwd"}
     auto_tools: list[RepoTool] = []
 
     for section_name, section_value in config.items():
@@ -109,32 +106,8 @@ def _auto_register_config_tools(
         if not isinstance(section_value, dict):
             continue
 
-        keys = list(section_value.keys())
-
-        # Split each key on '@' to get the base name.
-        has_command = False
-        unknown_keys: list[str] = []
-        for k in keys:
-            base = k.split("@", 1)[0]
-            if base == "command":
-                has_command = True
-            if base not in _known_prefixes:
-                unknown_keys.append(k)
-
-        if not has_command:
-            continue  # No command key — not a command-runner section.
-
-        if unknown_keys:
-            logger.warning(
-                f"[auto-tool] '{section_name}': skipped auto-generation because the section "
-                f"contains unknown keys: {unknown_keys}. "
-                f"A section is auto-generated only when every key (before @filter) is one of "
-                f"{sorted(_known_prefixes)}. Options:\n"
-                f"  • Move shared values to the top-level 'tokens:' block so they are "
-                f"available as {{token}} substitutions in the command.\n"
-                f"  • Define a RepoTool subclass in tools/repo_tools/{section_name}.py "
-                f"for custom behaviour."
-            )
+        has_steps = any(k.split("@", 1)[0] == "steps" for k in section_value)
+        if not has_steps:
             continue
 
         tool = CommandRunnerTool()

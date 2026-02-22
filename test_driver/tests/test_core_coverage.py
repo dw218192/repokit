@@ -312,3 +312,63 @@ class TestIsWindows:
     def test_linux(self, mock_sys):
         from repo_tools.core import is_windows
         assert is_windows() is False
+
+
+# ── run_command env parameter ─────────────────────────────────
+
+
+class TestRunCommandEnv:
+    @patch("repo_tools.core.subprocess.run")
+    def test_env_passed_to_subprocess_run(self, mock_run):
+        from repo_tools.core import run_command
+        custom_env = {"MY_VAR": "hello"}
+        run_command(["echo", "hi"], env=custom_env)
+        call_env = mock_run.call_args[1]["env"]
+        assert call_env["MY_VAR"] == "hello"
+        # Should also contain os.environ entries
+        assert "PATH" in call_env or len(call_env) > 1
+
+    @patch("repo_tools.core.subprocess.Popen")
+    def test_env_passed_to_popen(self, mock_popen, tmp_path):
+        from repo_tools.core import run_command
+        mock_proc = MagicMock()
+        mock_proc.stdout = iter([])
+        mock_proc.returncode = 0
+        mock_popen.return_value = mock_proc
+        custom_env = {"MY_VAR": "world"}
+        run_command(["echo", "hi"], log_file=tmp_path / "log.txt", env=custom_env)
+        call_env = mock_popen.call_args[1]["env"]
+        assert call_env["MY_VAR"] == "world"
+
+    @patch("repo_tools.core.subprocess.run")
+    def test_env_none_no_override(self, mock_run):
+        from repo_tools.core import run_command
+        run_command(["echo", "hi"], env=None)
+        assert mock_run.call_args[1]["env"] is None
+
+
+# ── CommandGroup env parameter ────────────────────────────────
+
+
+class TestCommandGroupEnv:
+    @patch("repo_tools.core.run_command")
+    def test_group_env_forwarded(self, mock_run):
+        from repo_tools.core import CommandGroup
+        with CommandGroup("test", env={"A": "1"}) as g:
+            g.run(["echo", "hi"])
+        assert mock_run.call_args[1]["env"] == {"A": "1"}
+
+    @patch("repo_tools.core.run_command")
+    def test_per_step_env_overrides_group(self, mock_run):
+        from repo_tools.core import CommandGroup
+        with CommandGroup("test", env={"A": "1", "B": "2"}) as g:
+            g.run(["echo", "hi"], env={"B": "override", "C": "3"})
+        merged = mock_run.call_args[1]["env"]
+        assert merged == {"A": "1", "B": "override", "C": "3"}
+
+    @patch("repo_tools.core.run_command")
+    def test_no_env_passes_none(self, mock_run):
+        from repo_tools.core import CommandGroup
+        with CommandGroup("test") as g:
+            g.run(["echo", "hi"])
+        assert mock_run.call_args[1]["env"] is None

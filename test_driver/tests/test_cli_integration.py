@@ -98,7 +98,8 @@ def test_tool_config_merged(make_workspace):
     ws = make_workspace(
         config_yaml="""\
         build:
-            command: "cmake --build {build_dir}"
+            steps:
+                - "cmake --build {build_dir}"
         """
     )
     cli = _cli_for(ws)
@@ -106,16 +107,18 @@ def test_tool_config_merged(make_workspace):
     assert result.exit_code == 0
 
 
-# ── 7. Config section with command auto-generates a tool ────────────
+# ── 7. Config section with steps auto-generates a tool ──────────────
 
 
 def test_auto_generated_tool_appears_in_help(make_workspace):
     ws = make_workspace(
         config_yaml="""\
         clean:
-            command: "rm -rf {build_dir}"
+            steps:
+                - "rm -rf {build_dir}"
         deploy:
-            command: "rsync -av {build_dir}/ server:/app"
+            steps:
+                - "rsync -av {build_dir}/ server:/app"
         """
     )
     cli = _cli_for(ws)
@@ -131,7 +134,8 @@ def test_auto_generated_tool_dry_run(make_workspace, capture_logs):
         tokens:
             build_type: [Debug, Release]
         build:
-            command: "cmake --config {build_type}"
+            steps:
+                - "cmake --config {build_type}"
         """
     )
     cli = _cli_for(ws)
@@ -150,7 +154,8 @@ def test_auto_generated_tool_exposes_dry_run(make_workspace):
     ws = make_workspace(
         config_yaml="""\
         build:
-            command: "cmake --build {build_dir}"
+            steps:
+                - "cmake --build {build_dir}"
         """
     )
     cli = _cli_for(ws)
