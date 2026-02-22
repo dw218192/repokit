@@ -129,7 +129,7 @@ tokens:
     path: true                                         # normalized to forward slashes
 ```
 
-**List-valued tokens** become CLI dimension flags (`--platform`, `--build-type`). Use `@filter` to vary commands by dimension:
+**List-valued tokens** become CLI dimension flags (`--platform`, `--build-type`). Use `@filter` to vary steps by dimension:
 
 ```yaml
 tokens:
@@ -137,8 +137,10 @@ tokens:
   build_type: [Debug, Release]
 
 build:
-  command@windows-x64: "msbuild {build_dir}/project.sln /p:Configuration={build_type}"
-  command@linux-x64: "make -C {build_dir} -j$(nproc)"
+  steps@windows-x64:
+    - "msbuild {build_dir}/project.sln /p:Configuration={build_type}"
+  steps@linux-x64:
+    - "make -C {build_dir} -j$(nproc)"
 ```
 
 Built-in tokens (always available, cannot be overridden):
