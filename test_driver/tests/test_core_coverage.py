@@ -264,6 +264,44 @@ class TestRunCommandShellQuoting:
         assert expected in cmd_str
 
 
+class TestRunCommandCwd:
+    """run_command passes cwd to subprocess."""
+
+    @patch("repo_tools.core.subprocess.run")
+    def test_cwd_passed_to_subprocess_run(self, mock_run, tmp_path):
+        from repo_tools.core import run_command
+        run_command(["echo", "hi"], cwd=tmp_path)
+        assert mock_run.call_args[1]["cwd"] == tmp_path
+
+    @patch("repo_tools.core.subprocess.Popen")
+    def test_cwd_passed_to_popen(self, mock_popen, tmp_path):
+        from repo_tools.core import run_command
+        mock_proc = MagicMock()
+        mock_proc.stdout = iter([])
+        mock_proc.returncode = 0
+        mock_popen.return_value = mock_proc
+        log_file = tmp_path / "log.txt"
+        run_command(["echo", "hi"], log_file=log_file, cwd=tmp_path)
+        assert mock_popen.call_args[1]["cwd"] == tmp_path
+
+
+class TestRunCommandEnvScriptFailLoud:
+    """run_command errors out when env_script doesn't exist."""
+
+    def test_missing_env_script_exits(self, tmp_path):
+        from repo_tools.core import run_command
+        missing = tmp_path / "nonexistent.sh"
+        with pytest.raises(SystemExit):
+            run_command(["echo", "hi"], env_script=missing)
+
+    def test_missing_env_script_auto_suffix(self, tmp_path):
+        """Auto-suffixed env_script that doesn't exist also fails."""
+        from repo_tools.core import run_command
+        missing = tmp_path / "nonexistent"  # no suffix — will try .bat/.sh
+        with pytest.raises(SystemExit):
+            run_command(["echo", "hi"], env_script=missing)
+
+
 class TestIsWindows:
     @patch("repo_tools.core.platform.system", return_value="Windows")
     def test_windows(self, mock_sys):

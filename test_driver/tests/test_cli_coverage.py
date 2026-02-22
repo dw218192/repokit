@@ -112,12 +112,12 @@ class TestAutoRegisterConfigTools:
         result = _auto_register_config_tools(config, set())
         assert result == []
 
-    def test_non_command_key_warns_and_skips(self, capture_logs):
-        """A section with both command and non-command keys emits a warning and is skipped."""
+    def test_unknown_key_warns_and_skips(self, capture_logs):
+        """A section with command plus unknown keys emits a warning and is skipped."""
         config = {"test": {"command": "pytest", "verbose_flag": "-v"}}
         result = _auto_register_config_tools(config, set())
         assert result == []
-        assert "non-command keys" in capture_logs.getvalue()
+        assert "unknown keys" in capture_logs.getvalue()
         assert "verbose_flag" in capture_logs.getvalue()
 
     def test_registered_name_skipped(self):
@@ -136,6 +136,44 @@ class TestAutoRegisterConfigTools:
         result = _auto_register_config_tools(config, set())
         names = {t.name for t in result}
         assert names == {"build", "test", "deploy"}
+
+    def test_env_script_key_accepted(self):
+        """Sections with env_script alongside command are eligible."""
+        config = {"build": {"command": "cmake --build .", "env_script": "tools/env"}}
+        result = _auto_register_config_tools(config, set())
+        assert len(result) == 1
+        assert result[0].name == "build"
+
+    def test_cwd_key_accepted(self):
+        """Sections with cwd alongside command are eligible."""
+        config = {"build": {"command": "make", "cwd": "{workspace_root}/src"}}
+        result = _auto_register_config_tools(config, set())
+        assert len(result) == 1
+
+    def test_env_script_and_cwd_filter_variants(self):
+        """@filter variants of env_script and cwd are recognized."""
+        config = {
+            "build": {
+                "command": "make",
+                "env_script@windows-x64": "setup.bat",
+                "env_script@linux-x64": "setup.sh",
+                "cwd@windows-x64": "C:/build",
+            }
+        }
+        result = _auto_register_config_tools(config, set())
+        assert len(result) == 1
+
+    def test_env_script_alone_not_eligible(self):
+        """A section with only env_script (no command) is not eligible."""
+        config = {"setup": {"env_script": "tools/env.sh"}}
+        result = _auto_register_config_tools(config, set())
+        assert result == []
+
+    def test_requires_command_key(self):
+        """A section with cwd but no command is not eligible."""
+        config = {"thing": {"cwd": "/some/dir", "env_script": "tools/env"}}
+        result = _auto_register_config_tools(config, set())
+        assert result == []
 
 
 class TestCLICallbackPaths:

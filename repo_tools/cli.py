@@ -88,15 +88,14 @@ def _auto_register_config_tools(
 ) -> list[RepoTool]:
     """Create CommandRunnerTools for eligible config sections.
 
-    A section is eligible if and only if **every** key in it is ``command``
-    or ``command@<filter>``.  Sections with any other keys are skipped —
-    extra keys signal that richer behaviour is needed; define a ``RepoTool``
-    subclass instead, or move shared values into the top-level ``tokens:``
-    block.
+    A section is eligible when **every** key (ignoring ``@filter`` suffixes)
+    belongs to the known runner key set: ``command``, ``env_script``, ``cwd``.
+    At least one ``command`` or ``command@*`` key must be present.
     """
     from .command_runner import CommandRunnerTool
 
     _skip_sections = {"tokens"}
+    _known_prefixes = {"command", "env_script", "cwd"}
     auto_tools: list[RepoTool] = []
 
     for section_name, section_value in config.items():
@@ -111,18 +110,26 @@ def _auto_register_config_tools(
             continue
 
         keys = list(section_value.keys())
-        command_keys = [k for k in keys if k == "command" or k.startswith("command@")]
-        non_command_keys = [k for k in keys if k not in command_keys]
 
-        if not command_keys:
+        # Split each key on '@' to get the base name.
+        has_command = False
+        unknown_keys: list[str] = []
+        for k in keys:
+            base = k.split("@", 1)[0]
+            if base == "command":
+                has_command = True
+            if base not in _known_prefixes:
+                unknown_keys.append(k)
+
+        if not has_command:
             continue  # No command key — not a command-runner section.
 
-        if non_command_keys:
+        if unknown_keys:
             logger.warning(
                 f"[auto-tool] '{section_name}': skipped auto-generation because the section "
-                f"contains non-command keys: {non_command_keys}. "
-                f"A section is auto-generated only when every key is 'command' or "
-                f"'command@<filter>'. Options:\n"
+                f"contains unknown keys: {unknown_keys}. "
+                f"A section is auto-generated only when every key (before @filter) is one of "
+                f"{sorted(_known_prefixes)}. Options:\n"
                 f"  • Move shared values to the top-level 'tokens:' block so they are "
                 f"available as {{token}} substitutions in the command.\n"
                 f"  • Define a RepoTool subclass in tools/repo_tools/{section_name}.py "

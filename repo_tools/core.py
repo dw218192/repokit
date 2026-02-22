@@ -558,11 +558,12 @@ def run_command(
     cmd: list[str],
     log_file: Path | None = None,
     env_script: Path | None = None,
+    cwd: Path | None = None,
 ) -> None:
     """Run a command and optionally tee output to a log file.
 
-    If *env_script* is provided and exists, the command is executed
-    inside a shell that sources the script first.
+    If *env_script* is provided, the command is executed inside a shell
+    that sources the script first.  Errors out when the script doesn't exist.
     """
     use_shell = False
     run_cmd: list[str] | str = cmd
@@ -570,14 +571,16 @@ def run_command(
         script = env_script
         if not script.suffix:
             script = script.with_suffix(".bat" if is_windows() else ".sh")
-        if script.exists():
-            if is_windows():
-                cmd_str = subprocess.list2cmdline(cmd)
-                run_cmd = f'call "{script}" >nul 2>&1 && {cmd_str}'
-            else:
-                cmd_str = shlex.join(cmd)
-                run_cmd = f'source "{script}" >/dev/null 2>&1 && {cmd_str}'
-            use_shell = True
+        if not script.exists():
+            logger.error(f"env_script not found: {script}")
+            sys.exit(1)
+        if is_windows():
+            cmd_str = subprocess.list2cmdline(cmd)
+            run_cmd = f'call "{script}" >nul 2>&1 && {cmd_str}'
+        else:
+            cmd_str = shlex.join(cmd)
+            run_cmd = f'source "{script}" >/dev/null 2>&1 && {cmd_str}'
+        use_shell = True
 
     if log_file:
         log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -591,6 +594,7 @@ def run_command(
                 encoding="utf-8",
                 errors="replace",
                 bufsize=1,
+                cwd=cwd,
             )
             for line in process.stdout:
                 print_subprocess_line(line)
@@ -600,7 +604,7 @@ def run_command(
                 sys.exit(process.returncode)
     else:
         try:
-            subprocess.run(run_cmd, shell=use_shell, check=True)
+            subprocess.run(run_cmd, shell=use_shell, check=True, cwd=cwd)
         except subprocess.CalledProcessError as e:
             sys.exit(e.returncode)
 
@@ -673,10 +677,12 @@ class CommandGroup:
         label: str,
         log_file: Path | None = None,
         env_script: Path | None = None,
+        cwd: Path | None = None,
     ) -> None:
         self.label = label
         self.log_file = log_file
         self.env_script = env_script
+        self.cwd = cwd
         self._commands_run = 0
         self._failed = False
 
@@ -702,15 +708,17 @@ class CommandGroup:
         cmd: list[str],
         log_file: Path | None = None,
         env_script: Path | None = None,
+        cwd: Path | None = None,
     ) -> None:
         """Run a command within this group.
 
-        Per-call *log_file* and *env_script* override the group defaults.
+        Per-call *log_file*, *env_script*, and *cwd* override the group defaults.
         """
         lf = log_file or self.log_file
         es = env_script or self.env_script
+        cw = cwd or self.cwd
         try:
-            run_command(cmd, log_file=lf, env_script=es)
+            run_command(cmd, log_file=lf, env_script=es, cwd=cw)
             self._commands_run += 1
         except SystemExit:
             self._failed = True

@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import shlex
+from pathlib import Path
 from typing import Any
 
 import click
 
-from .core import RepoTool, TokenFormatter, ToolContext, logger, run_command
+from .core import CommandGroup, RepoTool, TokenFormatter, ToolContext, logger, run_command
 
 
 class CommandRunnerTool(RepoTool):
@@ -37,17 +38,40 @@ class CommandRunnerTool(RepoTool):
 
         # Merge remaining args as extra tokens (config values, custom fields).
         # Skip tool-framework keys and None values.
-        _skip = {"command", "dry_run"}
+        _skip = {"command", "dry_run", "env_script", "cwd"}
         for k, v in args.items():
             if k not in _skip and v is not None:
                 tokens[k] = str(v)
 
         formatter = TokenFormatter(tokens)
-        resolved = formatter.resolve(command)
 
-        if args.get("dry_run"):
-            logger.info(f"Would run: {resolved}")
-            return
+        # Resolve env_script and cwd through token expansion.
+        env_script: Path | None = None
+        cwd: Path | None = None
+        raw_env = args.get("env_script")
+        if raw_env is not None:
+            env_script = Path(formatter.resolve(str(raw_env)))
+        raw_cwd = args.get("cwd")
+        if raw_cwd is not None:
+            cwd = Path(formatter.resolve(str(raw_cwd)))
 
-        logger.info(f"Running: {resolved}")
-        run_command(shlex.split(resolved))
+        if isinstance(command, list):
+            resolved_steps = [formatter.resolve(step) for step in command]
+
+            if args.get("dry_run"):
+                for i, step in enumerate(resolved_steps, 1):
+                    logger.info(f"Would run [{i}/{len(resolved_steps)}]: {step}")
+                return
+
+            with CommandGroup(self.name, env_script=env_script, cwd=cwd) as group:
+                for step in resolved_steps:
+                    group.run(shlex.split(step))
+        else:
+            resolved = formatter.resolve(command)
+
+            if args.get("dry_run"):
+                logger.info(f"Would run: {resolved}")
+                return
+
+            logger.info(f"Running: {resolved}")
+            run_command(shlex.split(resolved), env_script=env_script, cwd=cwd)
