@@ -77,7 +77,7 @@ class TestBuildCommand:
             rules_path=rules,
             project_root=tmp_path,
         )
-        hooks_path = tmp_path / "_agent" / "plugin" / "hooks" / "hooks.json"
+        hooks_path = tmp_path / "_agent" / "plugin-worker" / "hooks" / "hooks.json"
         data = json.loads(hooks_path.read_text())
         hook_cmd = data["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
         assert "--role" in hook_cmd
@@ -110,7 +110,7 @@ class TestBuildCommand:
             project_root=tmp_path,
         )
         data = json.loads(
-            (tmp_path / "_agent" / "plugin" / "hooks" / "hooks.json").read_text()
+            (tmp_path / "_agent" / "plugin-worker" / "hooks" / "hooks.json").read_text()
         )
         assert "Stop" not in data["hooks"]
 
@@ -128,6 +128,22 @@ class TestBuildCommand:
         idx = cmd.index("--plugin-dir")
         plugin_path = Path(cmd[idx + 1])
         assert plugin_path == tmp_path / "_agent" / "plugin"
+
+    def test_plugin_dir_role_specific(self, tmp_path):
+        """With role, plugin dir is _agent/plugin-{role}/ and --plugin-dir points there."""
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        claude = Claude()
+        cmd = claude.build_command(
+            role="reviewer",
+            rules_path=rules,
+            project_root=tmp_path,
+        )
+        expected = tmp_path / "_agent" / "plugin-reviewer"
+        assert expected.exists()
+        idx = cmd.index("--plugin-dir")
+        assert Path(cmd[idx + 1]) == expected
 
     def test_plugin_manifest_written(self, tmp_path):
         """Plugin manifest .claude-plugin/plugin.json is written."""
@@ -322,7 +338,7 @@ class TestBuildCommand:
             project_root=tmp_path,
         )
         mcp = json.loads(
-            (tmp_path / "_agent" / "plugin" / ".mcp.json").read_text()
+            (tmp_path / "_agent" / "plugin-worker" / ".mcp.json").read_text()
         )
 
         ts_args = mcp["mcpServers"]["tickets"]["args"]

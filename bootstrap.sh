@@ -82,13 +82,7 @@ chmod +x "$SHIM" 2>/dev/null || true
 # ── .gitignore ────────────────────────────────────────────────────────
 
 GITIGNORE="$ROOT/.gitignore"
-ENTRIES=("_tools/" "repo" "repo.cmd" "_agent/")
-# Strip CR before matching so CRLF files don't cause false negatives
-for entry in "${ENTRIES[@]}"; do
-    if ! tr -d '\r' < "$GITIGNORE" 2>/dev/null | grep -qxF "$entry"; then
-        echo "$entry" >> "$GITIGNORE"
-    fi
-done
+PYTHONPATH="$FRAMEWORK_DIR" "$PY" -m repo_tools.gitignore "$GITIGNORE"
 
 echo "OK: $VENV"
 echo "Run ./repo --help to get started."

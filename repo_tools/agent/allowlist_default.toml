@@ -16,6 +16,11 @@ roles = ["worker", "reviewer"]
 reason = "subagents cannot modify _agent/ — relay updates to the orchestrator via the send_message MCP tool"
 
 [[deny]]
+name = "plugin_dir"
+patterns = ["_agent[/\\\\]plugin"]
+reason = "plugin directories are managed by the framework — do not modify directly"
+
+[[deny]]
 name = "destructive"
 commands = ["rm", "rmdir", "del"]
 dir = "!project_root"
