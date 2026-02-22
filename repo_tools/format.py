@@ -187,10 +187,23 @@ class FormatTool(RepoTool):
 
     def _run_python_formatter(self, root: Path, verify: bool, tool_name: str) -> None:
         exe = find_venv_executable(tool_name)
-        cmd = [exe, "check", str(root)] if verify else [exe, "format", str(root)]
+        if not shutil.which(exe):
+            logger.error(
+                f"{tool_name} not found at '{exe}'. "
+                "Install it or add it to PATH."
+            )
+            sys.exit(1)
+
+        if verify:
+            cmd = [exe, "format", "--check", str(root)]
+        else:
+            cmd = [exe, "format", str(root)]
+
         try:
             subprocess.run(cmd, check=True)
         except subprocess.CalledProcessError:
             if verify:
                 logger.error("Python files are not properly formatted")
-                sys.exit(1)
+            else:
+                logger.error("Python formatting failed")
+            sys.exit(1)

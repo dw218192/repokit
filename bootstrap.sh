@@ -75,9 +75,20 @@ SHIM="$ROOT/repo"
 cat > "$SHIM" <<SHIMEOF
 #!/bin/bash
 export PATH="$VENV_BIN:\$PATH"
-PYTHONPATH="$FRAMEWORK_DIR\${PYTHONPATH:+:\$PYTHONPATH}" exec "$PY" -m repo_tools.cli --workspace-root "$ROOT" "\$@"
+PYTHONPATH="$FRAMEWORK_DIR" exec "$PY" -m repo_tools.cli --workspace-root "$ROOT" "\$@"
 SHIMEOF
 chmod +x "$SHIM" 2>/dev/null || true
+
+# ── .gitignore ────────────────────────────────────────────────────────
+
+GITIGNORE="$ROOT/.gitignore"
+ENTRIES=("_tools/" "repo" "repo.cmd" "_agent/")
+# Strip CR before matching so CRLF files don't cause false negatives
+for entry in "${ENTRIES[@]}"; do
+    if ! tr -d '\r' < "$GITIGNORE" 2>/dev/null | grep -qxF "$entry"; then
+        echo "$entry" >> "$GITIGNORE"
+    fi
+done
 
 echo "OK: $VENV"
 echo "Run ./repo --help to get started."

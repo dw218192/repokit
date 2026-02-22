@@ -1,0 +1,26 @@
+## Repo Tooling Framework
+
+This repository uses the **repokit** framework — a unified `{repo_cmd}` CLI
+configured per-project via `config.yaml`. All building, testing, formatting,
+and repository operations should go through it rather than being invoked
+directly.
+
+Run `{repo_cmd} --help` to discover available commands. Common operations:
+
+- `{repo_cmd} build` — build the project
+- `{repo_cmd} test` — run the test suite
+- `{repo_cmd} format` — format source code
+
+Commands resolve platform-specific variants, paths, and tokens automatically.
+See `{framework_root}/README.md` for full details on configuration, token
+expansion, and extending the framework with custom tools.
+
+## General Coding Principles
+
+- **Fail loud.** No fallback mechanisms and no error swallowing — they hide real failures. Prefer explicit errors, invariant assertions over silent recovery.
+- **Less is more.** Rewrite existing components over adding new ones. Flag obsolete files for removal.
+- **Desctructive Updates by default.** Unless explicitly requested, don't preserve legacy behavior or add compatibility shims just to backward compatibility.
+- **Test edge cases, not plumbing.** Cover meaningful behavior; skip tests that just assert assignment or trivial argument forwarding.
+- **Tests are code too.** Keep them readable and maintainable — they outlast the session that wrote them.
+- **No session artifacts in code.** Avoid comments like "Removed X" or "no longer uses Y" — future readers have no context for X.
+- **Think before typing.** Use extended thinking generously; reasoning is cheaper than debugging.

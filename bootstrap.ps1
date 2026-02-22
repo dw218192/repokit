@@ -56,7 +56,7 @@ $CmdShim = "$Root\repo.cmd"
 $CmdContent = @"
 @echo off
 set "PATH=$VenvBin;%PATH%"
-set "PYTHONPATH=$FrameworkDir;%PYTHONPATH%"
+set "PYTHONPATH=$FrameworkDir"
 "$Py" -m repo_tools.cli --workspace-root "$Root" %*
 "@
 [System.IO.File]::WriteAllText($CmdShim, $CmdContent.Replace("`r`n", "`r`n"))
@@ -71,9 +71,20 @@ $BashShim = "$Root\repo"
 $BashContent = @"
 #!/bin/bash
 export PATH="${VenvBinBash}:`$PATH"
-PYTHONPATH="$FrameworkDirBash`${PYTHONPATH:+:`$PYTHONPATH}" exec "$PyBash" -m repo_tools.cli --workspace-root "$RootBash" "`$@"
+PYTHONPATH="$FrameworkDirBash" exec "$PyBash" -m repo_tools.cli --workspace-root "$RootBash" "`$@"
 "@
 [System.IO.File]::WriteAllText($BashShim, $BashContent.Replace("`r`n", "`n"))
+
+# ── .gitignore ────────────────────────────────────────────────────────
+
+$Gitignore = "$Root\.gitignore"
+$Entries = @("_tools/", "repo", "repo.cmd", "_agent/")
+$Existing = if (Test-Path $Gitignore) { Get-Content $Gitignore } else { @() }
+foreach ($entry in $Entries) {
+    if ($entry -notin $Existing) {
+        Add-Content -Path $Gitignore -Value $entry
+    }
+}
 
 Write-Host "OK: $Venv"
 Write-Host "Run .\repo --help to get started."

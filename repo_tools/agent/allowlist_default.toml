@@ -1,0 +1,106 @@
+# Default agent command allowlist for repokit-managed repositories.
+# Override with agent.allowlist in config.yaml.
+#
+# Rules support two matching fields (at least one required):
+#   commands = ["rm", "git"]   — exact command names (auto-wrapped as ^name\b)
+#   patterns = ['git\s+push']  — raw regex for complex matches
+
+default_reason = "try another approach"
+
+# ── Deny rules ───────────────────────────────────────────────────────
+
+[[deny]]
+name = "agent_dir"
+patterns = ["\\b_agent[/\\\\]"]
+roles = ["worker", "reviewer"]
+reason = "subagents cannot modify _agent/ — relay updates to the orchestrator via the send_message MCP tool"
+
+[[deny]]
+name = "destructive"
+commands = ["rm", "rmdir", "del"]
+dir = "!project_root"
+reason = "destructive file operations are only allowed within the project tree"
+
+[[deny]]
+name = "admin"
+commands = ["sudo", "su", "runas"]
+reason = "elevated privilege commands are not permitted"
+
+[[deny]]
+name = "git_rewrite"
+patterns = [
+    'git\s+push\s.*--force',
+    'git\s+push\s+-f\b',
+    'git\s+reset\s+--hard',
+    'git\s+rebase',
+    'git\s+commit\s.*--amend',
+    'git\s+filter-branch',
+    'git\s+reflog\s+expire',
+    'git\s+reflog\s+delete',
+]
+reason = "destructive git history rewrites are not permitted — commit and push normally"
+
+[[deny]]
+name = "subshell"
+commands = ["bash", "sh"]
+reason = "subshells bypass the command allowlist — run commands directly instead"
+
+[[deny]]
+name = "network_cli"
+commands = ["curl", "wget"]
+reason = "use the WebFetch or WebSearch tools instead of CLI network commands"
+
+[[deny]]
+name = "env_dump"
+commands = ["env", "printenv"]
+reason = "environment variables may contain secrets — use specific tools to inspect configuration"
+
+[[deny]]
+name = "sleep"
+commands = ["sleep"]
+reason = "polling loops waste time — find another approach or ask the orchestrator"
+
+# ── Allow rules ──────────────────────────────────────────────────────
+
+[[allow]]
+name = "repo-tools"
+patterns = ['^\./repo\b']
+dir = "project_root"
+
+[[allow]]
+name = "file_inspection"
+commands = ["cat", "head", "tail", "less", "wc", "file", "type"]
+
+[[allow]]
+name = "navigation"
+commands = ["cd", "ls", "dir", "tree", "find", "fd"]
+
+[[allow]]
+name = "search"
+commands = ["grep", "rg", "findstr", "ag"]
+
+[[allow]]
+name = "shell"
+commands = ["echo", "printf", "test", "true", "false", "expr"]
+patterns = ['^\[']
+
+[[allow]]
+name = "text_processing"
+commands = ["xargs", "sort", "uniq", "cut", "awk", "sed", "tr", "tee"]
+
+[[allow]]
+name = "system_info"
+commands = ["which", "where", "pwd", "whoami", "date", "uname"]
+
+[[allow]]
+name = "version_control"
+commands = ["git", "gh"]
+
+[[allow]]
+name = "destructive_in_project"
+commands = ["rm", "rmdir", "del"]
+dir = "project_root"
+
+[[allow]]
+name = "control_flow"
+commands = ["for", "if", "while", "case"]

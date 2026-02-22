@@ -5,16 +5,19 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import functools
+import glob
 import logging
 import os
 import platform
 import re
+import shlex
 import shutil
 import string
 import subprocess
 import sys
 import time
 from collections.abc import Generator
+from graphlib import CycleError, TopologicalSorter
 from pathlib import Path
 from typing import Any
 
@@ -67,7 +70,6 @@ class TokenFormatter(string.Formatter):
         self._tokens = tokens
 
     def resolve(self, template: str) -> str:
-        seen: set[str] = set()
         result = template
         for _ in range(self.MAX_DEPTH):
             try:
@@ -77,17 +79,17 @@ class TokenFormatter(string.Formatter):
                 raise KeyError(f"Missing token: {missing}") from exc
             if expanded == result:
                 return expanded
-            key = expanded
-            if key in seen:
-                raise ValueError(f"Circular token reference: {key}")
-            seen.add(key)
             result = expanded
-        raise ValueError(f"Token expansion exceeded {self.MAX_DEPTH} iterations")
+        remaining = _extract_references(result)
+        raise ValueError(
+            f"Token expansion exceeded {self.MAX_DEPTH} iterations"
+            f" (unresolved: {', '.join(sorted(remaining))})"
+        )
 
 
-def _fwd(p: str) -> str:
+def posix_path(p: str) -> str:
     """Normalize path to forward slashes (safe for shlex.split on Windows)."""
-    return Path(p).as_posix()
+    return p.replace("\\", "/")
 
 
 # Built-in tokens resolved from the runtime environment.
@@ -95,13 +97,71 @@ def _builtin_tokens() -> dict[str, str]:
     system = platform.system()
     is_win = system == "Windows"
     is_mac = system == "Darwin"
+    # Framework root: parent of the repo_tools package (the submodule dir).
+    framework_root = posix_path(str(Path(__file__).resolve().parent.parent))
     return {
         "exe_ext": ".exe" if is_win else "",
         "shell_ext": ".cmd" if is_win else ".sh",
         "lib_ext": ".dll" if is_win else (".dylib" if is_mac else ".so"),
         "path_sep": ";" if is_win else ":",
-        "repo": f'"{_fwd(sys.executable)}" -m repo_tools.cli --workspace-root "{{workspace_root}}"',
+        "repo": f'"{posix_path(sys.executable)}" -m repo_tools.cli --workspace-root "{{workspace_root}}"',
+        "framework_root": framework_root,
     }
+
+
+# Tokens set by the framework that config.yaml must not override.
+_RESERVED_TOKENS = {"workspace_root", "repo", "framework_root"}
+
+
+def _extract_references(template: str) -> set[str]:
+    """Return the set of token names referenced by ``{name}`` placeholders.
+
+    Uses ``string.Formatter().parse()`` which correctly ignores escaped
+    braces (``{{``/``}}``), returning ``field_name=None`` for those.
+    """
+    refs: set[str] = set()
+    for _, field_name, _, _ in string.Formatter().parse(template):
+        if field_name is not None:
+            refs.add(field_name)
+    return refs
+
+
+def _validate_token_graph(tokens: dict[str, str]) -> None:
+    """Validate the token dependency graph before expansion.
+
+    Raises:
+        ValueError: on self-references or cycles (with the cycle path).
+        KeyError: when a token references an undefined token.
+    """
+    # Build dependency graph: token -> set of tokens it depends on
+    graph: dict[str, set[str]] = {}
+    for name, value in tokens.items():
+        refs = _extract_references(str(value))
+        graph[name] = refs
+
+        # Self-reference check (clear message before TopologicalSorter)
+        if name in refs:
+            raise ValueError(f"Token '{name}' references itself")
+
+    # Missing reference check
+    all_names = set(tokens)
+    for name, refs in graph.items():
+        missing = refs - all_names
+        if missing:
+            raise KeyError(
+                f"Token '{name}' references undefined token(s): "
+                + ", ".join(sorted(missing))
+            )
+
+    # Cycle detection via topological sort
+    ts = TopologicalSorter(graph)
+    try:
+        ts.prepare()
+    except CycleError as exc:
+        # exc.args[1] is the cycle as a tuple, e.g. ('a', 'b', 'c', 'a')
+        cycle = exc.args[1] if len(exc.args) > 1 else ()
+        path = " -> ".join(str(n) for n in cycle)
+        raise ValueError(f"Circular token reference: {path}") from exc
 
 
 def resolve_tokens(
@@ -112,9 +172,9 @@ def resolve_tokens(
     """Build the full token dictionary.
 
     Merge order (later wins):
-      1. Built-in tokens (exe_ext, shell_ext, etc.)
+      1. Built-in tokens (exe_ext, shell_ext, repo, etc.)
       2. Variable tokens from config
-      3. Computed paths (workspace_root, build_root, etc.)
+      3. workspace_root path token
       4. Dimension values (platform, build_type, etc.)
     """
     tokens: dict[str, str] = _builtin_tokens()
@@ -123,22 +183,25 @@ def resolve_tokens(
     for key, value in config.get("tokens", {}).items():
         if isinstance(value, list):
             continue  # dimension tokens handled elsewhere
-        tokens[key] = str(value)
+        if key in _RESERVED_TOKENS:
+            logger.warning(f"'{key}' is a reserved token and cannot be overridden in config.")
+            continue
+        if isinstance(value, dict):
+            raw = str(value.get("value", ""))
+            if value.get("path"):
+                raw = posix_path(raw)
+            tokens[key] = raw
+        else:
+            tokens[key] = str(value)
 
-    # Core path tokens
-    build_root = config.get("tokens", {}).get("build_root") or \
-                 _get_config_value(config, "repo_paths.build_root",
-                 _get_config_value(config, "paths.build_root", "_build"))
-    logs_root = config.get("tokens", {}).get("logs_root") or \
-                _get_config_value(config, "repo_paths.logs_root",
-                _get_config_value(config, "paths.logs_root", "_logs"))
-
-    tokens["workspace_root"] = _fwd(workspace_root)
-    tokens["build_root"] = _fwd(str(Path(workspace_root) / build_root))
-    tokens["logs_root"] = _fwd(str(Path(workspace_root) / logs_root))
+    # workspace_root is always set from the runtime environment
+    tokens["workspace_root"] = posix_path(workspace_root)
 
     # Dimension values override
     tokens.update(dimension_values)
+
+    # Validate graph before expansion
+    _validate_token_graph(tokens)
 
     # Resolve any cross-references in variable tokens
     formatter = TokenFormatter(tokens)
@@ -147,15 +210,11 @@ def resolve_tokens(
         if "{" in str(value):
             try:
                 resolved[key] = formatter.resolve(str(value))
-            except (KeyError, ValueError):
+            except (KeyError, ValueError) as exc:
+                logger.warning("Token '%s' could not be resolved: %s", key, exc)
                 resolved[key] = str(value)
         else:
             resolved[key] = str(value)
-
-    # Computed compound tokens
-    resolved["build_dir"] = _fwd(str(
-        Path(resolved["build_root"]) / resolved.get("platform", "default") / resolved.get("build_type", "Debug")
-    ))
 
     return resolved
 
@@ -174,16 +233,6 @@ def load_config(workspace_root: str) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise TypeError("config.yaml must contain a top-level mapping.")
     return data
-
-
-def _get_config_value(config: dict, key_path: str, default: str = "") -> str:
-    """Nested dict lookup by dot-separated key path."""
-    current: Any = config
-    for key in key_path.split("."):
-        if not isinstance(current, dict) or key not in current:
-            return default
-        current = current[key]
-    return str(current) if current is not None else default
 
 
 
@@ -330,6 +379,10 @@ class RepoTool:
         """Return default args dict before config/CLI merge."""
         return {}
 
+    def create_click_command(self) -> click.BaseCommand | None:
+        """Override to provide a custom Click group/command. Returns None by default."""
+        return None
+
     def execute(self, ctx: ToolContext, args: dict[str, Any]) -> None:
         """Execute the tool with context and tool-specific args."""
         raise NotImplementedError
@@ -404,7 +457,7 @@ def detect_platform_identifier(
             arch_match = re.search(r"^arch=(\w+)", profile_content, re.MULTILINE)
             if os_match and arch_match:
                 return _map_platform_identifier(os_match.group(1), arch_match.group(1))
-        except Exception:
+        except (OSError, UnicodeDecodeError):
             pass
 
     system = platform.system()
@@ -505,11 +558,13 @@ def run_command(
     cmd: list[str],
     log_file: Path | None = None,
     env_script: Path | None = None,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
 ) -> None:
     """Run a command and optionally tee output to a log file.
 
-    If *env_script* is provided and exists, the command is executed
-    inside a shell that sources the script first.
+    If *env_script* is provided, the command is executed inside a shell
+    that sources the script first.  Errors out when the script doesn't exist.
     """
     use_shell = False
     run_cmd: list[str] | str = cmd
@@ -517,13 +572,18 @@ def run_command(
         script = env_script
         if not script.suffix:
             script = script.with_suffix(".bat" if is_windows() else ".sh")
-        if script.exists():
+        if not script.exists():
+            logger.error(f"env_script not found: {script}")
+            sys.exit(1)
+        if is_windows():
             cmd_str = subprocess.list2cmdline(cmd)
-            if is_windows():
-                run_cmd = f'call "{script}" >nul 2>&1 && {cmd_str}'
-            else:
-                run_cmd = f'source "{script}" >/dev/null 2>&1 && {cmd_str}'
-            use_shell = True
+            run_cmd = f'call "{script}" >nul 2>&1 && {cmd_str}'
+        else:
+            cmd_str = shlex.join(cmd)
+            run_cmd = f'source "{script}" >/dev/null 2>&1 && {cmd_str}'
+        use_shell = True
+
+    proc_env = {**os.environ, **env} if env else None
 
     if log_file:
         log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -537,6 +597,8 @@ def run_command(
                 encoding="utf-8",
                 errors="replace",
                 bufsize=1,
+                cwd=cwd,
+                env=proc_env,
             )
             for line in process.stdout:
                 print_subprocess_line(line)
@@ -546,7 +608,7 @@ def run_command(
                 sys.exit(process.returncode)
     else:
         try:
-            subprocess.run(run_cmd, shell=use_shell, check=True)
+            subprocess.run(run_cmd, shell=use_shell, check=True, cwd=cwd, env=proc_env)
         except subprocess.CalledProcessError as e:
             sys.exit(e.returncode)
 
@@ -578,6 +640,98 @@ def resolve_path(root: Path, template: str, tokens: dict[str, str]) -> Path:
     if not path.is_absolute():
         path = root / path
     return path
+
+
+# ── Path Utilities ───────────────────────────────────────────────────
+
+
+def glob_paths(pattern: Path | str) -> list[Path]:
+    """Expand a glob pattern to a sorted list of matching file paths.
+
+    Returns a single-element list for non-glob paths.
+    """
+    pattern_text = str(pattern)
+    if any(char in pattern_text for char in ("*", "?", "[")):
+        return sorted(Path(match) for match in glob.glob(pattern_text, recursive=True))
+    return [Path(pattern_text)]
+
+
+# ── Command Group ────────────────────────────────────────────────────
+
+
+class CommandGroup:
+    """A labeled unit of work that runs commands and reports results.
+
+    Usage::
+
+        with CommandGroup("Building") as g:
+            g.run(["cmake", "--build", "build"])
+            g.run(["cmake", "--install", "build"])
+
+    Features:
+    - Labels each phase with a clear header
+    - Tracks pass/fail per group
+    - Dimmed subprocess output, summary on completion
+    - Optional per-group log file
+    - CI fold markers (``::group::``) in GitHub Actions
+    """
+
+    def __init__(
+        self,
+        label: str,
+        log_file: Path | None = None,
+        env_script: Path | None = None,
+        cwd: Path | None = None,
+        env: dict[str, str] | None = None,
+    ) -> None:
+        self.label = label
+        self.log_file = log_file
+        self.env_script = env_script
+        self.cwd = cwd
+        self.env = env
+        self._commands_run = 0
+        self._failed = False
+
+    def __enter__(self) -> CommandGroup:
+        if _is_ci():
+            print(f"::group::{self.label}", flush=True)
+        else:
+            logger.info(f"── {self.label} ──")
+        return self
+
+    def __exit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any) -> None:
+        if _is_ci():
+            print("::endgroup::", flush=True)
+        if exc_type is not None:
+            return  # let the exception propagate
+        if self._failed:
+            logger.error(f"  ✗ {self.label} failed")
+        else:
+            logger.info(f"  ✓ {self.label} ({self._commands_run} command(s))")
+
+    def run(
+        self,
+        cmd: list[str],
+        log_file: Path | None = None,
+        env_script: Path | None = None,
+        cwd: Path | None = None,
+        env: dict[str, str] | None = None,
+    ) -> None:
+        """Run a command within this group.
+
+        Per-call *log_file*, *env_script*, *cwd*, and *env* override the
+        group defaults.  Per-call *env* is merged on top of group-level env.
+        """
+        lf = log_file or self.log_file
+        es = env_script or self.env_script
+        cw = cwd or self.cwd
+        merged_env = {**(self.env or {}), **(env or {})} or None
+        try:
+            run_command(cmd, log_file=lf, env_script=es, cwd=cw, env=merged_env)
+            self._commands_run += 1
+        except SystemExit:
+            self._failed = True
+            raise
 
 
 # ── Normalization Helpers ────────────────────────────────────────────

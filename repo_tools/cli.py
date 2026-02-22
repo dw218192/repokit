@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import os
 import pkgutil
 import sys
 from pathlib import Path
@@ -81,6 +82,43 @@ def _resolve_tools(framework_tools: list[RepoTool], project_tools: list[RepoTool
     return sorted(by_name.values(), key=lambda t: t.name)
 
 
+def _auto_register_config_tools(
+    config: dict[str, Any],
+    registered_names: set[str],
+) -> list[RepoTool]:
+    """Create CommandRunnerTools for eligible config sections.
+
+    A section is eligible when it contains a ``steps`` or ``steps@*`` key.
+    """
+    from .command_runner import CommandRunnerTool
+
+    _skip_sections = {"tokens"}
+    auto_tools: list[RepoTool] = []
+
+    for section_name, section_value in config.items():
+        if section_name in _skip_sections:
+            continue
+        if section_name in registered_names:
+            logger.debug(
+                f"[auto-tool] '{section_name}': skipped — a RepoTool subclass is already registered."
+            )
+            continue
+        if not isinstance(section_value, dict):
+            continue
+
+        has_steps = any(k.split("@", 1)[0] == "steps" for k in section_value)
+        if not has_steps:
+            continue
+
+        tool = CommandRunnerTool()
+        tool.name = section_name  # type: ignore[assignment]
+        tool.help = f"Run {section_name} (from config.yaml)"
+        auto_tools.append(tool)
+        logger.debug(f"[auto-tool] '{section_name}': registered from config.yaml.")
+
+    return auto_tools
+
+
 # ── Dimension Tokens → Click Options ────────────────────────────────
 
 
@@ -105,6 +143,22 @@ def _auto_detect_dimension(name: str) -> str | None:
 # ── Click Command Builder ────────────────────────────────────────────
 
 
+def _build_tool_context(ctx_obj: dict[str, Any], tool_name: str) -> ToolContext:
+    """Build a ToolContext from the click context obj dict."""
+    config = ctx_obj["config"]
+    tool_config = config.get(tool_name, {})
+    if not isinstance(tool_config, dict):
+        tool_config = {}
+    return ToolContext(
+        workspace_root=Path(ctx_obj["workspace_root"]),
+        tokens=ctx_obj["tokens"],
+        config=config,
+        tool_config=tool_config,
+        dimensions=ctx_obj["dimensions"],
+        passthrough_args=[],
+    )
+
+
 def _make_tool_command(
     tool: RepoTool,
     dimensions: dict[str, list[str]],
@@ -113,25 +167,19 @@ def _make_tool_command(
 
     @click.pass_context
     def callback(ctx: click.Context, **kwargs: Any) -> None:
-        tokens = ctx.obj["tokens"]
-        config = ctx.obj["config"]
-
-        tool_config = config.get(tool.name, {})
-        if not isinstance(tool_config, dict):
-            tool_config = {}
-
+        context = _build_tool_context(ctx.obj, tool.name)
         context = ToolContext(
-            workspace_root=Path(ctx.obj["workspace_root"]),
-            tokens=tokens,
-            config=config,
-            tool_config=tool_config,
-            dimensions=ctx.obj["dimensions"],
+            workspace_root=context.workspace_root,
+            tokens=context.tokens,
+            config=context.config,
+            tool_config=context.tool_config,
+            dimensions=context.dimensions,
             passthrough_args=list(ctx.args) if ctx.args else [],
         )
 
         # Merge: defaults < tool_config < CLI kwargs
-        args: dict[str, Any] = {**tool.default_args(tokens)}
-        for k, v in tool_config.items():
+        args: dict[str, Any] = {**tool.default_args(context.tokens)}
+        for k, v in context.tool_config.items():
             if k not in kwargs or kwargs[k] is None:
                 args[k] = v
         for k, v in kwargs.items():
@@ -162,12 +210,12 @@ def _build_cli(
 ) -> click.Group:
     """Build the top-level click group with all discovered tools."""
 
-    @click.group()
+    @click.group(context_settings={"help_option_names": ["-h", "--help"]})
     @click.option(
         "--workspace-root",
         type=click.Path(exists=True),
         default=workspace_root,
-        help="Repository root directory",
+        hidden=True,  # Set by the ./repo shim; consumers never pass this directly.
     )
     @click.pass_context
     def cli(ctx: click.Context, workspace_root: str, **dim_kwargs: Any) -> None:
@@ -197,16 +245,7 @@ def _build_cli(
                 else:
                     dim_values[dim_name] = dimensions[dim_name][0]
 
-        # Handle fallback --platform/--build-type when not in config tokens
-        if "platform" not in dimensions:
-            val = dim_kwargs.get("platform")
-            dim_values["platform"] = val if val else detect_platform_identifier()
-
-        if "build_type" not in dimensions:
-            val = dim_kwargs.get("build_type")
-            dim_values["build_type"] = normalize_build_type(val) if val else "Debug"
-
-        # Normalize build_type
+        # Normalize build_type if it was configured as a dimension.
         if "build_type" in dim_values:
             dim_values["build_type"] = normalize_build_type(dim_values["build_type"])
 
@@ -236,27 +275,19 @@ def _build_cli(
             help=f"{dim_name} selection (auto-detected by default)",
         )(cli)
 
-    # If no dimension tokens in config, add default --platform and --build-type
-    if "platform" not in dimensions:
-        cli = click.option(
-            "--platform",
-            default=None,
-            help="Platform identifier (auto-detected by default)",
-        )(cli)
-
-    if "build_type" not in dimensions:
-        cli = click.option(
-            "--build-type",
-            type=click.Choice(["Debug", "Release", "RelWithDebInfo", "MinSizeRel"], case_sensitive=False),
-            default=None,
-            help="Build configuration type (default: Debug)",
-        )(cli)
-
     # Add project tool dirs to sys.path BEFORE any imports so namespace
     # package discovery sees both framework and project portions.
     if project_tool_dirs:
         for tool_dir in project_tool_dirs:
             tool_path = Path(tool_dir)
+            bad_init = tool_path / "repo_tools" / "__init__.py"
+            if bad_init.exists():
+                logger.error(
+                    f"Remove {bad_init} — it breaks namespace package "
+                    f"merging and hides framework tools.  "
+                    f"See README.md § Extending."
+                )
+                sys.exit(1)
             if tool_path.exists() and str(tool_dir) not in sys.path:
                 sys.path.insert(0, str(tool_dir))
         importlib.invalidate_caches()
@@ -282,11 +313,21 @@ def _build_cli(
 
     tools = _resolve_tools(framework_tools, project_tools)
 
+    # Auto-generate CommandRunnerTools for config sections not already covered.
+    registered_names = {t.name for t in tools}
+    auto_tools = _auto_register_config_tools(early_config, registered_names)
+    if auto_tools:
+        tools = sorted(tools + auto_tools, key=lambda t: t.name)
+
     # Register all resolved tools in the global registry (for invoke_tool)
     for tool in tools:
         register_tool(tool)
-        cmd = _make_tool_command(tool, dimensions)
-        cli.add_command(cmd)
+        custom_cmd = tool.create_click_command()
+        if custom_cmd is not None:
+            cli.add_command(custom_cmd)
+        else:
+            cmd = _make_tool_command(tool, dimensions)
+            cli.add_command(cmd)
 
     return cli
 
@@ -333,7 +374,11 @@ def main() -> None:
         workspace_root=workspace_root,
         project_tool_dirs=project_tool_dirs,
     )
-    cli(standalone_mode=True)
+    if os.name != "nt" or os.environ.get("BASH_VERSION"):
+        prog = "./repo"
+    else:
+        prog = ".\\repo.cmd"
+    cli(prog_name=prog, standalone_mode=True)
 
 
 if __name__ == "__main__":
