@@ -82,72 +82,73 @@ class TestBuildToolContext:
 
 class TestAutoRegisterConfigTools:
     def test_basic_registration(self):
-        config = {"build": {"command": "cmake --build {build_dir}"}}
+        config = {"build": {"steps": ["cmake --build {build_dir}"]}}
         result = _auto_register_config_tools(config, set())
         assert len(result) == 1
         assert result[0].name == "build"
 
-    def test_filter_commands_registered(self):
-        """Sections with only command@filter keys are eligible."""
-        config = {"build": {"command@windows-x64": "msbuild", "command@linux-x64": "make"}}
+    def test_filter_steps_registered(self):
+        """Sections with steps@filter keys are eligible."""
+        config = {"build": {"steps@windows-x64": ["msbuild"], "steps@linux-x64": ["make"]}}
         result = _auto_register_config_tools(config, set())
         assert len(result) == 1
         assert result[0].name == "build"
 
     def test_tokens_section_always_skipped(self):
-        """The 'tokens' section is never auto-registered even if it has a command key."""
-        config = {"tokens": {"command": "not-a-tool"}}
+        config = {"tokens": {"steps": ["not-a-tool"]}}
         result = _auto_register_config_tools(config, set())
         assert result == []
 
     def test_non_dict_section_skipped(self):
-        """Scalar and list config sections are not auto-registered."""
         config = {"version": "1.0", "flags": ["a", "b"]}
         result = _auto_register_config_tools(config, set())
         assert result == []
 
-    def test_no_command_key_skipped(self):
-        """A section with no command key is silently ignored."""
+    def test_no_steps_key_skipped(self):
+        """A section without steps is silently ignored."""
         config = {"my_section": {"verbose_flag": "-v", "other": "stuff"}}
         result = _auto_register_config_tools(config, set())
         assert result == []
 
-    def test_non_command_key_warns_and_skips(self, capture_logs):
-        """A section with both command and non-command keys emits a warning and is skipped."""
-        config = {"test": {"command": "pytest", "verbose_flag": "-v"}}
-        result = _auto_register_config_tools(config, set())
-        assert result == []
-        assert "non-command keys" in capture_logs.getvalue()
-        assert "verbose_flag" in capture_logs.getvalue()
-
     def test_registered_name_skipped(self):
-        """A config section whose name is already registered is skipped."""
-        config = {"format": {"command": "ruff format ."}}
+        config = {"format": {"steps": ["ruff format ."]}}
         result = _auto_register_config_tools(config, {"format"})
         assert result == []
 
     def test_multiple_tools(self):
-        """Multiple eligible sections all get registered."""
         config = {
-            "build": {"command": "cmake --build ."},
-            "test": {"command": "ctest ."},
-            "deploy": {"command": "rsync . server:/app"},
+            "build": {"steps": ["cmake --build ."]},
+            "test": {"steps": ["ctest ."]},
+            "deploy": {"steps": ["rsync . server:/app"]},
         }
         result = _auto_register_config_tools(config, set())
         names = {t.name for t in result}
         assert names == {"build", "test", "deploy"}
 
+    def test_section_without_steps_not_eligible(self):
+        """Extra keys don't matter — only steps presence counts."""
+        config = {"build": {"env_script": "setup.sh", "cwd": "/tmp"}}
+        result = _auto_register_config_tools(config, set())
+        assert result == []
+
+    def test_steps_with_extra_keys_still_eligible(self):
+        """Sections with steps plus other keys are still eligible."""
+        config = {"build": {"steps": ["make"], "verbose_flag": "-v"}}
+        result = _auto_register_config_tools(config, set())
+        assert len(result) == 1
+        assert result[0].name == "build"
+
 
 class TestCLICallbackPaths:
     def test_config_dimension_tokens_with_cli_value(self, make_workspace):
-        """Dimension tokens from config produce CLI flags; passing them updates tokens."""
         ws = make_workspace(
             config_yaml="""\
             tokens:
                 platform: [windows-x64, linux-x64]
                 build_type: [Debug, Release]
             build:
-                command: "cmake --build {build_dir}"
+                steps:
+                    - "cmake --build {build_dir}"
             """
         )
         cli = _build_cli(workspace_root=str(ws))
@@ -160,18 +161,16 @@ class TestCLICallbackPaths:
         assert data["build_type"] == "Release"
 
     def test_workspace_root_none_defaults_to_cwd(self, tmp_path):
-        """When _build_cli has no workspace_root, callback falls back to cwd."""
         cli = _build_cli(workspace_root=None)
         result = CliRunner().invoke(cli, ["--workspace-root", str(tmp_path), "--help"])
         assert result.exit_code == 0
 
     def test_different_workspace_root_reloads_config(self, tmp_path):
-        """Passing --workspace-root that differs from _build_cli default triggers config reload."""
         ws1 = tmp_path / "ws1"
         ws2 = tmp_path / "ws2"
         ws1.mkdir()
         ws2.mkdir()
-        (ws2 / "config.yaml").write_text("build:\n  command: cmake\n", encoding="utf-8")
+        (ws2 / "config.yaml").write_text("build:\n  steps:\n    - cmake\n", encoding="utf-8")
 
         cli = _build_cli(workspace_root=str(ws1))
         result = CliRunner().invoke(cli, ["--workspace-root", str(ws2), "--help"])

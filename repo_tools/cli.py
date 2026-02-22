@@ -88,11 +88,7 @@ def _auto_register_config_tools(
 ) -> list[RepoTool]:
     """Create CommandRunnerTools for eligible config sections.
 
-    A section is eligible if and only if **every** key in it is ``command``
-    or ``command@<filter>``.  Sections with any other keys are skipped —
-    extra keys signal that richer behaviour is needed; define a ``RepoTool``
-    subclass instead, or move shared values into the top-level ``tokens:``
-    block.
+    A section is eligible when it contains a ``steps`` or ``steps@*`` key.
     """
     from .command_runner import CommandRunnerTool
 
@@ -110,24 +106,8 @@ def _auto_register_config_tools(
         if not isinstance(section_value, dict):
             continue
 
-        keys = list(section_value.keys())
-        command_keys = [k for k in keys if k == "command" or k.startswith("command@")]
-        non_command_keys = [k for k in keys if k not in command_keys]
-
-        if not command_keys:
-            continue  # No command key — not a command-runner section.
-
-        if non_command_keys:
-            logger.warning(
-                f"[auto-tool] '{section_name}': skipped auto-generation because the section "
-                f"contains non-command keys: {non_command_keys}. "
-                f"A section is auto-generated only when every key is 'command' or "
-                f"'command@<filter>'. Options:\n"
-                f"  • Move shared values to the top-level 'tokens:' block so they are "
-                f"available as {{token}} substitutions in the command.\n"
-                f"  • Define a RepoTool subclass in tools/repo_tools/{section_name}.py "
-                f"for custom behaviour."
-            )
+        has_steps = any(k.split("@", 1)[0] == "steps" for k in section_value)
+        if not has_steps:
             continue
 
         tool = CommandRunnerTool()

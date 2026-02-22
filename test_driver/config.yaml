@@ -2,10 +2,12 @@ tokens:
   coverage_flags: "--cov=repo_tools --cov-report=term-missing --cov-report=markdown:{workspace_root}/coverage.md"
 
 test:
-  command: "{repo} python -m pytest {workspace_root}/tests/"
+  steps:
+    - "{repo} python -m pytest {workspace_root}/tests/"
 
 test-cov:
-  command: "{repo} python -m pytest {workspace_root}/tests/ {coverage_flags}"
+  steps:
+    - "{repo} python -m pytest {workspace_root}/tests/ {coverage_flags}"
 
 agent:
   debug_hooks: true
