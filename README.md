@@ -59,24 +59,39 @@ Framework tools with non-trivial logic:
 
 ## Agent
 
-The `agent` tool launches [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions in [WezTerm](https://wezfurlong.org/wezterm/) panes with pre-approved tools and a Bash command allowlist.
+The `agent` tool launches [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions with pre-approved tools and a Bash command allowlist.
 
 ```
-./repo agent run                              # solo session
-./repo agent team my-workstream               # multi-agent workstream
+./repo agent                                                # interactive orchestrator
+./repo agent --role worker --ticket add-hierarchical-config -w   # headless worker (worktree)
+./repo agent --role reviewer --ticket add-hierarchical-config    # headless reviewer
 ```
 
-**Solo mode** opens a single Claude Code session. Bash calls are checked against `allowlist_default.toml` (deny-first, then allow). Hooks and MCP configs are written to `_agent/plugin/` via `--plugin-dir`, keeping user settings untouched.
+**Interactive mode** (no `--ticket`) opens a Claude Code session as an **orchestrator**. The orchestrator owns the full lifecycle: plan changes, create tickets, dispatch workers, merge results, and verify acceptance criteria. Bash calls are checked against `allowlist_default.toml` (deny-first, then allow). Hooks and MCP configs are written to `_agent/plugin/` via `--plugin-dir`, keeping user settings untouched. Two stdio MCP servers are always available: `coderabbit` (code review) and `tickets` (ticket CRUD).
 
-**Team mode** creates `_agent/<workstream_id>/` (plan, tickets, worktrees), spawns an orchestrator, and starts an MCP server that provides `send_message` and `coderabbit_review` tools. The orchestrator reads `plan.toml`, creates tickets, and dispatches worker/reviewer agents — each in its own git worktree. Sub-agents communicate via the MCP server and cannot write to `_agent/` directly. Ctrl+C stops the server and kills all agent panes.
+**Headless mode** (`--role` + `--ticket`) runs `claude -p` as a subprocess, reads the ticket JSON, and returns structured output. Workers and reviewers are dispatched by the orchestrator.
 
 ```
-_agent/<workstream_id>/
-    plan.toml           ← goals and acceptance criteria
-    mcp.port            ← MCP server port (written at session start)
-    tickets/            ← one TOML file per ticket
-    worktrees/          ← git worktrees for workers and reviewers
+_agent/
+    tickets/            ← one JSON file per ticket
+    plugin/             ← auto-generated hooks and MCP config
 ```
+
+### Recommended Workflow
+
+**Plan → ticket → execute → merge → verify.**
+
+1. `./repo agent` — start an interactive orchestrator session.
+2. Describe what you want. The orchestrator explores the codebase and enters plan mode.
+3. Approve the plan. The orchestrator creates tickets with short descriptive IDs (e.g. `add-auth-hook`) via the `create_ticket` MCP tool.
+4. The orchestrator dispatches headless workers and reviewers for each ticket.
+5. After review passes, the orchestrator merges the worktree branch, builds, tests, and verifies acceptance criteria before moving on.
+
+**Keep tickets small.** Each ticket should be completable in a single focused agent session. If a ticket needs too many turns, split it.
+
+**Use worktrees for isolation.** The `-w` flag runs workers in a git worktree so they don't interfere with your working tree or each other.
+
+**Let the orchestrator drive.** Resist the urge to implement directly in the orchestrator session — its value is in planning, dispatching, and verifying. The worker/reviewer cycle gives you built-in code review.
 
 Agent settings in `config.yaml`:
 
@@ -84,8 +99,7 @@ Agent settings in `config.yaml`:
 agent:
   allowlist: "path/to/custom_rules.toml"    # override default command allowlist
   debug_hooks: true                          # log hook decisions to _agent/hooks.log
-  idle_reminder_interval: 120                # seconds between idle pings (team mode)
-  idle_reminder_limit: 3                     # max idle pings before killing a pane
+  max_turns: 30                              # turn limit for headless agents
 ```
 
 ## Configuration

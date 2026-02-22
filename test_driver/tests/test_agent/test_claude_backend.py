@@ -1,0 +1,348 @@
+"""Tests for Claude backend — build_command() and plugin generation."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from repo_tools.agent.claude import Claude
+
+
+class TestBuildCommand:
+    def test_basic_command(self):
+        """build_command() always pre-approves the safe read/edit tools."""
+        claude = Claude()
+        cmd = claude.build_command()
+        assert cmd[0] == "claude"
+        assert "--allowedTools" in cmd
+        for tool in ("Read", "Edit", "Write", "Glob", "Grep", "WebFetch", "WebSearch"):
+            assert tool in cmd
+
+    def test_no_bash_by_default(self):
+        claude = Claude()
+        cmd = claude.build_command()
+        assert "Bash" not in cmd
+
+    def test_role_adds_bash(self):
+        claude = Claude()
+        cmd = claude.build_command(role="worker")
+        assert "Bash" in cmd
+
+    def test_role_prompt_appended(self):
+        claude = Claude()
+        cmd = claude.build_command(role_prompt="You are a test worker.")
+        assert "--append-system-prompt" in cmd
+        idx = cmd.index("--append-system-prompt")
+        assert "You are a test worker." in cmd[idx + 1]
+
+    def test_hook_settings_wired(self, tmp_path):
+        """When rules_path and project_root are given, plugin hooks are written."""
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        claude = Claude()
+        cmd = claude.build_command(
+            rules_path=rules,
+            project_root=tmp_path,
+        )
+        hooks_path = tmp_path / "_agent" / "plugin" / "hooks" / "hooks.json"
+        assert hooks_path.exists(), "hooks file must be written to disk"
+        assert "--plugin-dir" in cmd
+
+        data = json.loads(hooks_path.read_text())
+        pre = data["hooks"]["PreToolUse"]
+        assert len(pre) == 1
+        assert pre[0]["matcher"] == "Bash"
+        hook_cmd = pre[0]["hooks"][0]["command"]
+        assert "repo_tools.agent.hooks" in hook_cmd
+        assert "check_bash" in hook_cmd
+        assert "\\" not in hook_cmd
+
+    def test_no_settings_without_rules(self):
+        """Without rules_path, no plugin dir is written."""
+        claude = Claude()
+        cmd = claude.build_command()
+        assert "--plugin-dir" not in cmd
+
+    def test_role_forwarded_to_hook_command(self, tmp_path):
+        """When role is provided, --role is included in the hook command."""
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        claude = Claude()
+        claude.build_command(
+            role="worker",
+            rules_path=rules,
+            project_root=tmp_path,
+        )
+        hooks_path = tmp_path / "_agent" / "plugin" / "hooks" / "hooks.json"
+        data = json.loads(hooks_path.read_text())
+        hook_cmd = data["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        assert "--role" in hook_cmd
+        assert "worker" in hook_cmd
+
+    def test_no_role_no_role_flag_in_hook(self, tmp_path):
+        """When no role is given, --role is not added to the hook command."""
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        claude = Claude()
+        claude.build_command(
+            rules_path=rules,
+            project_root=tmp_path,
+        )
+        hooks_path = tmp_path / "_agent" / "plugin" / "hooks" / "hooks.json"
+        data = json.loads(hooks_path.read_text())
+        hook_cmd = data["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        assert "--role" not in hook_cmd
+
+    def test_no_stop_hook(self, tmp_path):
+        """No Stop hook is generated (idle tracking removed)."""
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        claude = Claude()
+        claude.build_command(
+            role="worker",
+            rules_path=rules,
+            project_root=tmp_path,
+        )
+        data = json.loads(
+            (tmp_path / "_agent" / "plugin" / "hooks" / "hooks.json").read_text()
+        )
+        assert "Stop" not in data["hooks"]
+
+    def test_plugin_dir_in_command(self, tmp_path):
+        """--plugin-dir appears in command and points to the plugin directory."""
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        claude = Claude()
+        cmd = claude.build_command(
+            rules_path=rules,
+            project_root=tmp_path,
+        )
+        assert "--plugin-dir" in cmd
+        idx = cmd.index("--plugin-dir")
+        plugin_path = Path(cmd[idx + 1])
+        assert plugin_path == tmp_path / "_agent" / "plugin"
+
+    def test_plugin_manifest_written(self, tmp_path):
+        """Plugin manifest .claude-plugin/plugin.json is written."""
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        claude = Claude()
+        claude.build_command(
+            rules_path=rules,
+            project_root=tmp_path,
+        )
+        manifest = json.loads(
+            (tmp_path / "_agent" / "plugin" / ".claude-plugin" / "plugin.json").read_text()
+        )
+        assert manifest["name"] == "repokit-agent"
+
+    def test_no_settings_local_json_written(self, tmp_path):
+        """.claude/settings.local.json must NOT be written."""
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        claude = Claude()
+        claude.build_command(
+            rules_path=rules,
+            project_root=tmp_path,
+        )
+        assert not (tmp_path / ".claude" / "settings.local.json").exists()
+
+    def test_empty_path_with_none_raises(self):
+        """Path('') with None should raise ValueError."""
+        claude = Claude()
+        with pytest.raises(ValueError, match="must both be provided together"):
+            claude.build_command(rules_path=Path(""), project_root=None)
+
+    def test_headless_mode(self, tmp_path):
+        """With prompt, -p, --output-format json, and --no-session-persistence are added."""
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        claude = Claude()
+        cmd = claude.build_command(
+            prompt="Do the work",
+            role="worker",
+            rules_path=rules,
+            project_root=tmp_path,
+        )
+        assert "-p" in cmd
+        idx = cmd.index("-p")
+        assert cmd[idx + 1] == "Do the work"
+        assert "--output-format" in cmd
+        fmt_idx = cmd.index("--output-format")
+        assert cmd[fmt_idx + 1] == "json"
+        assert "--no-session-persistence" in cmd
+
+    def test_headless_worker_has_json_schema(self, tmp_path):
+        """Worker headless mode includes --json-schema with correct structure."""
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        claude = Claude()
+        cmd = claude.build_command(
+            prompt="Do the work",
+            role="worker",
+            rules_path=rules,
+            project_root=tmp_path,
+        )
+        assert "--json-schema" in cmd
+        schema_idx = cmd.index("--json-schema")
+        schema = json.loads(cmd[schema_idx + 1])
+        assert schema["type"] == "object"
+        assert "ticket_id" in schema["properties"]
+        assert "status" in schema["properties"]
+        assert schema["properties"]["status"]["enum"] == ["verify", "in_progress"]
+        assert "notes" in schema["properties"]
+
+    def test_headless_reviewer_has_json_schema(self, tmp_path):
+        """Reviewer headless mode includes --json-schema with result/feedback fields."""
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        claude = Claude()
+        cmd = claude.build_command(
+            prompt="Review the work",
+            role="reviewer",
+            rules_path=rules,
+            project_root=tmp_path,
+        )
+        assert "--json-schema" in cmd
+        schema_idx = cmd.index("--json-schema")
+        schema = json.loads(cmd[schema_idx + 1])
+        assert "result" in schema["properties"]
+        assert schema["properties"]["result"]["enum"] == ["pass", "fail"]
+        assert "feedback" in schema["properties"]
+
+    def test_headless_no_role_no_schema(self, tmp_path):
+        """Headless mode without a role does not include --json-schema."""
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        claude = Claude()
+        cmd = claude.build_command(
+            prompt="Do something",
+            rules_path=rules,
+            project_root=tmp_path,
+        )
+        assert "-p" in cmd
+        assert "--json-schema" not in cmd
+
+    def test_interactive_mode_no_prompt_flags(self):
+        """Without prompt, no -p, --output-format, or --no-session-persistence flags."""
+        claude = Claude()
+        cmd = claude.build_command()
+        assert "-p" not in cmd
+        assert "--output-format" not in cmd
+        assert "--no-session-persistence" not in cmd
+        assert "--json-schema" not in cmd
+
+    def test_worktree_flag(self):
+        """With worktree name, -w <name> is added to the command."""
+        claude = Claude()
+        cmd = claude.build_command(worktree="test-G1_1")
+        assert "-w" in cmd
+        idx = cmd.index("-w")
+        assert cmd[idx + 1] == "test-G1_1"
+
+    def test_worktree_empty_string_passes_bare_flag(self):
+        """Empty worktree string passes -w with empty name (auto-generate)."""
+        claude = Claude()
+        cmd = claude.build_command(worktree="")
+        assert "-w" not in cmd
+
+    def test_no_worktree_by_default(self):
+        """No -w flag without worktree parameter."""
+        claude = Claude()
+        cmd = claude.build_command()
+        assert "-w" not in cmd
+
+    def test_ticket_mcp_in_plugin(self, tmp_path):
+        """Plugin .mcp.json includes both tickets and coderabbit entries."""
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        claude = Claude()
+        claude.build_command(
+            rules_path=rules,
+            project_root=tmp_path,
+        )
+        mcp = json.loads(
+            (tmp_path / "_agent" / "plugin" / ".mcp.json").read_text()
+        )
+
+        assert "mcpServers" in mcp
+        assert "coderabbit" in mcp["mcpServers"]
+        assert "tickets" in mcp["mcpServers"]
+
+        cr = mcp["mcpServers"]["coderabbit"]
+        assert cr["type"] == "stdio"
+        assert "coderabbit_mcp" in " ".join(cr["args"])
+
+        ts = mcp["mcpServers"]["tickets"]
+        assert ts["type"] == "stdio"
+        assert "--project-root" in ts["args"]
+        assert "ticket_mcp" in " ".join(ts["args"])
+
+    def test_ticket_mcp_has_project_root(self, tmp_path):
+        """Ticket MCP config passes the correct --project-root."""
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        claude = Claude()
+        claude.build_command(
+            rules_path=rules,
+            project_root=tmp_path,
+        )
+        mcp = json.loads(
+            (tmp_path / "_agent" / "plugin" / ".mcp.json").read_text()
+        )
+
+        ts_args = mcp["mcpServers"]["tickets"]["args"]
+        root_idx = ts_args.index("--project-root")
+        assert tmp_path.as_posix() in ts_args[root_idx + 1]
+
+    def test_max_turns_in_headless(self, tmp_path):
+        """max_turns adds --max-turns flag in headless mode."""
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        claude = Claude()
+        cmd = claude.build_command(
+            prompt="Do work",
+            role="worker",
+            rules_path=rules,
+            project_root=tmp_path,
+            max_turns=25,
+        )
+        assert "--max-turns" in cmd
+        idx = cmd.index("--max-turns")
+        assert cmd[idx + 1] == "25"
+
+    def test_no_max_turns_by_default(self, tmp_path):
+        """Without max_turns, --max-turns is not added."""
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        claude = Claude()
+        cmd = claude.build_command(
+            prompt="Do work",
+            role="worker",
+            rules_path=rules,
+            project_root=tmp_path,
+        )
+        assert "--max-turns" not in cmd
+
+    def test_max_turns_not_in_interactive(self):
+        """max_turns is ignored in interactive mode (no prompt)."""
+        claude = Claude()
+        cmd = claude.build_command(max_turns=25)
+        assert "--max-turns" not in cmd

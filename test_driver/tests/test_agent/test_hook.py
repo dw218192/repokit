@@ -37,6 +37,48 @@ def _run_hook(command: str, rules: Path | None = None, cwd: str = "/tmp") -> dic
     return json.loads(result.stdout)
 
 
+class TestUnifiedEntrypoint:
+    """Test that python -m repo_tools.agent.hooks dispatches correctly."""
+
+    def test_check_bash_via_unified_entrypoint(self):
+        """check_bash subcommand works via the unified entrypoint."""
+        rules = _rules_path()
+        event = {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+            "tool_input": {"command": "git status"},
+            "cwd": "/tmp",
+        }
+        result = subprocess.run(
+            [sys.executable, "-m", "repo_tools.agent.hooks",
+             "check_bash", "--rules", str(rules), "--project-root", "/tmp"],
+            input=json.dumps(event),
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, f"Hook exited {result.returncode}: {result.stderr}"
+        output = json.loads(result.stdout)
+        assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
+
+    def test_unknown_subcommand_exits_2(self):
+        """Unknown subcommand exits with code 2."""
+        result = subprocess.run(
+            [sys.executable, "-m", "repo_tools.agent.hooks", "bogus"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 2
+
+    def test_no_subcommand_exits_2(self):
+        """No subcommand exits with code 2."""
+        result = subprocess.run(
+            [sys.executable, "-m", "repo_tools.agent.hooks"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 2
+
+
 class TestHookAllow:
     def test_git_allowed(self):
         output = _run_hook("git status")

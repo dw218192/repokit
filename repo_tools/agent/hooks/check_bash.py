@@ -19,24 +19,10 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime
 from pathlib import Path
 
 from ..rules import check_command, load_rules
-
-
-def _write_log(log_path: Path, command: str, decision: str, reason: str = "") -> None:
-    """Append one line to the hook debug log."""
-    try:
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        ts = datetime.now().strftime("%H:%M:%S")
-        line = f"[{ts}] {decision:5s}  {command!r}"
-        if reason:
-            line += f"  # {reason}"
-        with log_path.open("a", encoding="utf-8") as f:
-            f.write(line + "\n")
-    except OSError:
-        pass  # Never let logging break the hook
+from . import write_log
 
 
 def main() -> None:
@@ -73,7 +59,7 @@ def main() -> None:
 
     if allowed:
         if log_path:
-            _write_log(log_path, command, "allow")
+            write_log(log_path, command, "allow")
         decision = {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
@@ -82,7 +68,7 @@ def main() -> None:
         }
     else:
         if log_path:
-            _write_log(log_path, command, "deny", reason)
+            write_log(log_path, command, "deny", reason)
 
         # Show path relative to project root so the agent can find the file
         try:

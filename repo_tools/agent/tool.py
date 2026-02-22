@@ -1,17 +1,16 @@
 """Agent tool — launches coding agents with repo-specific config.
 
-Provides the ``agent`` Click group with subcommands:
-  run   — launch a single agent (solo or team role)
-  team  — start a multi-agent workstream (creates if new, resumes if existing)
+``./repo agent`` starts an interactive Claude session.
+``./repo agent --role worker --ticket G1_1`` runs headless.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
-import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +19,7 @@ import click
 from ..cli import _build_tool_context
 from ..core import RepoTool, ToolContext, logger
 from .claude import Claude
-from .wezterm import PaneSession, activate_pane, ensure_installed, list_workspace, spawn_in_workspace
+from .ticket_mcp import _tool_reset_ticket, _tool_update_ticket
 
 _backend = Claude()
 
@@ -47,8 +46,7 @@ def _render_role_prompt(role: str, **kwargs: str) -> str:
     """Load prompt template for a role and format placeholders.
 
     If ``prompts/common.txt`` exists it is prepended to the role template
-    so that every role receives shared context (framework overview, filesystem
-    boundaries, etc.).
+    so that every role receives shared context.
     """
     prompts_dir = Path(__file__).parent / "prompts"
     template_file = prompts_dir / f"{role}.txt"
@@ -66,7 +64,7 @@ _SAFE_AGENT_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
 def _validate_agent_id(value: str, field: str) -> None:
-    """Raise ValueError if *value* is not safe for use as a path component or branch name."""
+    """Raise ValueError if *value* is not safe for use as a path component."""
     if not value:
         raise ValueError(f"{field} must not be empty")
     if ".." in value or "/" in value or "\\" in value:
@@ -75,108 +73,77 @@ def _validate_agent_id(value: str, field: str) -> None:
         raise ValueError(f"{field} contains unsafe characters: {value!r}")
 
 
-def _setup_worktree(workspace_root: Path, workstream: str, ticket: str) -> Path:
-    """Create a git worktree for the ticket and return its path."""
-    _validate_agent_id(workstream, "workstream")
-    _validate_agent_id(ticket, "ticket")
-    agent_dir = workspace_root / "_agent" / workstream
-    worktree_path = agent_dir / "worktrees" / ticket
-    branch = f"agent/{workstream}/{ticket}"
-
-    if worktree_path.exists():
-        return worktree_path
-
-    worktree_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        subprocess.run(
-            ["git", "worktree", "add", "-b", branch, str(worktree_path)],
-            cwd=str(workspace_root),
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except subprocess.CalledProcessError:
-        # Branch may already exist
-        subprocess.run(
-            ["git", "worktree", "add", str(worktree_path), branch],
-            cwd=str(workspace_root),
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    return worktree_path
-
-
-def _register_pane(
-    port: int, pane_id: int, role: str, workstream: str, ticket: str
-) -> None:
-    """Register a spawned pane with the MCP server for idle tracking."""
-    data = json.dumps(
-        {"pane_id": pane_id, "role": role, "workstream": workstream, "ticket": ticket}
-    ).encode()
-    req = urllib.request.Request(
-        f"http://127.0.0.1:{port}/register",
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        urllib.request.urlopen(req, timeout=2)
-    except Exception as exc:
-        logger.debug(f"Pane registration failed (port {port}): {exc}")
-
-
 def _agent_run(
     tool_ctx: ToolContext,
-    workspace: str | None = None,
     role: str | None = None,
-    workstream: str | None = None,
     ticket: str | None = None,
     debug_hooks: bool = False,
-    mcp_port: int | None = None,
-) -> PaneSession | None:
-    """Launch an agent — solo mode (original) or team mode (with role/workspace).
+    worktree: bool = False,
+) -> str | None:
+    """Launch an agent session.
 
-    Returns the PaneSession so callers can activate/manage the pane.
+    With ``--ticket``: runs headless ``claude -p``, blocks until done,
+    returns the result text.
+
+    Without ``--ticket``: replaces this process with interactive Claude.
     """
-    ensure_installed()
-    cwd = str(tool_ctx.workspace_root)
-    repo_cmd = tool_ctx.tokens.get("repo", "./repo")
     debug_hooks = debug_hooks or tool_ctx.tool_config.get("debug_hooks", False)
+    max_turns = tool_ctx.tool_config.get("max_turns")
+    repo_cmd = tool_ctx.tokens.get("repo", "./repo")
 
-    logger.info(f"Starting agent... role={role}, workstream={workstream}, ticket={ticket}, debug_hooks={debug_hooks}")
-
-    # Resolve MCP port from port file if not explicitly given
-    if workstream and mcp_port is None:
-        port_file = tool_ctx.workspace_root / "_agent" / workstream / "mcp.port"
-        if port_file.exists():
-            try:
-                mcp_port = int(port_file.read_text(encoding="utf-8").strip())
-            except ValueError:
-                pass
-
-    # Build role prompt if in team mode
+    # Build role prompt for headless mode
     role_prompt = None
-    worktree_path = None
-    if role and workstream:
-        agent_dir = tool_ctx.workspace_root / "_agent" / workstream
-        ticket_path = ""
-        branch = f"agent/{workstream}"
+    prompt = None
+    if role and ticket:
+        _validate_agent_id(ticket, "ticket")
+        ticket_path = tool_ctx.workspace_root / "_agent" / "tickets" / f"{ticket}.json"
 
-        if ticket:
-            ticket_path = str(agent_dir / "tickets" / f"{ticket}.toml")
-            branch = f"agent/{workstream}/{ticket}"
-            worktree_path = _setup_worktree(tool_ctx.workspace_root, workstream, ticket)
-            cwd = str(worktree_path)
+        if not ticket_path.exists():
+            logger.error(f"Ticket file not found: {ticket_path}")
+            sys.exit(1)
+
+        ticket_content = ticket_path.read_text(encoding="utf-8")
+
+        # Lifecycle gating — enforce role/status constraints
+        try:
+            ticket_data = json.loads(ticket_content)
+            ticket_status = ticket_data.get("ticket", {}).get("status", "unknown")
+        except (json.JSONDecodeError, AttributeError):
+            logger.error(f"Ticket file is not valid JSON: {ticket_path}")
+            sys.exit(1)
+
+        if role == "worker" and ticket_status not in ("todo", "in_progress"):
+            logger.error(
+                f"Worker requires ticket status 'todo' or 'in_progress', "
+                f"got '{ticket_status}'"
+            )
+            sys.exit(1)
+        elif role == "reviewer" and ticket_status != "verify":
+            logger.error(
+                f"Reviewer requires ticket status 'verify', "
+                f"got '{ticket_status}'"
+            )
+            sys.exit(1)
 
         role_prompt = _render_role_prompt(
             role,
-            workstream_id=workstream,
-            ticket_id=ticket or "",
-            worktree_path=str(worktree_path or cwd),
-            ticket_path=ticket_path,
-            branch=branch,
+            ticket_id=ticket,
+            ticket_path=str(ticket_path),
             project_root=str(tool_ctx.workspace_root),
+            repo_cmd=repo_cmd,
+            framework_root=tool_ctx.tokens.get("framework_root", ""),
+        )
+
+        prompt = (
+            f"You are working on ticket {ticket}.\n\n"
+            f"Ticket content:\n```json\n{ticket_content}\n```\n\n"
+            f"Read the ticket and begin your work."
+        )
+
+    if role_prompt is None:
+        # Interactive session — inject orchestrator prompt (includes common.txt)
+        role_prompt = _render_role_prompt(
+            "orchestrator",
             repo_cmd=repo_cmd,
             framework_root=tool_ctx.tokens.get("framework_root", ""),
         )
@@ -185,83 +152,170 @@ def _agent_run(
         tool_ctx.workspace_root,
         configured=tool_ctx.tool_config.get("allowlist"),
     )
+    # Derive worktree name from ticket when available
+    worktree_name = None
+    if worktree:
+        if ticket:
+            worktree_name = ticket
+        else:
+            worktree_name = ""  # let Claude Code auto-generate
+
     cmd = _backend.build_command(
+        prompt=prompt,
         role=role,
         role_prompt=role_prompt,
         rules_path=rules_path,
         project_root=tool_ctx.workspace_root,
         debug_hooks=debug_hooks,
-        mcp_port=mcp_port,
-        cwd=Path(cwd),
+        worktree=worktree_name,
+        max_turns=max_turns,
     )
 
-    # Spawn in workspace or new window
-    if workspace:
-        session = spawn_in_workspace(cmd, workspace, cwd=cwd)
+    if prompt is not None:
+        # Headless mode — run subprocess, capture output (stderr passes through)
+        logger.info(f"Running headless agent: role={role}, ticket={ticket}")
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+        proc = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            text=True,
+            cwd=str(tool_ctx.workspace_root),
+            env=env,
+        )
+
+        if proc.returncode != 0:
+            logger.error(f"Agent exited with code {proc.returncode}")
+
+        # Parse structured JSON output and apply ticket update.
+        # Claude Code --output-format json always wraps output in an
+        # envelope: {"type":"result", "subtype":"success"|"error_max_turns",
+        #            "is_error":bool, "structured_output":{...}, ...}.
+        try:
+            envelope = json.loads(proc.stdout)
+        except (json.JSONDecodeError, TypeError):
+            logger.error(f"Agent produced invalid JSON output — ticket not updated")
+            print(proc.stdout)
+            return proc.stdout
+
+        if not isinstance(envelope, dict):
+            logger.error(f"Agent output is not a JSON object — ticket not updated")
+            print(proc.stdout)
+            return proc.stdout
+
+        if envelope.get("is_error"):
+            subtype = envelope.get("subtype", "")
+            if subtype == "error_max_turns" and role == "worker":
+                logger.warning(f"Worker exhausted turn limit — setting ticket to in_progress")
+                update_args = {
+                    "ticket_id": ticket,
+                    "status": "in_progress",
+                    "notes": "Agent exhausted turn limit",
+                }
+                update_result = _tool_update_ticket(tool_ctx.workspace_root, update_args)
+                if update_result.get("isError"):
+                    logger.error(f"Ticket update failed: {update_result['text']}")
+                else:
+                    logger.info(f"Ticket {ticket} updated: {update_result['text']}")
+            else:
+                logger.error(f"Agent reported error (subtype={subtype!r}) — ticket not updated")
+            print(proc.stdout)
+            return proc.stdout
+
+        output = envelope.get("structured_output")
+
+        if not isinstance(output, dict) or "ticket_id" not in output:
+            logger.error(f"Agent output missing ticket_id — ticket not updated")
+            print(proc.stdout)
+            return proc.stdout
+
+        if output["ticket_id"] != ticket:
+            logger.error(
+                f"Agent returned ticket_id={output['ticket_id']!r} "
+                f"but was assigned {ticket!r} — ticket not updated"
+            )
+            print(proc.stdout)
+            return proc.stdout
+
+        # Apply the update to the ticket JSON
+        update_args = {"ticket_id": ticket}
+        for field in ("status", "notes", "result", "feedback"):
+            if field in output:
+                update_args[field] = output[field]
+
+        update_result = _tool_update_ticket(tool_ctx.workspace_root, update_args)
+        if update_result.get("isError"):
+            logger.error(f"Ticket update failed: {update_result['text']}")
+        else:
+            logger.info(f"Ticket {ticket} updated: {update_result['text']}")
+
+        result = json.dumps(output, indent=2)
+        print(result)
+        return result
+
+    # Interactive mode — replace process (Unix) or delegate (Windows)
+    logger.info("Starting interactive agent session")
+    if sys.platform == "win32":
+        proc = subprocess.run(cmd, cwd=str(tool_ctx.workspace_root))
+        sys.exit(proc.returncode)
     else:
-        session = PaneSession.spawn(cmd, cwd=cwd)
-
-    if session is None:
-        logger.error("Failed to obtain WezTerm pane.")
-        sys.exit(1)
-
-    logger.info(f"Agent running in WezTerm pane {session.pane_id}")
-    activate_pane(session.pane_id)
-
-    # Register worker/reviewer panes with the MCP server for idle tracking
-    if mcp_port and role in ("worker", "reviewer") and workstream and ticket:
-        _register_pane(mcp_port, session.pane_id, role, workstream, ticket)
-
-    return session
+        os.execvp(cmd[0], cmd)
 
 
-# ── Click Group ──────────────────────────────────────────────────────
+# ── Click Command ────────────────────────────────────────────────────
 
 
-def _make_agent_group() -> click.Group:
-    """Build the ``agent`` Click group with run/team subcommands."""
+def _reset_ticket(workspace_root: Path, ticket_id: str) -> None:
+    """Reset a ticket to 'todo' — delegates to ticket_mcp._tool_reset_ticket."""
+    result = _tool_reset_ticket(workspace_root, {"ticket_id": ticket_id})
+    if result.get("isError"):
+        raise click.ClickException(result["text"])
+    logger.info(result["text"])
 
-    @click.group(name="agent", help="Run coding agents with workflows tailored for this repository.")
-    @click.pass_context
-    def agent(ctx: click.Context) -> None:
-        ctx.ensure_object(dict)
 
-    # ── run ──
+def _make_agent_command() -> click.Group:
+    """Build the ``agent`` Click group."""
 
-    @agent.command()
-    @click.option("--workspace", default=None, help="WezTerm workspace name")
-    @click.option("--role", default=None, type=click.Choice(["orchestrator", "worker", "reviewer"]),
-                  help="Team role for this agent")
-    @click.option("--workstream", default=None, help="Workstream ID")
+    @click.group(
+        name="agent",
+        help="Run coding agents with workflows tailored for this repository.",
+        invoke_without_command=True,
+    )
+    @click.option("--role", default=None, type=click.Choice(["worker", "reviewer"]),
+                  help="Role for this agent")
     @click.option("--ticket", default=None, help="Ticket ID (for worker/reviewer roles)")
     @click.option("--debug-hooks", is_flag=True, default=False,
                   help="Log hook decisions to _agent/hooks.log")
+    @click.option("--worktree", "-w", is_flag=True, default=False,
+                  help="Run in an isolated git worktree")
     @click.pass_context
-    def run(ctx: click.Context, workspace: str | None,
-            role: str | None, workstream: str | None, ticket: str | None,
-            debug_hooks: bool) -> None:
-        """Launch a single agent session."""
+    def agent(ctx: click.Context,
+              role: str | None, ticket: str | None,
+              debug_hooks: bool, worktree: bool) -> None:
+        """Launch an agent session."""
+        if ctx.invoked_subcommand is not None:
+            return
+        if bool(role) != bool(ticket):
+            raise click.UsageError("--role and --ticket must be used together")
         tool_ctx = _ctx_from_click(ctx)
         _agent_run(
             tool_ctx,
-            workspace=workspace,
             role=role,
-            workstream=workstream,
             ticket=ticket,
             debug_hooks=debug_hooks,
+            worktree=worktree,
         )
 
-    # ── team ──
+    @agent.group(name="ticket", help="Manage agent tickets.")
+    def ticket_group() -> None:
+        pass
 
-    @agent.command()
-    @click.argument("workstream_id")
+    @ticket_group.command(name="reset")
+    @click.argument("ticket_id")
     @click.pass_context
-    def team(ctx: click.Context, workstream_id: str) -> None:
-        """Start a multi-agent workstream (creates if new, resumes if existing)."""
-        from .team import TeamManager
+    def ticket_reset(ctx: click.Context, ticket_id: str) -> None:
+        """Reset a ticket to 'todo' status."""
         tool_ctx = _ctx_from_click(ctx)
-        mgr = TeamManager(tool_ctx)
-        mgr.start(workstream_id)
+        _reset_ticket(tool_ctx.workspace_root, ticket_id)
 
     return agent
 
@@ -274,7 +328,7 @@ class AgentTool(RepoTool):
     help = "Run coding agents with workflows tailored for this repository."
 
     def create_click_command(self) -> click.BaseCommand | None:
-        return _make_agent_group()
+        return _make_agent_command()
 
     def setup(self, cmd: click.Command) -> click.Command:
         return cmd

@@ -15,8 +15,12 @@ Commands resolve platform-specific variants, paths, and tokens automatically.
 See `{framework_root}/README.md` for full details on configuration, token
 expansion, and extending the framework with custom tools.
 
-## Filesystem Boundary
+## General Coding Principles
 
-Only the orchestrator reads and writes files under `_agent/` (plan, tickets,
-workstream state). Workers and reviewers must not access `_agent/` — relay
-updates to the orchestrator via the **send_message** MCP tool instead.
+- **Fail loud.** No fallback mechanisms and no error swallowing — they hide real failures. Prefer explicit errors, invariant assertions over silent recovery.
+- **Less is more.** Rewrite existing components over adding new ones. Flag obsolete files for removal.
+- **Desctructive Updates by default.** Unless explicitly requested, don't preserve legacy behavior or add compatibility shims just to backward compatibility.
+- **Test edge cases, not plumbing.** Cover meaningful behavior; skip tests that just assert assignment or trivial argument forwarding.
+- **Tests are code too.** Keep them readable and maintainable — they outlast the session that wrote them.
+- **No session artifacts in code.** Avoid comments like "Removed X" or "no longer uses Y" — future readers have no context for X.
+- **Think before typing.** Use extended thinking generously; reasoning is cheaper than debugging.
