@@ -19,7 +19,7 @@ import click
 from ..cli import _build_tool_context
 from ..core import RepoTool, ToolContext, logger
 from .claude import Claude
-from .ticket_mcp import _tool_reset_ticket, _tool_update_ticket
+from .ticket_mcp import _ROLE_ALLOWED_TRANSITIONS, _tool_reset_ticket, _tool_update_ticket
 
 _backend = Claude()
 
@@ -63,7 +63,7 @@ def _render_role_prompt(role: str, **kwargs: str) -> str:
 _SAFE_AGENT_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
-def _validate_agent_id(value: str, field: str) -> None:
+def _validate_ticket_id(value: str, field: str) -> None:
     """Raise ValueError if *value* is not safe for use as a path component."""
     if not value:
         raise ValueError(f"{field} must not be empty")
@@ -95,7 +95,7 @@ def _agent_run(
     role_prompt = None
     prompt = None
     if role and ticket:
-        _validate_agent_id(ticket, "ticket")
+        _validate_ticket_id(ticket, "ticket")
         ticket_path = tool_ctx.workspace_root / "_agent" / "tickets" / f"{ticket}.json"
 
         if not ticket_path.exists():
@@ -112,15 +112,10 @@ def _agent_run(
             logger.error(f"Ticket file is not valid JSON: {ticket_path}")
             sys.exit(1)
 
-        if role == "worker" and ticket_status not in ("todo", "in_progress"):
+        valid_statuses = {s for s, _ in _ROLE_ALLOWED_TRANSITIONS.get(role, set())}
+        if valid_statuses and ticket_status not in valid_statuses:
             logger.error(
-                f"Worker requires ticket status 'todo' or 'in_progress', "
-                f"got '{ticket_status}'"
-            )
-            sys.exit(1)
-        elif role == "reviewer" and ticket_status != "verify":
-            logger.error(
-                f"Reviewer requires ticket status 'verify', "
+                f"{role} requires ticket status in {sorted(valid_statuses)}, "
                 f"got '{ticket_status}'"
             )
             sys.exit(1)
@@ -141,9 +136,11 @@ def _agent_run(
         )
 
     if role_prompt is None:
-        # Interactive session — inject orchestrator prompt (includes common.txt)
+        # Interactive session — set orchestrator role explicitly so MCP
+        # permissions and allowlist rules apply correctly.
+        role = "orchestrator"
         role_prompt = _render_role_prompt(
-            "orchestrator",
+            role,
             repo_cmd=repo_cmd,
             framework_root=tool_ctx.tokens.get("framework_root", ""),
         )
