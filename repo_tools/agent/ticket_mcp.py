@@ -135,6 +135,40 @@ _TOOLS = [
             "required": ["ticket_id"],
         },
     },
+    {
+        "name": "mark_criteria",
+        "description": "Mark specific acceptance criteria as met or unmet.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "ticket_id": {"type": "string", "description": "Ticket identifier."},
+                "indices": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "Zero-based indices of criteria to update.",
+                },
+                "met": {
+                    "type": "boolean",
+                    "description": "Whether to mark as met (default true).",
+                },
+            },
+            "required": ["ticket_id", "indices"],
+        },
+    },
+    {
+        "name": "delete_ticket",
+        "description": "Delete a ticket JSON file.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "ticket_id": {
+                    "type": "string",
+                    "description": "Ticket identifier.",
+                },
+            },
+            "required": ["ticket_id"],
+        },
+    },
 ]
 
 
@@ -233,6 +267,27 @@ def _tickets_dir(root: Path) -> Path:
     return root / "_agent" / "tickets"
 
 
+def _load_required_criteria(root: Path) -> list[str]:
+    """Read ``agent.required_criteria`` from config.yaml."""
+    config_path = root / "config.yaml"
+    if not config_path.exists():
+        return []
+    try:
+        import yaml
+        data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    if not isinstance(data, dict):
+        return []
+    agent = data.get("agent")
+    if not isinstance(agent, dict):
+        return []
+    criteria = agent.get("required_criteria")
+    if not isinstance(criteria, list):
+        return []
+    return [str(c) for c in criteria]
+
+
 # ── Tool implementations ─────────────────────────────────────────────────────
 
 
@@ -243,12 +298,20 @@ def _tool_list_tickets(root: Path, args: dict) -> dict:
 
     tickets = []
     for f in sorted(tdir.glob("*.json")):
+        entry: dict = {"id": f.stem}
         try:
             data = json.loads(f.read_text(encoding="utf-8"))
-            status = data.get("ticket", {}).get("status", "unknown")
-        except (json.JSONDecodeError, KeyError):
-            status = "unknown"
-        tickets.append({"id": f.stem, "status": status})
+        except json.JSONDecodeError as exc:
+            entry["status"] = "invalid"
+            entry["error"] = f"invalid JSON: {exc}"
+            tickets.append(entry)
+            continue
+        if err := _validate_ticket(data):
+            entry["status"] = "invalid"
+            entry["error"] = f"bad schema: {err}"
+        else:
+            entry["status"] = data.get("ticket", {}).get("status", "unknown")
+        tickets.append(entry)
 
     return {"text": json.dumps(tickets)}
 
@@ -263,7 +326,10 @@ def _tool_get_ticket(root: Path, args: dict) -> dict:
         return {"isError": True, "text": f"Ticket '{tid}' not found"}
 
     content = ticket_path.read_text(encoding="utf-8")
-    data = json.loads(content)
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError:
+        return {"isError": True, "text": f"Ticket '{tid}' has invalid JSON"}
     if err := _validate_ticket(data):
         return {"isError": True, "text": f"Ticket '{tid}' has invalid schema: {err}"}
 
@@ -284,7 +350,14 @@ def _tool_create_ticket(root: Path, args: dict) -> dict:
 
     title = args.get("title", "")
     description = args.get("description", "")
-    raw_criteria = args.get("criteria", [])
+    raw_criteria = list(args.get("criteria", []))
+
+    # Merge required criteria (appended, deduplicated)
+    seen = set(raw_criteria)
+    for rc in _load_required_criteria(root):
+        if rc not in seen:
+            raw_criteria.append(rc)
+            seen.add(rc)
 
     criteria = [{"criterion": c, "met": False} for c in raw_criteria]
 
@@ -367,6 +440,56 @@ def _tool_reset_ticket(root: Path, args: dict) -> dict:
     return {"text": f"Ticket '{tid}' reset to todo"}
 
 
+def _tool_mark_criteria(root: Path, args: dict) -> dict:
+    tid = args.get("ticket_id", "").strip()
+    if err := _validate_id(tid, "ticket_id"):
+        return {"isError": True, "text": err}
+
+    indices = args.get("indices", [])
+    if not indices:
+        return {"isError": True, "text": "indices must not be empty"}
+
+    met = args.get("met", True)
+
+    ticket_path = _tickets_dir(root) / f"{tid}.json"
+    if not ticket_path.exists():
+        return {"isError": True, "text": f"Ticket '{tid}' not found"}
+
+    data = json.loads(ticket_path.read_text(encoding="utf-8"))
+    criteria = data.get("criteria")
+    if not criteria:
+        return {"isError": True, "text": f"Ticket '{tid}' has no criteria"}
+
+    # Validate all indices before mutating (atomic: all-or-nothing)
+    for idx in indices:
+        if not isinstance(idx, int) or idx < 0:
+            return {"isError": True, "text": f"Invalid index: {idx}"}
+        if idx >= len(criteria):
+            return {
+                "isError": True,
+                "text": f"Index {idx} out of range (ticket has {len(criteria)} criteria)",
+            }
+
+    for idx in indices:
+        criteria[idx]["met"] = met
+
+    ticket_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return {"text": f"Ticket '{tid}' criteria updated: indices {indices} -> met={met}"}
+
+
+def _tool_delete_ticket(root: Path, args: dict) -> dict:
+    tid = args.get("ticket_id", "").strip()
+    if err := _validate_id(tid, "ticket_id"):
+        return {"isError": True, "text": err}
+
+    ticket_path = _tickets_dir(root) / f"{tid}.json"
+    if not ticket_path.exists():
+        return {"isError": True, "text": f"Ticket '{tid}' not found"}
+
+    ticket_path.unlink()
+    return {"text": f"Ticket '{tid}' deleted"}
+
+
 # ── JSON-RPC dispatch ─────────────────────────────────────────────────────────
 
 
@@ -376,6 +499,8 @@ _TOOL_DISPATCH = {
     "create_ticket": _tool_create_ticket,
     "update_ticket": _tool_update_ticket,
     "reset_ticket": _tool_reset_ticket,
+    "mark_criteria": _tool_mark_criteria,
+    "delete_ticket": _tool_delete_ticket,
 }
 
 

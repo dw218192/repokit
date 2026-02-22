@@ -10,8 +10,10 @@ import pytest
 from repo_tools.agent.ticket_mcp import (
     _dispatch,
     _tool_create_ticket,
+    _tool_delete_ticket,
     _tool_get_ticket,
     _tool_list_tickets,
+    _tool_mark_criteria,
     _tool_update_ticket,
     _validate_ticket,
     _validate_transition,
@@ -474,6 +476,9 @@ class TestDispatch:
         assert "get_ticket" in tool_names
         assert "create_ticket" in tool_names
         assert "update_ticket" in tool_names
+        assert "reset_ticket" in tool_names
+        assert "mark_criteria" in tool_names
+        assert "delete_ticket" in tool_names
         assert "init_workstream" not in tool_names
 
     def test_notification_no_response(self, project):
@@ -499,3 +504,273 @@ class TestDispatch:
         result = _call_tool(project, "nonexistent", {})
         assert result["isError"]
         assert "Unknown tool" in result["text"]
+
+
+# ── mark_criteria ────────────────────────────────────────────────
+
+
+class TestMarkCriteria:
+    def _make_ticket(self, project, criteria):
+        _tool_create_ticket(project, {
+            "id": "T1", "title": "t", "description": "d",
+            "criteria": criteria,
+        })
+
+    def _read_criteria(self, project):
+        path = project / "_agent" / "tickets" / "T1.json"
+        return json.loads(path.read_text(encoding="utf-8"))["criteria"]
+
+    def test_mark_single_criterion(self, project):
+        self._make_ticket(project, ["c0", "c1", "c2"])
+        result = _tool_mark_criteria(project, {"ticket_id": "T1", "indices": [1]})
+        assert not result.get("isError")
+        criteria = self._read_criteria(project)
+        assert criteria[0]["met"] is False
+        assert criteria[1]["met"] is True
+        assert criteria[2]["met"] is False
+
+    def test_mark_multiple_criteria(self, project):
+        self._make_ticket(project, ["c0", "c1", "c2"])
+        result = _tool_mark_criteria(project, {"ticket_id": "T1", "indices": [0, 2]})
+        assert not result.get("isError")
+        criteria = self._read_criteria(project)
+        assert criteria[0]["met"] is True
+        assert criteria[1]["met"] is False
+        assert criteria[2]["met"] is True
+
+    def test_mark_as_unmet(self, project):
+        self._make_ticket(project, ["c0"])
+        _tool_mark_criteria(project, {"ticket_id": "T1", "indices": [0]})
+        result = _tool_mark_criteria(project, {
+            "ticket_id": "T1", "indices": [0], "met": False,
+        })
+        assert not result.get("isError")
+        assert self._read_criteria(project)[0]["met"] is False
+
+    def test_default_met_is_true(self, project):
+        self._make_ticket(project, ["c0"])
+        result = _tool_mark_criteria(project, {"ticket_id": "T1", "indices": [0]})
+        assert not result.get("isError")
+        assert self._read_criteria(project)[0]["met"] is True
+
+    def test_index_out_of_range(self, project):
+        self._make_ticket(project, ["c0"])
+        result = _tool_mark_criteria(project, {"ticket_id": "T1", "indices": [5]})
+        assert result.get("isError")
+        assert "out of range" in result["text"]
+
+    def test_negative_index(self, project):
+        self._make_ticket(project, ["c0"])
+        result = _tool_mark_criteria(project, {"ticket_id": "T1", "indices": [-1]})
+        assert result.get("isError")
+        assert "Invalid index" in result["text"]
+
+    def test_no_criteria_on_ticket(self, project):
+        _tool_create_ticket(project, {"id": "T1", "title": "t", "description": "d"})
+        result = _tool_mark_criteria(project, {"ticket_id": "T1", "indices": [0]})
+        assert result.get("isError")
+        assert "no criteria" in result["text"]
+
+    def test_empty_indices(self, project):
+        self._make_ticket(project, ["c0"])
+        result = _tool_mark_criteria(project, {"ticket_id": "T1", "indices": []})
+        assert result.get("isError")
+        assert "empty" in result["text"]
+
+    def test_missing_ticket(self, project):
+        result = _tool_mark_criteria(project, {"ticket_id": "nope", "indices": [0]})
+        assert result.get("isError")
+        assert "not found" in result["text"]
+
+    def test_invalid_ticket_id(self, project):
+        result = _tool_mark_criteria(project, {"ticket_id": "../bad", "indices": [0]})
+        assert result.get("isError")
+        assert "invalid characters" in result["text"]
+
+    def test_atomicity_bad_index_prevents_mutation(self, project):
+        self._make_ticket(project, ["c0", "c1"])
+        result = _tool_mark_criteria(project, {
+            "ticket_id": "T1", "indices": [0, 99],
+        })
+        assert result.get("isError")
+        criteria = self._read_criteria(project)
+        assert criteria[0]["met"] is False
+        assert criteria[1]["met"] is False
+
+    def test_dispatch_roundtrip(self, project):
+        self._make_ticket(project, ["c0"])
+        result = _call_tool(project, "mark_criteria", {
+            "ticket_id": "T1", "indices": [0],
+        })
+        assert not result["isError"]
+        assert self._read_criteria(project)[0]["met"] is True
+
+
+# ── delete_ticket ────────────────────────────────────────────────
+
+
+class TestDeleteTicket:
+    def test_deletes_existing_ticket(self, project):
+        _tool_create_ticket(project, {"id": "T1", "title": "t", "description": "d"})
+        result = _tool_delete_ticket(project, {"ticket_id": "T1"})
+        assert not result.get("isError")
+        assert not (project / "_agent" / "tickets" / "T1.json").exists()
+
+    def test_missing_ticket(self, project):
+        result = _tool_delete_ticket(project, {"ticket_id": "nope"})
+        assert result.get("isError")
+        assert "not found" in result["text"]
+
+    def test_invalid_id(self, project):
+        result = _tool_delete_ticket(project, {"ticket_id": "../bad"})
+        assert result.get("isError")
+        assert "invalid characters" in result["text"]
+
+    def test_deleted_absent_from_list(self, project):
+        _tool_create_ticket(project, {"id": "T1", "title": "t", "description": "d"})
+        _tool_delete_ticket(project, {"ticket_id": "T1"})
+        tickets = json.loads(_tool_list_tickets(project, {})["text"])
+        assert all(t["id"] != "T1" for t in tickets)
+
+    def test_delete_then_recreate(self, project):
+        _tool_create_ticket(project, {"id": "T1", "title": "t", "description": "d"})
+        _tool_delete_ticket(project, {"ticket_id": "T1"})
+        result = _tool_create_ticket(project, {"id": "T1", "title": "t2", "description": "d2"})
+        assert not result.get("isError")
+        data = json.loads(
+            (project / "_agent" / "tickets" / "T1.json").read_text(encoding="utf-8")
+        )
+        assert data["ticket"]["title"] == "t2"
+
+    def test_dispatch_roundtrip(self, project):
+        _tool_create_ticket(project, {"id": "T1", "title": "t", "description": "d"})
+        result = _call_tool(project, "delete_ticket", {"ticket_id": "T1"})
+        assert not result["isError"]
+        assert not (project / "_agent" / "tickets" / "T1.json").exists()
+
+
+# ── corruption handling ──────────────────────────────────────────
+
+
+class TestCorruptionHandling:
+    def test_list_invalid_json(self, project):
+        tdir = project / "_agent" / "tickets"
+        tdir.mkdir(parents=True, exist_ok=True)
+        (tdir / "bad.json").write_text("not json{{{", encoding="utf-8")
+        tickets = json.loads(_tool_list_tickets(project, {})["text"])
+        assert len(tickets) == 1
+        assert tickets[0]["id"] == "bad"
+        assert tickets[0]["status"] == "invalid"
+        assert "invalid JSON" in tickets[0]["error"]
+
+    def test_list_bad_schema(self, project):
+        tdir = project / "_agent" / "tickets"
+        tdir.mkdir(parents=True, exist_ok=True)
+        (tdir / "bad.json").write_text('{"not": "a ticket"}', encoding="utf-8")
+        tickets = json.loads(_tool_list_tickets(project, {})["text"])
+        assert len(tickets) == 1
+        assert tickets[0]["status"] == "invalid"
+        assert "bad schema" in tickets[0]["error"]
+
+    def test_list_mixed_valid_and_invalid(self, project):
+        _tool_create_ticket(project, {"id": "good", "title": "t", "description": "d"})
+        tdir = project / "_agent" / "tickets"
+        (tdir / "bad.json").write_text("{{broken", encoding="utf-8")
+        tickets = json.loads(_tool_list_tickets(project, {})["text"])
+        by_id = {t["id"]: t for t in tickets}
+        assert by_id["good"]["status"] == "todo"
+        assert "error" not in by_id["good"]
+        assert by_id["bad"]["status"] == "invalid"
+        assert "error" in by_id["bad"]
+
+    def test_valid_ticket_has_no_error_field(self, project):
+        _tool_create_ticket(project, {"id": "ok", "title": "t", "description": "d"})
+        tickets = json.loads(_tool_list_tickets(project, {})["text"])
+        assert "error" not in tickets[0]
+
+    def test_get_ticket_invalid_json(self, project):
+        tdir = project / "_agent" / "tickets"
+        tdir.mkdir(parents=True, exist_ok=True)
+        (tdir / "bad.json").write_text("not json", encoding="utf-8")
+        result = _tool_get_ticket(project, {"ticket_id": "bad"})
+        assert result.get("isError")
+        assert "invalid JSON" in result["text"]
+
+
+# ── required criteria (config.yaml) ─────────────────────────────
+
+
+def _write_config(project, required_criteria):
+    """Write a config.yaml with agent.required_criteria."""
+    import yaml
+    data = {"agent": {"required_criteria": required_criteria}}
+    (project / "config.yaml").write_text(yaml.dump(data), encoding="utf-8")
+
+
+class TestRequiredCriteria:
+    def test_required_criteria_added(self, project):
+        _write_config(project, ["Tests pass", "No regressions"])
+        result = _tool_create_ticket(project, {
+            "id": "T1", "title": "t", "description": "d",
+        })
+        assert not result.get("isError")
+        path = project / "_agent" / "tickets" / "T1.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        texts = [c["criterion"] for c in data["criteria"]]
+        assert "Tests pass" in texts
+        assert "No regressions" in texts
+
+    def test_merged_with_user_criteria(self, project):
+        _write_config(project, ["Tests pass"])
+        result = _tool_create_ticket(project, {
+            "id": "T1", "title": "t", "description": "d",
+            "criteria": ["Custom check"],
+        })
+        assert not result.get("isError")
+        path = project / "_agent" / "tickets" / "T1.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        texts = [c["criterion"] for c in data["criteria"]]
+        assert texts == ["Custom check", "Tests pass"]
+
+    def test_deduplication(self, project):
+        _write_config(project, ["Tests pass"])
+        result = _tool_create_ticket(project, {
+            "id": "T1", "title": "t", "description": "d",
+            "criteria": ["Tests pass", "Other"],
+        })
+        assert not result.get("isError")
+        path = project / "_agent" / "tickets" / "T1.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        texts = [c["criterion"] for c in data["criteria"]]
+        assert texts == ["Tests pass", "Other"]
+
+    def test_no_config_file(self, project):
+        """No config.yaml → no required criteria, no error."""
+        result = _tool_create_ticket(project, {
+            "id": "T1", "title": "t", "description": "d",
+        })
+        assert not result.get("isError")
+        path = project / "_agent" / "tickets" / "T1.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert data["criteria"] == []
+
+    def test_empty_required_list(self, project):
+        _write_config(project, [])
+        result = _tool_create_ticket(project, {
+            "id": "T1", "title": "t", "description": "d",
+            "criteria": ["User criterion"],
+        })
+        assert not result.get("isError")
+        path = project / "_agent" / "tickets" / "T1.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        texts = [c["criterion"] for c in data["criteria"]]
+        assert texts == ["User criterion"]
+
+    def test_all_criteria_start_unmet(self, project):
+        _write_config(project, ["Tests pass"])
+        _tool_create_ticket(project, {
+            "id": "T1", "title": "t", "description": "d",
+        })
+        path = project / "_agent" / "tickets" / "T1.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert all(c["met"] is False for c in data["criteria"])
