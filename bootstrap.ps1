@@ -75,5 +75,16 @@ PYTHONPATH="$FrameworkDirBash" exec "$PyBash" -m repo_tools.cli --workspace-root
 "@
 [System.IO.File]::WriteAllText($BashShim, $BashContent.Replace("`r`n", "`n"))
 
+# ── .gitignore ────────────────────────────────────────────────────────
+
+$Gitignore = "$Root\.gitignore"
+$Entries = @("_tools/", "repo", "repo.cmd", "_agent/")
+$Existing = if (Test-Path $Gitignore) { Get-Content $Gitignore } else { @() }
+foreach ($entry in $Entries) {
+    if ($entry -notin $Existing) {
+        Add-Content -Path $Gitignore -Value $entry
+    }
+}
+
 Write-Host "OK: $Venv"
 Write-Host "Run .\repo --help to get started."

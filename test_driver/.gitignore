@@ -1,0 +1,9 @@
+_tools/
+repo
+repo.cmd
+_agent/
+
+tools/framework
+coverage.md
+.coverage
+.claude

@@ -6,13 +6,3 @@ __pycache__/
 dist/
 build/
 .mypy_cache/
-
-# Bootstrap artifacts in test_driver
-test_driver/tools/framework
-test_driver/repo
-test_driver/repo.cmd
-test_driver/_tools/
-test_driver/_agent/
-test_driver/coverage.md
-test_driver/.coverage
-test_driver/.claude

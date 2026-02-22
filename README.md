@@ -6,11 +6,10 @@ Inspired by [NVIDIA Omniverse repo_man](https://docs.omniverse.nvidia.com/kit/do
 
 ## Why
 
-Think of `./repo` as a **local MCP server you get for free** — no daemon, no transport layer, no client integration. A human types `./repo build`; an AI agent calls the same command. Both get platform-aware token expansion, consistent error handling, and exactly the operations the project author intended.
+A human types `./repo build`; an AI agent calls the same command. Both get platform-aware token expansion, consistent error handling, and exactly the operations the project author intended. `./repo --help` is all either needs to discover available operations.
 
 - **One config, every platform.** Define commands once with `@filter` variants — `./repo build` resolves to the right toolchain on Windows, Linux, and macOS.
 - **Discoverable by design.** `./repo --help` lists every operation. Agents don't need project-specific prompts to find the build command.
-- **Safe agent automation.** The `agent` tool launches Claude Code sessions with a command allowlist that funnels operations through `./repo`, blocking shell escapes, network exfiltration, and env snooping.
 - **Zero infrastructure.** `git submodule add` + bootstrap. Works offline and in CI.
 
 ## Quick Start
@@ -69,7 +68,7 @@ Framework tools with non-trivial logic:
 | `format` | Format source (clang-format for C++, ruff for Python) |
 | `context` | Display resolved tokens and paths |
 | `python` | Run Python in the repo tooling venv |
-| `agent` | Launch coding agents with repo-aware guardrails |
+| `agent` | Launch coding agents with a command allowlist |
 
 ## Agent
 
