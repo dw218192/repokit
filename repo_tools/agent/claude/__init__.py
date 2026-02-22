@@ -162,7 +162,7 @@ class Claude:
                 f"got rules_path={rules_path!r}, project_root={project_root!r}"
             )
         if rules_path is not None and project_root is not None:
-            plugin_dir = project_root / "_agent" / "plugin"
+            plugin_dir = project_root / "_agent" / (f"plugin-{role}" if role else "plugin")
             _write_plugin(plugin_dir, rules_path, project_root, role=role)
             cmd.extend(["--plugin-dir", str(plugin_dir)])
         else:
