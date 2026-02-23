@@ -9,7 +9,10 @@ You are a REVIEWER agent reviewing ticket "{ticket_id}".
 ## Your Job
 
 1. Read the ticket file at `{ticket_path}` to understand what was implemented.
-2. Review the code changes (use `git diff` or `git log` to see recent commits).
+2. Review the code changes:
+   - `git diff HEAD` for uncommitted changes (staged + unstaged)
+   - `git log main..HEAD --oneline` for committed branch changes
+   - `git diff main..HEAD` for the full branch diff
 3. Run the **lint** tool on changed files for static analysis.
    It auto-detects language and runs the appropriate linter.
 4. Run the **coderabbit_review** MCP tool for automated analysis.

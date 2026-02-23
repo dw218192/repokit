@@ -12,6 +12,7 @@ import pytest
 from repo_tools.agent.tool import (
     _agent_run,
     _find_rules_file,
+    _has_reviewable_changes,
 )
 from repo_tools.core import ToolContext, resolve_tokens
 
@@ -162,6 +163,65 @@ class TestLifecycleGating:
 
         with pytest.raises(SystemExit):
             _agent_run(tool_ctx, role="reviewer", ticket="G1_1")
+
+    @patch("repo_tools.agent.tool._has_reviewable_changes", return_value=False)
+    def test_reviewer_exits_when_no_changes(self, _mock, tool_ctx):
+        """Reviewer exits early when there are no reviewable changes."""
+        _make_ticket(tool_ctx, status="verify")
+
+        with pytest.raises(SystemExit):
+            _agent_run(tool_ctx, role="reviewer", ticket="G1_1")
+
+
+# ── _has_reviewable_changes ──────────────────────────────────────
+
+
+class TestHasReviewableChanges:
+    @patch("repo_tools.agent.tool.subprocess.run")
+    def test_uncommitted_changes_detected(self, mock_run):
+        """Returns True when git diff HEAD shows changes."""
+        mock_run.return_value = MagicMock(returncode=1, stdout="")
+        assert _has_reviewable_changes(Path("/tmp/project")) is True
+
+    @patch("repo_tools.agent.tool.subprocess.run")
+    def test_untracked_files_detected(self, mock_run):
+        """Returns True when untracked files exist."""
+        def side_effect(cmd, **kwargs):
+            if "diff" in cmd:
+                return MagicMock(returncode=0)  # no diff
+            if "ls-files" in cmd:
+                return MagicMock(returncode=0, stdout="new_file.py\n")
+            return MagicMock(returncode=1, stdout="")
+        mock_run.side_effect = side_effect
+        assert _has_reviewable_changes(Path("/tmp/project")) is True
+
+    @patch("repo_tools.agent.tool.subprocess.run")
+    def test_branch_diff_detected(self, mock_run):
+        """Returns True when branch has commits ahead of main."""
+        def side_effect(cmd, **kwargs):
+            if "diff" in cmd:
+                return MagicMock(returncode=0)
+            if "ls-files" in cmd:
+                return MagicMock(returncode=0, stdout="")
+            if "log" in cmd and "main..HEAD" in cmd:
+                return MagicMock(returncode=0, stdout="abc123 some commit\n")
+            return MagicMock(returncode=1, stdout="")
+        mock_run.side_effect = side_effect
+        assert _has_reviewable_changes(Path("/tmp/project")) is True
+
+    @patch("repo_tools.agent.tool.subprocess.run")
+    def test_no_changes_returns_false(self, mock_run):
+        """Returns False when there are no changes at all."""
+        def side_effect(cmd, **kwargs):
+            if "diff" in cmd:
+                return MagicMock(returncode=0)  # clean
+            if "ls-files" in cmd:
+                return MagicMock(returncode=0, stdout="")  # no untracked
+            if "log" in cmd:
+                return MagicMock(returncode=0, stdout="")  # no branch diff
+            return MagicMock(returncode=0, stdout="")
+        mock_run.side_effect = side_effect
+        assert _has_reviewable_changes(Path("/tmp/project")) is False
 
 
 # ── _agent_run (headless mode) ───────────────────────────────────

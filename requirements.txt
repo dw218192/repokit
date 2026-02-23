@@ -4,3 +4,5 @@ colorama>=0.4
 tomli>=2.0; python_version < "3.11"
 bashlex>=0.18
 ruff>=0.4
+clang-format>=19.0
+clang-tidy>=19.0

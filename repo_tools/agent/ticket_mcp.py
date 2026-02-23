@@ -47,7 +47,7 @@ _ROLE_ALLOWED_TOOLS: dict[str, set[str]] = {
 }
 
 _ROLE_UPDATE_FIELDS: dict[str, set[str]] = {
-    "orchestrator": {"status", "notes", "result", "feedback", "description"},
+    "orchestrator": {"status", "notes", "feedback", "description"},
     "worker": {"status", "notes"},
     "reviewer": {"status", "result", "feedback"},
 }
@@ -57,7 +57,6 @@ _ROLE_ALLOWED_TRANSITIONS: dict[str, set[tuple[str, str]]] = {
         ("todo", "in_progress"),
         ("todo", "verify"),
         ("in_progress", "verify"),
-        ("verify", "closed"),
         ("verify", "todo"),
     },
     "worker": {

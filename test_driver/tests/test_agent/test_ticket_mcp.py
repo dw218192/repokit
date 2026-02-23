@@ -825,6 +825,7 @@ class TestRoleEnforcement:
     # ── Field access ─────────────────────────────────────────────
 
     @pytest.mark.parametrize("role,field,value", [
+        ("orchestrator", "result", "pass"),
         ("worker", "result", "pass"),
         ("worker", "feedback", "looks good"),
         ("worker", "description", "new desc"),
@@ -854,13 +855,14 @@ class TestRoleEnforcement:
         }, role="reviewer")
         assert not result.get("isError")
 
-    def test_orchestrator_can_set_result_and_feedback(self, project):
+    def test_orchestrator_cannot_set_result(self, project):
         _tool_create_ticket(project, {"id": "T1", "title": "t", "description": "d"})
         _advance_ticket(project, "T1", "verify")
         result = _tool_update_ticket(project, {
             "ticket_id": "T1", "result": "fail", "feedback": "Needs work",
         }, role="orchestrator")
-        assert not result.get("isError")
+        assert result.get("isError")
+        assert "cannot update fields" in result["text"]
 
     def test_update_description(self, project):
         _tool_create_ticket(project, {"id": "T1", "title": "t", "description": "original"})
@@ -874,20 +876,25 @@ class TestRoleEnforcement:
 
     # ── Transition access ────────────────────────────────────────
 
-    def test_orchestrator_can_close(self, project):
+    def test_orchestrator_cannot_close(self, project):
         _tool_create_ticket(project, {"id": "T1", "title": "t", "description": "d"})
         _advance_ticket(project, "T1", "verify")
         self._make_review_ready(project, "T1")
         result = _tool_update_ticket(project, {
-            "ticket_id": "T1", "status": "closed", "result": "pass",
+            "ticket_id": "T1", "status": "closed",
         }, role="orchestrator")
-        assert not result.get("isError")
+        assert result.get("isError")
+        assert "cannot transition" in result["text"]
 
     def test_orchestrator_can_reopen(self, project):
         _tool_create_ticket(project, {"id": "T1", "title": "t", "description": "d"})
         _advance_ticket(project, "T1", "verify")
+        # Reviewer sets result: fail first
+        _tool_update_ticket(project, {
+            "ticket_id": "T1", "result": "fail",
+        }, role="reviewer")
         result = _tool_update_ticket(project, {
-            "ticket_id": "T1", "status": "todo", "result": "fail",
+            "ticket_id": "T1", "status": "todo",
         }, role="orchestrator")
         assert not result.get("isError")
 
