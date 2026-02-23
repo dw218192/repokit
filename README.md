@@ -106,6 +106,32 @@ _agent/
 
 **Let the orchestrator drive.** Resist the urge to implement directly in the orchestrator session — its value is in planning, dispatching, and verifying. The worker/reviewer cycle gives you built-in code review.
 
+### Ticket Lifecycle
+
+```
+todo ──→ in_progress ──→ verify ──→ closed
+  ↑                        │
+  └────────────────────────┘ (reopen on fail)
+```
+
+| Transition | Orchestrator | Worker | Reviewer | Constraints |
+|---|---|---|---|---|
+| todo → in_progress | yes | yes | — | — |
+| todo → verify | yes | yes | — | — |
+| in_progress → verify | yes | yes | — | — |
+| verify → closed | yes | — | yes | `result=pass`, all criteria met |
+| verify → todo | yes | — | yes | `result=fail` |
+
+**Field permissions:**
+
+| Field | Orchestrator | Worker | Reviewer |
+|---|---|---|---|
+| `status` | yes | yes | yes |
+| `notes` | yes | yes | — |
+| `result` | yes | — | yes |
+| `feedback` | yes | — | yes |
+| `description` | yes | — | — |
+
 Agent settings in `config.yaml`:
 
 ```yaml

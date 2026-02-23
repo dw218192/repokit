@@ -22,6 +22,10 @@ If you **cannot finish** (e.g. blocked, out of turns, or partially done),
 report `status: "in_progress"` with `notes` describing what you completed
 and what remains. The ticket stays available for a future worker run.
 
+If the ticket was reopened after a failed review, `progress.notes` or
+`review.feedback` will already contain content — read and address that
+feedback before submitting again.
+
 ## Rules
 
 - Stay focused on your assigned ticket only.

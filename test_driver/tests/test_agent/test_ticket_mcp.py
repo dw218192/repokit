@@ -827,9 +827,9 @@ class TestRoleEnforcement:
     @pytest.mark.parametrize("role,field,value", [
         ("worker", "result", "pass"),
         ("worker", "feedback", "looks good"),
-        ("orchestrator", "result", "pass"),
-        ("orchestrator", "feedback", "ok"),
+        ("worker", "description", "new desc"),
         ("reviewer", "notes", "progress note"),
+        ("reviewer", "description", "new desc"),
     ])
     def test_field_denied(self, project, role, field, value):
         _tool_create_ticket(project, {"id": "T1", "title": "t", "description": "d"})
@@ -854,17 +854,42 @@ class TestRoleEnforcement:
         }, role="reviewer")
         assert not result.get("isError")
 
-    # ── Transition access ────────────────────────────────────────
-
-    def test_orchestrator_cannot_close(self, project):
+    def test_orchestrator_can_set_result_and_feedback(self, project):
         _tool_create_ticket(project, {"id": "T1", "title": "t", "description": "d"})
         _advance_ticket(project, "T1", "verify")
-        data = self._make_review_ready(project, "T1")
         result = _tool_update_ticket(project, {
-            "ticket_id": "T1", "status": "closed",
+            "ticket_id": "T1", "result": "fail", "feedback": "Needs work",
         }, role="orchestrator")
-        assert result.get("isError")
-        assert "cannot transition" in result["text"]
+        assert not result.get("isError")
+
+    def test_update_description(self, project):
+        _tool_create_ticket(project, {"id": "T1", "title": "t", "description": "original"})
+        result = _tool_update_ticket(project, {
+            "ticket_id": "T1", "description": "revised instructions",
+        }, role="orchestrator")
+        assert not result.get("isError")
+        path = project / "_agent" / "tickets" / "T1.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert data["ticket"]["description"] == "revised instructions"
+
+    # ── Transition access ────────────────────────────────────────
+
+    def test_orchestrator_can_close(self, project):
+        _tool_create_ticket(project, {"id": "T1", "title": "t", "description": "d"})
+        _advance_ticket(project, "T1", "verify")
+        self._make_review_ready(project, "T1")
+        result = _tool_update_ticket(project, {
+            "ticket_id": "T1", "status": "closed", "result": "pass",
+        }, role="orchestrator")
+        assert not result.get("isError")
+
+    def test_orchestrator_can_reopen(self, project):
+        _tool_create_ticket(project, {"id": "T1", "title": "t", "description": "d"})
+        _advance_ticket(project, "T1", "verify")
+        result = _tool_update_ticket(project, {
+            "ticket_id": "T1", "status": "todo", "result": "fail",
+        }, role="orchestrator")
+        assert not result.get("isError")
 
     def test_worker_cannot_close(self, project):
         _tool_create_ticket(project, {"id": "T1", "title": "t", "description": "d"})
