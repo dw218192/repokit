@@ -419,3 +419,96 @@ class TestBuildCommand:
         hook_cmd = perm[0]["hooks"][0]["command"]
         assert "approve_mcp" in hook_cmd
         assert "repo_tools.agent.hooks" in hook_cmd
+
+    def test_lint_mcp_in_plugin(self, tmp_path):
+        """Plugin .mcp.json includes a lint server entry."""
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        claude = Claude()
+        claude.build_command(
+            rules_path=rules,
+            project_root=tmp_path,
+        )
+        mcp = json.loads(
+            (tmp_path / "_agent" / "plugin" / ".mcp.json").read_text()
+        )
+
+        assert "lint" in mcp["mcpServers"]
+        lint = mcp["mcpServers"]["lint"]
+        assert lint["type"] == "stdio"
+        assert "lint_mcp_stdio" in " ".join(lint["args"])
+
+    def test_lint_mcp_no_select_by_default(self, tmp_path):
+        """Without ruff_select, --select does not appear in lint MCP args."""
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        claude = Claude()
+        claude.build_command(
+            rules_path=rules,
+            project_root=tmp_path,
+        )
+        mcp = json.loads(
+            (tmp_path / "_agent" / "plugin" / ".mcp.json").read_text()
+        )
+
+        lint_args = mcp["mcpServers"]["lint"]["args"]
+        assert "--select" not in lint_args
+
+    def test_lint_mcp_select_passed_through(self, tmp_path):
+        """ruff_select adds --select to lint MCP args."""
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        claude = Claude()
+        claude.build_command(
+            rules_path=rules,
+            project_root=tmp_path,
+            ruff_select="E,F,S,B,SIM",
+        )
+        mcp = json.loads(
+            (tmp_path / "_agent" / "plugin" / ".mcp.json").read_text()
+        )
+
+        lint_args = mcp["mcpServers"]["lint"]["args"]
+        assert "--select" in lint_args
+        select_idx = lint_args.index("--select")
+        assert lint_args[select_idx + 1] == "E,F,S,B,SIM"
+
+    def test_lint_mcp_ignore_passed_through(self, tmp_path):
+        """ruff_ignore adds --ignore to lint MCP args."""
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        claude = Claude()
+        claude.build_command(
+            rules_path=rules,
+            project_root=tmp_path,
+            ruff_ignore="SIM108,B006",
+        )
+        mcp = json.loads(
+            (tmp_path / "_agent" / "plugin" / ".mcp.json").read_text()
+        )
+
+        lint_args = mcp["mcpServers"]["lint"]["args"]
+        assert "--ignore" in lint_args
+        ignore_idx = lint_args.index("--ignore")
+        assert lint_args[ignore_idx + 1] == "SIM108,B006"
+
+    def test_lint_mcp_no_ignore_by_default(self, tmp_path):
+        """Without ruff_ignore, --ignore does not appear in lint MCP args."""
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        claude = Claude()
+        claude.build_command(
+            rules_path=rules,
+            project_root=tmp_path,
+        )
+        mcp = json.loads(
+            (tmp_path / "_agent" / "plugin" / ".mcp.json").read_text()
+        )
+
+        lint_args = mcp["mcpServers"]["lint"]["args"]
+        assert "--ignore" not in lint_args

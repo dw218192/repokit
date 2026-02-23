@@ -157,6 +157,9 @@ def _agent_run(
         else:
             worktree_name = ""  # let Claude Code auto-generate
 
+    ruff_select = tool_ctx.tool_config.get("ruff_select")
+    ruff_ignore = tool_ctx.tool_config.get("ruff_ignore")
+
     cmd = _backend.build_command(
         prompt=prompt,
         role=role,
@@ -166,6 +169,8 @@ def _agent_run(
         debug_hooks=debug_hooks,
         worktree=worktree_name,
         max_turns=max_turns,
+        ruff_select=ruff_select,
+        ruff_ignore=ruff_ignore,
     )
 
     if prompt is not None:
