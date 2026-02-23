@@ -60,6 +60,42 @@ def _render_role_prompt(role: str, **kwargs: str) -> str:
     return "\n".join(parts).format_map(kwargs)
 
 
+def _has_reviewable_changes(workspace_root: Path) -> bool:
+    """Check if there are any changes for a reviewer to review.
+
+    Returns True if there are uncommitted changes (staged or unstaged)
+    or if the current branch has commits diverging from the default branch.
+    """
+    cwd = str(workspace_root)
+
+    # Check uncommitted changes (staged + unstaged)
+    diff = subprocess.run(
+        ["git", "diff", "HEAD", "--quiet"],
+        cwd=cwd, capture_output=True,
+    )
+    if diff.returncode != 0:
+        return True
+
+    # Check untracked files
+    untracked = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard"],
+        cwd=cwd, capture_output=True, text=True,
+    )
+    if untracked.stdout.strip():
+        return True
+
+    # Check branch diff from common default branches
+    for base in ("main", "master"):
+        log = subprocess.run(
+            ["git", "log", f"{base}..HEAD", "--oneline", "-1"],
+            cwd=cwd, capture_output=True, text=True,
+        )
+        if log.returncode == 0 and log.stdout.strip():
+            return True
+
+    return False
+
+
 _SAFE_AGENT_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
@@ -120,6 +156,13 @@ def _agent_run(
             )
             sys.exit(1)
 
+        if role == "reviewer" and not _has_reviewable_changes(tool_ctx.workspace_root):
+            logger.error(
+                "No reviewable changes found (no uncommitted diff, no branch "
+                "diff from default branch). Nothing for reviewer to review."
+            )
+            sys.exit(1)
+
         role_prompt = _render_role_prompt(
             role,
             ticket_id=ticket,
@@ -157,6 +200,9 @@ def _agent_run(
         else:
             worktree_name = ""  # let Claude Code auto-generate
 
+    ruff_select = tool_ctx.tool_config.get("ruff_select")
+    ruff_ignore = tool_ctx.tool_config.get("ruff_ignore")
+
     cmd = _backend.build_command(
         prompt=prompt,
         role=role,
@@ -166,6 +212,8 @@ def _agent_run(
         debug_hooks=debug_hooks,
         worktree=worktree_name,
         max_turns=max_turns,
+        ruff_select=ruff_select,
+        ruff_ignore=ruff_ignore,
     )
 
     if prompt is not None:

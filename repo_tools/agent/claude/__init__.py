@@ -52,6 +52,8 @@ def _write_plugin(
     rules_path: Path,
     project_root: Path,
     role: str | None = None,
+    ruff_select: str | None = None,
+    ruff_ignore: str | None = None,
 ) -> None:
     """Write a Claude Code plugin directory with hooks and MCP config.
 
@@ -85,13 +87,23 @@ def _write_plugin(
         check_bash_args.extend(["--role", role])
     check_bash_args.extend(["--debug-log", debug_log.as_posix()])
 
+    approve_mcp_cmd = shlex.join([
+        *base_cmd, "approve_mcp", "--debug-log", debug_log.as_posix(),
+    ])
+
     hook_events: dict = {
         "PreToolUse": [
             {
                 "matcher": "Bash",
                 "hooks": [{"type": "command", "command": shlex.join(check_bash_args)}],
             }
-        ]
+        ],
+        "PermissionRequest": [
+            {
+                "matcher": "^mcp__",
+                "hooks": [{"type": "command", "command": approve_mcp_cmd}],
+            }
+        ],
     }
 
     hooks_dir = plugin_dir / "hooks"
@@ -108,12 +120,23 @@ def _write_plugin(
     if role:
         ticket_args.extend(["--role", role])
 
+    lint_args = ["-m", "repo_tools.agent.hooks.lint_mcp_stdio"]
+    if ruff_select:
+        lint_args.extend(["--select", ruff_select])
+    if ruff_ignore:
+        lint_args.extend(["--ignore", ruff_ignore])
+
     mcp_config: dict = {
         "mcpServers": {
             "coderabbit": {
                 "type": "stdio",
                 "command": posix_path(sys.executable),
                 "args": ["-m", "repo_tools.agent.hooks.coderabbit_mcp_stdio"],
+            },
+            "lint": {
+                "type": "stdio",
+                "command": posix_path(sys.executable),
+                "args": lint_args,
             },
             "tickets": {
                 "type": "stdio",
@@ -141,6 +164,8 @@ class Claude:
         debug_hooks: bool = False,
         worktree: str | None = None,
         max_turns: int | None = None,
+        ruff_select: str | None = None,
+        ruff_ignore: str | None = None,
     ) -> list[str]:
         # Build allowed tools list — roles get Bash
         allowed = list(_ALLOWED_TOOLS)
@@ -163,7 +188,10 @@ class Claude:
             )
         if rules_path is not None and project_root is not None:
             plugin_dir = project_root / "_agent" / (f"plugin-{role}" if role else "plugin")
-            _write_plugin(plugin_dir, rules_path, project_root, role=role)
+            _write_plugin(
+                plugin_dir, rules_path, project_root,
+                role=role, ruff_select=ruff_select, ruff_ignore=ruff_ignore,
+            )
             cmd.extend(["--plugin-dir", str(plugin_dir)])
         else:
             logger.warning("No rules_path/project_root provided; launching Claude without hooks or MCP server")

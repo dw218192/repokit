@@ -47,7 +47,7 @@ _ROLE_ALLOWED_TOOLS: dict[str, set[str]] = {
 }
 
 _ROLE_UPDATE_FIELDS: dict[str, set[str]] = {
-    "orchestrator": {"status", "notes"},
+    "orchestrator": {"status", "notes", "feedback", "description"},
     "worker": {"status", "notes"},
     "reviewer": {"status", "result", "feedback"},
 }
@@ -57,6 +57,7 @@ _ROLE_ALLOWED_TRANSITIONS: dict[str, set[tuple[str, str]]] = {
         ("todo", "in_progress"),
         ("todo", "verify"),
         ("in_progress", "verify"),
+        ("verify", "todo"),
     },
     "worker": {
         ("todo", "in_progress"),
@@ -148,6 +149,10 @@ _TOOLS = [
                 "feedback": {
                     "type": "string",
                     "description": "Review feedback.",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "New ticket description.",
                 },
             },
             "required": ["ticket_id"],
@@ -430,7 +435,7 @@ def _tool_update_ticket(root: Path, args: dict, *, role: str | None = None) -> d
 
     data = json.loads(ticket_path.read_text(encoding="utf-8"))
 
-    updatable = {"status", "notes", "result", "feedback"}
+    updatable = {"status", "notes", "result", "feedback", "description"}
     updates = {k: v for k, v in args.items() if k in updatable and v is not None}
     if not updates:
         return {"text": "No fields to update"}
@@ -448,6 +453,8 @@ def _tool_update_ticket(root: Path, args: dict, *, role: str | None = None) -> d
         data["review"]["result"] = updates["result"]
     if "feedback" in updates:
         data["review"]["feedback"] = updates["feedback"]
+    if "description" in updates:
+        data["ticket"]["description"] = updates["description"]
 
     # Check status transition if status is being changed
     if "status" in updates:

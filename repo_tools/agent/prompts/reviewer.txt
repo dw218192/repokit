@@ -9,12 +9,26 @@ You are a REVIEWER agent reviewing ticket "{ticket_id}".
 ## Your Job
 
 1. Read the ticket file at `{ticket_path}` to understand what was implemented.
-2. Review the code changes (use `git diff` or `git log` to see recent commits).
-3. Run the **coderabbit_review** MCP tool for automated analysis.
+2. Review the code changes:
+   - `git diff HEAD` for uncommitted changes (staged + unstaged)
+   - `git log main..HEAD --oneline` for committed branch changes
+   - `git diff main..HEAD` for the full branch diff
+3. Run the **lint** tool on changed files for static analysis.
+   It auto-detects language and runs the appropriate linter.
+4. Run the **coderabbit_review** MCP tool for automated analysis.
    If the tool returns an error (not installed, not authenticated, or Bash unavailable),
    skip this step and rely entirely on your own manual review.
-4. Build and test (`{repo_cmd} build`, `{repo_cmd} test`).
-5. Evaluate whether the implementation meets the ticket requirements.
+5. Build and test (`{repo_cmd} build`, `{repo_cmd} test`).
+6. Evaluate whether the implementation meets the ticket requirements.
+
+## Completion
+
+When your review is finished, report the outcome using the ticket tools:
+
+- **Pass:** Set `result: "pass"`, mark all acceptance criteria as met via
+  `mark_criteria`, then set `status: "closed"`.
+- **Fail:** Set `result: "fail"`, provide `feedback` with actionable details
+  explaining what must change, then set `status: "todo"`.
 
 ## Rules
 
