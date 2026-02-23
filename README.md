@@ -11,6 +11,7 @@ A human types `./repo build`; an AI agent calls the same command. Both get platf
 - **One config, every platform.** Define commands once with `@filter` variants — `./repo build` resolves to the right toolchain on Windows, Linux, and macOS.
 - **Discoverable by design.** `./repo --help` lists every operation. Agents don't need project-specific prompts to find the build command.
 - **Zero infrastructure.** `git submodule add` + bootstrap. Works offline and in CI.
+- **Agent guardrails.** `./repo agent` runs AI coding agents with a Bash command allowlist, ticket-driven planning, and automated review via clang-tidy, ruff, and CodeRabbit — keeping output consistent with the plan.
 
 ## Quick Start
 
