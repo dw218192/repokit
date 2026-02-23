@@ -85,13 +85,23 @@ def _write_plugin(
         check_bash_args.extend(["--role", role])
     check_bash_args.extend(["--debug-log", debug_log.as_posix()])
 
+    approve_mcp_cmd = shlex.join([
+        *base_cmd, "approve_mcp", "--debug-log", debug_log.as_posix(),
+    ])
+
     hook_events: dict = {
         "PreToolUse": [
             {
                 "matcher": "Bash",
                 "hooks": [{"type": "command", "command": shlex.join(check_bash_args)}],
             }
-        ]
+        ],
+        "PermissionRequest": [
+            {
+                "matcher": "^mcp__",
+                "hooks": [{"type": "command", "command": approve_mcp_cmd}],
+            }
+        ],
     }
 
     hooks_dir = plugin_dir / "hooks"

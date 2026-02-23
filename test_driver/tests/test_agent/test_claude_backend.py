@@ -399,3 +399,23 @@ class TestBuildCommand:
         claude = Claude()
         cmd = claude.build_command(max_turns=25)
         assert "--max-turns" not in cmd
+
+    def test_permission_request_hook_for_mcp(self, tmp_path):
+        """PermissionRequest hook auto-approves MCP tools via approve_mcp."""
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        claude = Claude()
+        claude.build_command(
+            rules_path=rules,
+            project_root=tmp_path,
+        )
+        hooks_path = tmp_path / "_agent" / "plugin" / "hooks" / "hooks.json"
+        data = json.loads(hooks_path.read_text())
+
+        perm = data["hooks"]["PermissionRequest"]
+        assert len(perm) == 1
+        assert perm[0]["matcher"] == "^mcp__"
+        hook_cmd = perm[0]["hooks"][0]["command"]
+        assert "approve_mcp" in hook_cmd
+        assert "repo_tools.agent.hooks" in hook_cmd
