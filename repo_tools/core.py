@@ -567,6 +567,42 @@ def find_venv_executable(name: str) -> str:
     return name
 
 
+def sanitized_subprocess_env() -> dict[str, str]:
+    """Return env overrides that strip repo-tool Python contamination.
+
+    The generated shim (``repo`` / ``repo.cmd``) prepends the venv's Scripts
+    directory to ``PATH`` and sets ``PYTHONPATH`` so the CLI can import
+    ``repo_tools``.  These variables must **not** leak into build-tool
+    subprocesses (Conan, CMake, …) because they can cause the wrong Python
+    stdlib to be loaded — for example, a system Python 3.12 picking up the
+    venv's Python 3.14 stdlib, resulting in ``SRE module mismatch`` or
+    ``_thread`` attribute errors.
+
+    Returns a dict suitable for the *env* parameter of :func:`run_command`
+    or :class:`CommandGroup`.  The dict is merged **on top of**
+    ``os.environ``, so only the keys that need overriding are present.
+    """
+    env: dict[str, str] = {}
+
+    # Strip PYTHONPATH — only needed for repo_tools imports
+    env["PYTHONPATH"] = ""
+
+    # Strip PYTHONHOME if present
+    if "PYTHONHOME" in os.environ:
+        env["PYTHONHOME"] = ""
+
+    # Remove venv Scripts from PATH so build tools find the system Python
+    venv_bin = os.path.normcase(os.path.normpath(str(Path(sys.executable).parent)))
+    path_parts = os.environ.get("PATH", "").split(os.pathsep)
+    clean_parts = [
+        p for p in path_parts
+        if os.path.normcase(os.path.normpath(p)) != venv_bin
+    ]
+    env["PATH"] = os.pathsep.join(clean_parts)
+
+    return env
+
+
 def run_command(
     cmd: list[str],
     log_file: Path | None = None,
