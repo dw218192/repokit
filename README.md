@@ -92,21 +92,9 @@ _agent/
     plugin/             ← auto-generated hooks and MCP config
 ```
 
-### Recommended Workflow
+### Usage
 
-**Plan → ticket → execute → merge → verify.**
-
-1. `./repo agent` — start an interactive orchestrator session.
-2. Describe what you want. The orchestrator explores the codebase and enters plan mode.
-3. Approve the plan. The orchestrator creates tickets with short descriptive IDs (e.g. `add-auth-hook`) via the `create_ticket` MCP tool.
-4. The orchestrator dispatches headless workers and reviewers for each ticket.
-5. After review passes, the orchestrator merges the worktree branch, builds, tests, and verifies acceptance criteria before moving on.
-
-**Keep tickets small.** Each ticket should be completable in a single focused agent session. If a ticket needs too many turns, split it.
-
-**Use worktrees for isolation.** The `-w` flag runs workers in a git worktree so they don't interfere with your working tree or each other.
-
-**Let the orchestrator drive.** Resist the urge to implement directly in the orchestrator session — its value is in planning, dispatching, and verifying. The worker/reviewer cycle gives you built-in code review.
+Run `./repo agent` and describe what you want. The orchestrator handles the rest — it explores the codebase, plans the changes, creates tickets, dispatches headless workers and reviewers, merges results, and verifies acceptance criteria. You only need to approve the plan when prompted.
 
 ### Ticket Lifecycle
 
