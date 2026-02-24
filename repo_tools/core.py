@@ -179,8 +179,11 @@ def resolve_tokens(
     """
     tokens: dict[str, str] = _builtin_tokens()
 
-    # Variable tokens from config
-    for key, value in config.get("tokens", {}).items():
+    # Variable tokens from config (repo.tokens section)
+    repo_section = config.get("repo", {})
+    if not isinstance(repo_section, dict):
+        repo_section = {}
+    for key, value in repo_section.get("tokens", {}).items():
         if isinstance(value, list):
             continue  # dimension tokens handled elsewhere
         if key in _RESERVED_TOKENS:
@@ -370,6 +373,8 @@ class RepoTool:
 
     name: str = ""
     help: str = ""
+    feature: str = ""
+    deps: list[str] = []
 
     def setup(self, cmd: click.Command) -> click.Command:
         """Add click options/arguments to the command. Return the command."""
@@ -401,6 +406,14 @@ def register_tool(tool: RepoTool) -> None:
 def get_tool(name: str) -> RepoTool | None:
     """Look up a registered tool by name."""
     return _TOOL_REGISTRY.get(name)
+
+
+def registered_tool_deps() -> list[str]:
+    """Collect, deduplicate, and sort deps from all registered tools."""
+    seen: set[str] = set()
+    for tool in _TOOL_REGISTRY.values():
+        seen.update(tool.deps)
+    return sorted(seen)
 
 
 def invoke_tool(

@@ -38,48 +38,10 @@ if (-not (Test-Path $Py)) {
     $Py = "$Venv\bin\python"
 }
 
-# ── Install dependencies ─────────────────────────────────────────────
+# ── Bootstrap: deps + shims ───────────────────────────────────────────
 
-& $Uv pip install --python $Py -r "$FrameworkDir\requirements.txt"
-
-$ProjectReqs = "$Root\tools\requirements.txt"
-if (Test-Path $ProjectReqs) {
-    & $Uv pip install --python $Py -r $ProjectReqs
-}
-
-# ── Generate ./repo shims ────────────────────────────────────────────
-
-$VenvBin = Split-Path -Parent $Py
-
-# repo.cmd — native Windows shim (PowerShell / cmd)
-$CmdShim = "$Root\repo.cmd"
-$CmdContent = @"
-@echo off
-set "PATH=$VenvBin;%PATH%"
-set "PYTHONPATH=$FrameworkDir"
-"$Py" -m repo_tools.cli --workspace-root "$Root" %*
-"@
-[System.IO.File]::WriteAllText($CmdShim, $CmdContent.Replace("`r`n", "`r`n"))
-
-# repo — bash shim (Git Bash)
-$FrameworkDirBash = $FrameworkDir -replace '\\','/'
-$PyBash = $Py -replace '\\','/'
-$RootBash = $Root -replace '\\','/'
-$VenvBinBash = $VenvBin -replace '\\','/'
-
-$BashShim = "$Root\repo"
-$BashContent = @"
-#!/bin/bash
-export PATH="${VenvBinBash}:`$PATH"
-PYTHONPATH="$FrameworkDirBash" exec "$PyBash" -m repo_tools.cli --workspace-root "$RootBash" "`$@"
-"@
-[System.IO.File]::WriteAllText($BashShim, $BashContent.Replace("`r`n", "`n"))
-
-# ── .gitignore ────────────────────────────────────────────────────────
-
-$Gitignore = "$Root\.gitignore"
+# Stdlib-only — no pip install needed before this.
 $env:PYTHONPATH = $FrameworkDir
-& $Py -m repo_tools.gitignore $Gitignore
+& $Py -m repo_tools._bootstrap $FrameworkDir $Root $Uv
 
 Write-Host "OK: $Venv"
-Write-Host "Run .\repo --help to get started."

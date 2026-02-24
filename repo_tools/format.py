@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -10,7 +9,8 @@ from typing import Any
 
 import click
 
-from .core import RepoTool, ToolContext, find_venv_executable, logger
+from .core import RepoTool, ToolContext, logger
+from .features import require_executable
 
 
 _CLANG_FORMAT_EXTENSIONS = {".cpp", ".h", ".hpp", ".c", ".cc", ".cxx", ".hxx"}
@@ -82,15 +82,7 @@ class FormatTool(RepoTool):
         if logs_root:
             exclude_dirs.add(Path(logs_root).name)
 
-        clang_format_exe = find_venv_executable("clang-format")
-
-        # Verify the executable actually exists
-        if not shutil.which(clang_format_exe):
-            logger.error(
-                f"clang-format not found at '{clang_format_exe}'. "
-                "Install it or add it to PATH."
-            )
-            sys.exit(1)
+        clang_format_exe = require_executable("clang-format", feature="cpp")
 
         clang_format_file = root / ".clang-format"
         if not clang_format_file.exists():
@@ -186,13 +178,7 @@ class FormatTool(RepoTool):
         logger.info(f"Successfully formatted {len(files)} file(s)")
 
     def _run_python_formatter(self, root: Path, verify: bool, tool_name: str) -> None:
-        exe = find_venv_executable(tool_name)
-        if not shutil.which(exe):
-            logger.error(
-                f"{tool_name} not found at '{exe}'. "
-                "Install it or add it to PATH."
-            )
-            sys.exit(1)
+        exe = require_executable(tool_name, feature="python")
 
         if verify:
             cmd = [exe, "format", "--check", str(root)]

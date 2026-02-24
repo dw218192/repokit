@@ -51,38 +51,9 @@ else
     exit 1
 fi
 
-# ── Install dependencies ─────────────────────────────────────────────
+# ── Bootstrap: deps + shims ───────────────────────────────────────────
 
-# Framework requirements
-"$UV" pip install --python "$PY" -r "$FRAMEWORK_DIR/requirements.txt"
-
-# Project requirements (if present)
-PROJECT_REQS="$ROOT/tools/requirements.txt"
-if [[ -f "$PROJECT_REQS" ]]; then
-    "$UV" pip install --python "$PY" -r "$PROJECT_REQS"
-fi
-
-# ── Generate ./repo shim ─────────────────────────────────────────────
-
-# The shim sets PYTHONPATH so that repo_tools is importable as a
-# namespace package, then runs it as a module.  Project tool dirs are
-# discovered at runtime by cli.py.
-# PATH is prepended with the venv bin dir so subprocess calls
-# (e.g. "python -m pytest") find venv Python, not the system one.
-
-VENV_BIN="$(dirname "$PY")"
-SHIM="$ROOT/repo"
-cat > "$SHIM" <<SHIMEOF
-#!/bin/bash
-export PATH="$VENV_BIN:\$PATH"
-PYTHONPATH="$FRAMEWORK_DIR" exec "$PY" -m repo_tools.cli --workspace-root "$ROOT" "\$@"
-SHIMEOF
-chmod +x "$SHIM" 2>/dev/null || true
-
-# ── .gitignore ────────────────────────────────────────────────────────
-
-GITIGNORE="$ROOT/.gitignore"
-PYTHONPATH="$FRAMEWORK_DIR" "$PY" -m repo_tools.gitignore "$GITIGNORE"
+# Stdlib-only — no pip install needed before this.
+PYTHONPATH="$FRAMEWORK_DIR" "$PY" -m repo_tools._bootstrap "$FRAMEWORK_DIR" "$ROOT" "$UV"
 
 echo "OK: $VENV"
-echo "Run ./repo --help to get started."
