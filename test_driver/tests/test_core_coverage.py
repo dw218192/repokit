@@ -95,7 +95,7 @@ class TestMapPlatform:
 
 class TestResolveTokensEdge:
     def test_list_tokens_skipped(self):
-        config = {"tokens": {"platform": ["linux-x64", "windows-x64"], "custom": "val"}}
+        config = {"repo": {"tokens": {"platform": ["linux-x64", "windows-x64"], "custom": "val"}}}
         result = resolve_tokens("/ws", config, {"platform": "linux-x64", "build_type": "Debug"})
         assert result["custom"] == "val"
         # list token should not appear as raw list

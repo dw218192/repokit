@@ -43,8 +43,9 @@ def test_context_displays_tokens(make_workspace, capture_logs):
 def test_context_json(make_workspace):
     ws = make_workspace(
         config_yaml="""\
-        tokens:
-            custom_var: hello
+        repo:
+            tokens:
+                custom_var: hello
         """
     )
     cli = _cli_for(ws)
@@ -62,8 +63,9 @@ def test_dimension_flags_affect_tokens(make_workspace):
     """Dimensions defined in config tokens produce group-level flags that update tokens."""
     ws = make_workspace(
         config_yaml="""\
-        tokens:
-            build_type: [Debug, Release]
+        repo:
+            tokens:
+                build_type: [Debug, Release]
         """
     )
     cli = _cli_for(ws)
@@ -79,9 +81,10 @@ def test_dimension_flags_affect_tokens(make_workspace):
 def test_config_dimension_tokens(make_workspace):
     ws = make_workspace(
         config_yaml="""\
-        tokens:
-            platform: [windows-x64, linux-x64]
-            build_type: [Debug, Release]
+        repo:
+            tokens:
+                platform: [windows-x64, linux-x64]
+                build_type: [Debug, Release]
         """
     )
     cli = _cli_for(ws)
@@ -131,8 +134,9 @@ def test_auto_generated_tool_appears_in_help(make_workspace):
 def test_auto_generated_tool_dry_run(make_workspace, capture_logs):
     ws = make_workspace(
         config_yaml="""\
-        tokens:
-            build_type: [Debug, Release]
+        repo:
+            tokens:
+                build_type: [Debug, Release]
         build:
             steps:
                 - "cmake --config {build_type}"
@@ -164,7 +168,105 @@ def test_auto_generated_tool_exposes_dry_run(make_workspace):
     assert "--dry-run" in result.output
 
 
-# ── 9. __init__.py in project repo_tools/ is rejected ────────────────
+# ── 9. repo section is not auto-registered as a tool ──────────────────
+
+
+def test_repo_section_not_auto_registered(make_workspace):
+    """The 'repo' config section is skipped by auto-registration even if it has steps."""
+    ws = make_workspace(
+        config_yaml="""\
+        repo:
+            steps:
+                - "echo should not become a tool"
+            tokens:
+                custom: hello
+            features: [conan]
+        """
+    )
+    cli = _cli_for(ws)
+    result = CliRunner().invoke(cli, ["repo", "--help"])
+    # 'repo' should not be registered as a command — invoke should fail
+    assert result.exit_code != 0
+
+
+# ── 10. Feature-gated tools are hidden when feature not enabled ───────
+
+
+def test_feature_gated_tool_hidden(make_workspace):
+    """A tool with a non-empty feature is hidden when that feature is not in repo.features."""
+    _gated_tool_src = """\
+from repo_tools.core import RepoTool
+
+class GatedTool(RepoTool):
+    name = "gated-cmd"
+    help = "A gated tool"
+    feature = "conan"
+
+    def execute(self, ctx, args):
+        pass
+"""
+    ws = make_workspace(
+        config_yaml="""\
+        repo:
+            features: [python]
+        """,
+        project_tool_files={"gated_tool.py": _gated_tool_src},
+    )
+    cli = _build_cli(workspace_root=str(ws), project_tool_dirs=[str(ws / "tools")])
+    result = CliRunner().invoke(cli, ["--help"])
+    assert result.exit_code == 0
+    assert "gated-cmd" not in result.output
+
+
+def test_feature_gated_tool_visible_when_no_features_key(make_workspace):
+    """When repo.features is absent, all feature-gated tools are visible."""
+    _gated_tool_src = """\
+from repo_tools.core import RepoTool
+
+class GatedTool(RepoTool):
+    name = "gated-all"
+    help = "A gated tool visible when no features key"
+    feature = "conan"
+
+    def execute(self, ctx, args):
+        pass
+"""
+    ws = make_workspace(
+        project_tool_files={"gated_tool_all.py": _gated_tool_src},
+    )
+    cli = _build_cli(workspace_root=str(ws), project_tool_dirs=[str(ws / "tools")])
+    result = CliRunner().invoke(cli, ["--help"])
+    assert result.exit_code == 0
+    assert "gated-all" in result.output
+
+
+def test_feature_gated_tool_visible_when_enabled(make_workspace):
+    """A tool with a feature is visible when that feature is listed in repo.features."""
+    _gated_tool_src = """\
+from repo_tools.core import RepoTool
+
+class GatedTool2(RepoTool):
+    name = "gated-cmd2"
+    help = "A gated tool"
+    feature = "conan"
+
+    def execute(self, ctx, args):
+        pass
+"""
+    ws = make_workspace(
+        config_yaml="""\
+        repo:
+            features: [conan]
+        """,
+        project_tool_files={"gated_tool2.py": _gated_tool_src},
+    )
+    cli = _build_cli(workspace_root=str(ws), project_tool_dirs=[str(ws / "tools")])
+    result = CliRunner().invoke(cli, ["--help"])
+    assert result.exit_code == 0
+    assert "gated-cmd2" in result.output
+
+
+# ── 11. __init__.py in project repo_tools/ is rejected ────────────────
 
 
 def test_init_py_in_project_repo_tools_rejected(make_workspace):

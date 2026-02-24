@@ -1,16 +1,17 @@
 """Shared lint helpers used by the stdio MCP server.
 
-Stdlib-only — no third-party imports so the lightweight stdio server
-can import without pulling in the full package.
+No third-party imports — the lightweight stdio server can import
+without pulling in the full package.  ``find_executable`` is
+stdlib-only and imported from ``repo_tools.features``.
 """
 
 from __future__ import annotations
 
-import shutil
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
+
+from ..features import find_executable as _find_executable
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -22,20 +23,6 @@ _CPP_EXTENSIONS = frozenset({".cpp", ".h", ".hpp", ".c", ".cc", ".cxx", ".hxx"})
 # test files and subprocess-using code).  Users can override via config.yaml
 # `agent.ruff_select`.
 _DEFAULT_SELECT = "F,S110,S301,S307,S602,B,SIM"
-
-
-# ── Helpers ──────────────────────────────────────────────────────────────────
-
-
-def _find_executable(name: str) -> str | None:
-    """Find an executable in the venv Scripts dir or system PATH."""
-    python_exe = Path(sys.executable)
-    scripts_dir = python_exe.parent
-    suffix = ".exe" if sys.platform == "win32" else ""
-    exe_path = scripts_dir / (name + suffix)
-    if exe_path.exists():
-        return str(exe_path)
-    return shutil.which(name)
 
 
 def _find_compile_commands(start: Path) -> str | None:

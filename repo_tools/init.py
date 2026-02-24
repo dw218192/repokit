@@ -1,74 +1,50 @@
-"""InitTool — install/update project dependencies."""
+"""InitTool — install/update project dependencies via uv sync."""
 
 from __future__ import annotations
 
-import shutil
-import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
-from .core import RepoTool, ToolContext, find_venv_executable, logger
-from .gitignore import patch_gitignore
+import click
 
-
-def _find_uv(workspace_root: Path) -> str | None:
-    """Locate the uv executable: _tools/bin first, then venv, then PATH."""
-    suffix = ".exe" if sys.platform == "win32" else ""
-
-    tools_bin = workspace_root / "_tools" / "bin" / f"uv{suffix}"
-    if tools_bin.exists():
-        return str(tools_bin)
-
-    venv_uv = find_venv_executable("uv")
-    if shutil.which(venv_uv):
-        return venv_uv
-
-    return None
-
-
-def _pip_install(uv: str, requirements: Path) -> bool:
-    """Run ``uv pip install`` for a single requirements file. Returns True on success."""
-    cmd = [uv, "pip", "install", "--python", sys.executable, "-r", str(requirements)]
-    logger.info("Running: %s", " ".join(cmd))
-    result = subprocess.run(cmd)
-    return result.returncode == 0
+from . import _bootstrap
+from .core import RepoTool, ToolContext, registered_tool_deps
 
 
 class InitTool(RepoTool):
     name = "init"
     help = "Install/update project dependencies"
 
+    def setup(self, cmd: click.Command) -> click.Command:
+        return click.option(
+            "--clean", is_flag=True,
+            help="Remove generated pyproject and lockfile before reinitializing",
+        )(cmd)
+
     def execute(self, ctx: ToolContext, args: dict[str, Any]) -> None:
-        uv = _find_uv(ctx.workspace_root)
-        if uv is None:
-            logger.error("uv not found — run bootstrap first")
-            sys.exit(1)
+        repo_cfg = ctx.config.get("repo", {})
+        if not isinstance(repo_cfg, dict):
+            repo_cfg = {}
 
-        framework_root = Path(ctx.tokens["framework_root"])
-        framework_reqs = framework_root / "requirements.txt"
-        project_reqs = ctx.workspace_root / "tools" / "requirements.txt"
+        if args.get("clean"):
+            self._clean(ctx.workspace_root)
 
-        ok = True
+        extra_deps = repo_cfg.get("extra_deps", [])
+        tool_deps = registered_tool_deps()
+        all_deps = sorted(set(extra_deps + tool_deps))
 
-        if framework_reqs.exists():
-            logger.info("Installing framework dependencies …")
-            if not _pip_install(uv, framework_reqs):
-                logger.error("Framework dependency install failed")
-                ok = False
-        else:
-            logger.warning("No framework requirements.txt found at %s", framework_reqs)
+        _bootstrap.run(
+            framework_root=Path(ctx.tokens["framework_root"]),
+            workspace_root=ctx.workspace_root,
+            features=repo_cfg.get("features", []),
+            tool_deps=all_deps,
+        )
 
-        if project_reqs.exists():
-            logger.info("Installing project dependencies …")
-            if not _pip_install(uv, project_reqs):
-                logger.error("Project dependency install failed")
-                ok = False
-
-        if not ok:
-            sys.exit(1)
-
-        logger.info("Dependencies up to date")
-
-        logger.info("Patching .gitignore …")
-        patch_gitignore(ctx.workspace_root / ".gitignore")
+    @staticmethod
+    def _clean(workspace_root: Path) -> None:
+        pyproject = workspace_root / "tools" / "pyproject.toml"
+        lock = workspace_root / "tools" / "uv.lock"
+        for path in (pyproject, lock):
+            if path.is_file():
+                path.unlink()
+                print(f"Removed {path}")

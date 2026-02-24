@@ -9,6 +9,8 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+import tomllib
+
 import click
 
 from repo_tools.core import RepoTool, ToolContext, logger
@@ -39,7 +41,7 @@ def _git(*args: str, capture: bool = False, cwd: str | Path | None = None) -> st
 
 class PublishTool(RepoTool):
     name = "publish"
-    help = "Sync release branch from main and tag a version (reads VERSION file)"
+    help = "Sync release branch from main and tag a version"
 
     def setup(self, cmd: click.Command) -> click.Command:
         cmd = click.option(
@@ -66,15 +68,16 @@ class PublishTool(RepoTool):
         git_root = Path(_git("rev-parse", "--show-toplevel", capture=True))
         git = partial(_git, cwd=git_root)
 
-        # ── Read version from VERSION file ────────────────────────
-        version_file = git_root / "VERSION"
-        if not version_file.exists():
-            logger.error("VERSION file not found at git root.")
+        # ── Read version from pyproject.toml ──────────────────────
+        pyproject_path = git_root / "pyproject.toml"
+        if not pyproject_path.exists():
+            logger.error("pyproject.toml not found at git root.")
             raise SystemExit(1)
 
-        version = version_file.read_text().strip()
+        pyproject = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+        version = pyproject.get("project", {}).get("version", "")
         if not version:
-            logger.error("VERSION file is empty.")
+            logger.error("No version found in pyproject.toml [project].version.")
             raise SystemExit(1)
 
         if not SEMVER_RE.match(version):

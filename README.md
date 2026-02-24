@@ -23,11 +23,12 @@ tools/framework/bootstrap.sh   # or bootstrap.ps1 on Windows
 Create `config.yaml` in your project root:
 
 ```yaml
-tokens:
-  platform: [windows-x64, linux-x64, macos-arm64]
-  build_type: [Debug, Release]
-  build_root: _build
-  build_dir: "{build_root}/{platform}/{build_type}"
+repo:
+  tokens:
+    platform: [windows-x64, linux-x64, macos-arm64]
+    build_type: [Debug, Release]
+    build_root: _build
+    build_dir: "{build_root}/{platform}/{build_type}"
 
 build:
   steps:
@@ -48,7 +49,7 @@ Then run:
 
 ## Tools
 
-Any `config.yaml` section with a `steps` key is automatically registered as a `./repo <name>` command — no Python required. All auto-generated commands support `--dry-run`.
+`config.yaml` has two kinds of top-level sections: the reserved `repo` section (tokens, features — see [Configuration](#configuration)), and everything else. Every other section with a `steps` key becomes a `./repo <name>` command automatically — no Python required. All auto-generated commands support `--dry-run`.
 
 `steps` is always a list. Each item is either a **string** (shorthand) or an **object** with the keys `command`, `cwd`, `env_script`, and `env`:
 
@@ -120,7 +121,7 @@ todo ──→ in_progress ──→ verify ──→ closed
 | todo → in_progress | yes | yes | — | — |
 | todo → verify | yes | yes | — | — |
 | in_progress → verify | yes | yes | — | — |
-| verify → closed | yes | — | yes | `result=pass`, all criteria met |
+| verify → closed | — | — | yes | `result=pass`, all criteria met |
 | verify → todo | yes | — | yes | `result=fail` |
 
 **Field permissions:**
@@ -129,11 +130,11 @@ todo ──→ in_progress ──→ verify ──→ closed
 |---|---|---|---|
 | `status` | yes | yes | yes |
 | `notes` | yes | yes | — |
-| `result` | yes | — | yes |
+| `result` | — | — | yes |
 | `feedback` | yes | — | yes |
 | `description` | yes | — | — |
 
-Agent settings in `config.yaml`:
+Agent settings (like any framework tool, configured under its own top-level key):
 
 ```yaml
 agent:
@@ -144,23 +145,27 @@ agent:
 
 ## Configuration
 
+The `repo` section is reserved for framework settings — it is never registered as a tool. It holds token definitions (`repo.tokens`) and feature flags (`repo.features`).
+
 **Tokens** are `{placeholders}` expanded in commands:
 
 ```yaml
-tokens:
-  build_root: _build
-  build_dir: "{build_root}/{platform}/{build_type}"   # cross-references other tokens
-  install_dir:
-    value: "{build_dir}/install"
-    path: true                                         # normalized to forward slashes
+repo:
+  tokens:
+    build_root: _build
+    build_dir: "{build_root}/{platform}/{build_type}"   # cross-references other tokens
+    install_dir:
+      value: "{build_dir}/install"
+      path: true                                         # normalized to forward slashes
 ```
 
 **List-valued tokens** become CLI dimension flags (`--platform`, `--build-type`). Use `@filter` to vary steps by dimension:
 
 ```yaml
-tokens:
-  platform: [windows-x64, linux-x64, macos-arm64]
-  build_type: [Debug, Release]
+repo:
+  tokens:
+    platform: [windows-x64, linux-x64, macos-arm64]
+    build_type: [Debug, Release]
 
 build:
   steps@windows-x64:
@@ -228,10 +233,54 @@ CLI flags map 1:1 to `config.yaml` fields under the tool name. Precedence: tool 
 | `logger` | Shared colored logger (`logging.getLogger("repo_tools")`) |
 | `glob_paths(pattern)` | Recursive glob returning sorted `Path` list |
 
+## Features
+
+`repo.features` controls which optional dependency groups are installed and which tools are visible. Feature groups are defined in the framework's `pyproject.toml` as PEP 735 `[dependency-groups]`:
+
+| Feature | Provides |
+|---|---|
+| `cpp` | clang-format, clang-tidy |
+| `python` | ruff |
+
+```yaml
+repo:
+  features: [python]        # install only Python tooling
+```
+
+When `features` is omitted, all groups are installed. When specified, only the listed groups are installed and only tools tied to those features appear in `./repo --help`.
+
+Run `./repo init` after changing features to sync dependencies.
+
 ## Dependencies
 
-Framework dependencies (click, ruff, etc.) are installed by bootstrap. For project-specific deps, create `tools/requirements.txt` and re-run bootstrap.
+All dependency specs live in the framework's `pyproject.toml` — there is no separate `requirements.txt`. Bootstrap installs [uv](https://docs.astral.sh/uv/), creates a venv at `_tools/venv/`, extracts core deps from `pyproject.toml`, and calls `./repo init`. The init command generates `tools/pyproject.toml` and runs `uv sync` to install:
+
+1. **Core deps** (click, pyyaml, colorama, etc.) — always installed.
+2. **Feature deps** — only groups listed in `repo.features` (or all groups when omitted).
+3. **Project deps** — injected from two sources described below.
+
+There are two ways to add project-specific dependencies:
+
+**`repo.extra_deps`** in `config.yaml` — for project-level deps not tied to any tool (e.g. pytest, pytest-cov). List PEP 508 dependency strings:
+
+```yaml
+repo:
+  extra_deps:
+    - "pytest>=7.0"
+    - "pytest-cov>=4.0"
+```
+
+**`RepoTool.deps`** class variable — for deps needed by custom Python tools in `tools/repo_tools/`. Declare them on your `RepoTool` subclass:
+
+```python
+class MyTool(RepoTool):
+    name = "my-tool"
+    help = "Does something useful"
+    deps = ["requests>=2.28"]
+```
+
+Both sources are merged, deduplicated, and installed via `uv sync` when `./repo init` runs.
 
 ## Versioning & Publishing
 
-Bump `VERSION` and push to `main`. CI syncs to the `release` branch and tags `v<version>`. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Bump the version in `pyproject.toml` and push to `main`. CI syncs to the `release` branch and tags `v<version>`. See [CONTRIBUTING.md](CONTRIBUTING.md).

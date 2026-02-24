@@ -25,12 +25,7 @@ class TestFormatTool:
 
         with (
             patch("repo_tools.format.subprocess.run") as mock_run,
-            patch(
-                "repo_tools.format.shutil.which", return_value="/usr/bin/clang-format"
-            ),
-            patch(
-                "repo_tools.format.find_venv_executable", return_value="clang-format"
-            ),
+            patch("repo_tools.format.require_executable", return_value="/usr/bin/clang-format"),
         ):
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
             tool.execute(ctx, args)
@@ -55,8 +50,7 @@ class TestFormatTool:
 
         with (
             patch("repo_tools.format.subprocess.run") as mock_run,
-            patch("repo_tools.format.shutil.which", return_value="/usr/bin/ruff"),
-            patch("repo_tools.format.find_venv_executable", return_value="ruff"),
+            patch("repo_tools.format.require_executable", return_value="/usr/bin/ruff"),
         ):
             mock_run.return_value = MagicMock(returncode=0)
             tool.execute(ctx, args)
@@ -70,7 +64,7 @@ class TestFormatTool:
             assert len(ruff_calls) > 0
 
     def test_missing_clang_format_exits(self, tmp_path, make_tool_context):
-        """If clang-format is not found on PATH, SystemExit is raised."""
+        """If clang-format is not found, SystemExit is raised."""
         ws = tmp_path / "ws"
         ws.mkdir()
         (ws / ".clang-format").write_text("BasedOnStyle: Google\n")
@@ -81,10 +75,7 @@ class TestFormatTool:
         args = {"verify": False}
 
         with (
-            patch("repo_tools.format.shutil.which", return_value=None),
-            patch(
-                "repo_tools.format.find_venv_executable", return_value="clang-format"
-            ),
+            patch("repo_tools.format.require_executable", side_effect=SystemExit(1)),
             pytest.raises(SystemExit),
         ):
             tool.execute(ctx, args)
@@ -102,12 +93,7 @@ class TestFormatTool:
 
         with (
             patch("repo_tools.format.subprocess.run") as mock_run,
-            patch(
-                "repo_tools.format.shutil.which", return_value="/usr/bin/clang-format"
-            ),
-            patch(
-                "repo_tools.format.find_venv_executable", return_value="clang-format"
-            ),
+            patch("repo_tools.format.require_executable", return_value="/usr/bin/clang-format"),
         ):
             # First call tests whether --dry-run is supported; return 0 means supported
             # Second call is the actual verify check; return 0 means all files pass

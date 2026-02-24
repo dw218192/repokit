@@ -92,7 +92,7 @@ def _auto_register_config_tools(
     """
     from .command_runner import CommandRunnerTool
 
-    _skip_sections = {"tokens"}
+    _skip_sections = {"tokens", "repo"}
     auto_tools: list[RepoTool] = []
 
     for section_name, section_value in config.items():
@@ -123,9 +123,12 @@ def _auto_register_config_tools(
 
 
 def _get_dimension_tokens(config: dict[str, Any]) -> dict[str, list[str]]:
-    """Extract dimension tokens (lists) from config."""
+    """Extract dimension tokens (lists) from config.repo.tokens."""
+    repo_section = config.get("repo", {})
+    if not isinstance(repo_section, dict):
+        repo_section = {}
     dims: dict[str, list[str]] = {}
-    for key, value in config.get("tokens", {}).items():
+    for key, value in repo_section.get("tokens", {}).items():
         if isinstance(value, list) and value:
             dims[key] = [str(v) for v in value]
     return dims
@@ -318,6 +321,19 @@ def _build_cli(
     auto_tools = _auto_register_config_tools(early_config, registered_names)
     if auto_tools:
         tools = sorted(tools + auto_tools, key=lambda t: t.name)
+
+    # Feature-gating: hide tools whose feature is not enabled in repo.features.
+    # When repo.features is absent, all features are implicitly enabled.
+    repo_section = early_config.get("repo", {})
+    if not isinstance(repo_section, dict):
+        repo_section = {}
+    features_value = repo_section.get("features")
+    if features_value is not None:
+        enabled_features = set(features_value)
+        tools = [
+            t for t in tools
+            if not t.feature or t.feature in enabled_features
+        ]
 
     # Register all resolved tools in the global registry (for invoke_tool)
     for tool in tools:

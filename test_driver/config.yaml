@@ -1,5 +1,9 @@
-tokens:
-  coverage_flags: "--cov=repo_tools --cov-report=term-missing --cov-report=markdown:{workspace_root}/coverage.md"
+repo:
+  extra_deps:
+    - pytest>=7.0
+    - pytest-cov>=4.0
+  tokens:
+    coverage_flags: "--cov=repo_tools --cov-report=term-missing --cov-report=markdown:{workspace_root}/coverage.md"
 
 test:
   steps:

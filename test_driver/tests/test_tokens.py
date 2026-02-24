@@ -192,11 +192,13 @@ class TestResolveTokens:
         assert "build_dir" not in tokens   # user-defined, not framework-injected
 
     def test_resolve_tokens_config_tokens(self, tmp_path: Path):
-        """Tokens declared in config['tokens'] appear in the result."""
+        """Tokens declared in config['repo']['tokens'] appear in the result."""
         config = {
-            "tokens": {
-                "my_var": "custom_value",
-                "another": "42",
+            "repo": {
+                "tokens": {
+                    "my_var": "custom_value",
+                    "another": "42",
+                },
             },
         }
         tokens = resolve_tokens(str(tmp_path), config, {})
@@ -214,10 +216,10 @@ class TestResolveTokens:
 
     def test_resolve_tokens_user_defined_build_dir(self, tmp_path: Path):
         """build_dir can be defined as a cross-reference token by the user."""
-        config = {"tokens": {
+        config = {"repo": {"tokens": {
             "build_root": "_build",
             "build_dir": "{build_root}/{platform}/{build_type}",
-        }}
+        }}}
         dims = {"platform": "linux-x64", "build_type": "Release"}
         tokens = resolve_tokens(str(tmp_path), config, dims)
 
@@ -226,19 +228,19 @@ class TestResolveTokens:
 
     def test_graph_validation_catches_typo(self, tmp_path: Path):
         """A typo like {buld_root} raises KeyError."""
-        config = {"tokens": {"build_dir": "{buld_root}/out"}}
+        config = {"repo": {"tokens": {"build_dir": "{buld_root}/out"}}}
         with pytest.raises(KeyError, match="undefined token.*buld_root"):
             resolve_tokens(str(tmp_path), config, {})
 
     def test_graph_validation_catches_cycle(self, tmp_path: Path):
         """Cycles in config tokens are caught before expansion."""
-        config = {"tokens": {"a": "{b}", "b": "{a}"}}
+        config = {"repo": {"tokens": {"a": "{b}", "b": "{a}"}}}
         with pytest.raises(ValueError, match="Circular token reference"):
             resolve_tokens(str(tmp_path), config, {})
 
     def test_graph_validation_catches_self_reference(self, tmp_path: Path):
         """Self-referencing config token is caught before expansion."""
-        config = {"tokens": {"x": "pre{x}post"}}
+        config = {"repo": {"tokens": {"x": "pre{x}post"}}}
         with pytest.raises(ValueError, match="references itself"):
             resolve_tokens(str(tmp_path), config, {})
 
@@ -248,7 +250,7 @@ class TestResolveTokens:
         n = TokenFormatter.MAX_DEPTH + 5
         chain = {f"t{i}": f"{{t{i + 1}}}" for i in range(n)}
         chain[f"t{n}"] = "end"
-        config = {"tokens": chain}
+        config = {"repo": {"tokens": chain}}
         repo_logger = logging.getLogger("repo_tools")
         repo_logger.propagate = True
         try:
@@ -267,32 +269,32 @@ class TestPathTokens:
 
     def test_path_true_normalizes_backslashes(self, tmp_path: Path):
         """A path: true token gets posix_path() normalization."""
-        config = {"tokens": {
+        config = {"repo": {"tokens": {
             "my_path": {"path": True, "value": "C:\\Repos\\proj\\_build"},
-        }}
+        }}}
         tokens = resolve_tokens(str(tmp_path), config, {})
         assert "\\" not in tokens["my_path"]
         assert "C:/Repos/proj/_build" == tokens["my_path"]
 
     def test_plain_string_unaffected(self, tmp_path: Path):
         """Plain string tokens are not path-normalized."""
-        config = {"tokens": {"plain": "no\\change\\here"}}
+        config = {"repo": {"tokens": {"plain": "no\\change\\here"}}}
         tokens = resolve_tokens(str(tmp_path), config, {})
         assert tokens["plain"] == "no\\change\\here"
 
     def test_dict_without_path_true(self, tmp_path: Path):
         """A dict token without path: true is treated as plain value."""
-        config = {"tokens": {
+        config = {"repo": {"tokens": {
             "my_var": {"value": "C:\\some\\path"},
-        }}
+        }}}
         tokens = resolve_tokens(str(tmp_path), config, {})
         assert tokens["my_var"] == "C:\\some\\path"
 
     def test_path_token_cross_reference(self, tmp_path: Path):
         """path: true tokens participate in cross-references correctly."""
-        config = {"tokens": {
+        config = {"repo": {"tokens": {
             "root": {"path": True, "value": "C:\\Repos\\proj"},
             "out": "{root}/build",
-        }}
+        }}}
         tokens = resolve_tokens(str(tmp_path), config, {})
         assert tokens["out"] == "C:/Repos/proj/build"

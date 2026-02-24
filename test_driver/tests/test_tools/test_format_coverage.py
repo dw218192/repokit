@@ -25,8 +25,7 @@ class TestConfiguredBackends:
 
         with (
             patch("repo_tools.format.subprocess.run") as mock_run,
-            patch("repo_tools.format.shutil.which", return_value="/usr/bin/clang-format"),
-            patch("repo_tools.format.find_venv_executable", return_value="clang-format"),
+            patch("repo_tools.format.require_executable", return_value="/usr/bin/clang-format"),
         ):
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
             tool.execute(ctx, args)
@@ -45,8 +44,7 @@ class TestConfiguredBackends:
 
         with (
             patch("repo_tools.format.subprocess.run") as mock_run,
-            patch("repo_tools.format.shutil.which", return_value="/usr/bin/ruff"),
-            patch("repo_tools.format.find_venv_executable", return_value="ruff"),
+            patch("repo_tools.format.require_executable", return_value="/usr/bin/ruff"),
         ):
             mock_run.return_value = MagicMock(returncode=0)
             tool.execute(ctx, args)
@@ -79,10 +77,7 @@ class TestNoSourceFiles:
         args = {"verify": False}
         buf = capture_logs
 
-        with (
-            patch("repo_tools.format.shutil.which", return_value="/usr/bin/clang-format"),
-            patch("repo_tools.format.find_venv_executable", return_value="clang-format"),
-        ):
+        with patch("repo_tools.format.require_executable", return_value="/usr/bin/clang-format"):
             tool.execute(ctx, args)
         assert "No source files" in buf.getvalue()
 
@@ -98,8 +93,7 @@ class TestPythonFormatterErrors:
         args = {"verify": False}
 
         with (
-            patch("repo_tools.format.shutil.which", return_value=None),
-            patch("repo_tools.format.find_venv_executable", return_value="ruff"),
+            patch("repo_tools.format.require_executable", side_effect=SystemExit(1)),
             pytest.raises(SystemExit),
         ):
             tool.execute(ctx, args)
@@ -115,8 +109,7 @@ class TestPythonFormatterErrors:
 
         with (
             patch("repo_tools.format.subprocess.run") as mock_run,
-            patch("repo_tools.format.shutil.which", return_value="/usr/bin/ruff"),
-            patch("repo_tools.format.find_venv_executable", return_value="ruff"),
+            patch("repo_tools.format.require_executable", return_value="/usr/bin/ruff"),
         ):
             mock_run.return_value = MagicMock(returncode=0)
             tool.execute(ctx, args)
@@ -135,8 +128,7 @@ class TestPythonFormatterErrors:
         import subprocess
         with (
             patch("repo_tools.format.subprocess.run", side_effect=subprocess.CalledProcessError(1, "ruff")),
-            patch("repo_tools.format.shutil.which", return_value="/usr/bin/ruff"),
-            patch("repo_tools.format.find_venv_executable", return_value="ruff"),
+            patch("repo_tools.format.require_executable", return_value="/usr/bin/ruff"),
             pytest.raises(SystemExit),
         ):
             tool.execute(ctx, args)
@@ -153,8 +145,7 @@ class TestPythonFormatterErrors:
         import subprocess
         with (
             patch("repo_tools.format.subprocess.run", side_effect=subprocess.CalledProcessError(1, "ruff")),
-            patch("repo_tools.format.shutil.which", return_value="/usr/bin/ruff"),
-            patch("repo_tools.format.find_venv_executable", return_value="ruff"),
+            patch("repo_tools.format.require_executable", return_value="/usr/bin/ruff"),
             pytest.raises(SystemExit),
         ):
             tool.execute(ctx, args)
@@ -182,8 +173,7 @@ class TestMissingClangFormatConfig:
         }
 
         with (
-            patch("repo_tools.format.shutil.which", return_value="/usr/bin/clang-format"),
-            patch("repo_tools.format.find_venv_executable", return_value="clang-format"),
+            patch("repo_tools.format.require_executable", return_value="/usr/bin/clang-format"),
             pytest.raises(SystemExit),
         ):
             tool.execute(ctx, args)
@@ -203,8 +193,7 @@ class TestClangFormatInplaceError:
         import subprocess
         with (
             patch("repo_tools.format.subprocess.run", side_effect=subprocess.CalledProcessError(1, "clang-format", stderr="error")),
-            patch("repo_tools.format.shutil.which", return_value="/usr/bin/clang-format"),
-            patch("repo_tools.format.find_venv_executable", return_value="clang-format"),
+            patch("repo_tools.format.require_executable", return_value="/usr/bin/clang-format"),
             pytest.raises(SystemExit),
         ):
             tool.execute(ctx, args)

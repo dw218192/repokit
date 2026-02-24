@@ -19,14 +19,14 @@ from repo_tools.cli import (
 
 class TestGetDimensionTokens:
     def test_extracts_list_tokens(self):
-        config = {"tokens": {"platform": ["linux-x64", "windows-x64"], "name": "test"}}
+        config = {"repo": {"tokens": {"platform": ["linux-x64", "windows-x64"], "name": "test"}}}
         result = _get_dimension_tokens(config)
         assert "platform" in result
         assert result["platform"] == ["linux-x64", "windows-x64"]
         assert "name" not in result
 
     def test_empty_list_skipped(self):
-        config = {"tokens": {"empty": []}}
+        config = {"repo": {"tokens": {"empty": []}}}
         result = _get_dimension_tokens(config)
         assert result == {}
 
@@ -143,9 +143,10 @@ class TestCLICallbackPaths:
     def test_config_dimension_tokens_with_cli_value(self, make_workspace):
         ws = make_workspace(
             config_yaml="""\
-            tokens:
-                platform: [windows-x64, linux-x64]
-                build_type: [Debug, Release]
+            repo:
+                tokens:
+                    platform: [windows-x64, linux-x64]
+                    build_type: [Debug, Release]
             build:
                 steps:
                     - "cmake --build {build_dir}"

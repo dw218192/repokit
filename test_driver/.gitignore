@@ -7,3 +7,7 @@ tools/framework
 coverage.md
 .coverage
 .claude
+
+# repokit
+tools/pyproject.toml
+tools/uv.lock

@@ -27,19 +27,55 @@ Ticket conventions:
 - Keep each ticket small enough for a single focused agent session.
 - Order tickets so dependencies come first.
 
+## Ticket Lifecycle
+
+```
+todo ──→ in_progress ──→ verify ──→ closed
+  ↑                        │
+  └────────────────────────┘ (reopen on fail)
+```
+
+**Your role in each transition:**
+
+| Transition | Who | When |
+|---|---|---|
+| todo → in_progress | Worker (automatic on dispatch) | Worker starts implementation |
+| in_progress → verify | Worker | Worker finishes and tests pass |
+| verify → closed | **Reviewer only** | Reviewer sets `result: "pass"` |
+| verify → todo | Reviewer (or you) | Review fails — ticket reopens |
+
+**You cannot close tickets.** Only a reviewer can transition verify → closed
+and set `result`. After a worker submits verify, always dispatch a reviewer.
+If review passes, the reviewer closes the ticket — then you merge and verify.
+
+**Field permissions (orchestrator):**
+
+| Field | Access | Notes |
+|---|---|---|
+| `status` | read/write | Cannot transition verify → closed |
+| `notes` | read/write | Add progress context for workers |
+| `description` | read/write | Refine requirements if needed |
+| `feedback` | read/write | — |
+| `result` | **read only** | Only reviewers can set pass/fail |
+
 ## Executing Tickets
 
-Dispatch workers and reviewers using headless commands:
+For each ticket, follow this sequence:
 
-- **Worker:** `{repo_cmd} agent --role worker --ticket <ID> -w`
-- **Reviewer:** `{repo_cmd} agent --role reviewer --ticket <ID>`
+1. **Dispatch worker:** `{repo_cmd} agent --role worker --ticket <ID> -w`
+2. Wait for the worker to finish. Check ticket status — it should be `verify`.
+3. **Dispatch reviewer:** `{repo_cmd} agent --role reviewer --ticket <ID>`
+4. Check the review outcome:
+   - **Pass** (status = closed): Merge the worktree branch and verify.
+   - **Fail** (status = todo): Read the feedback, optionally update the
+     ticket description, and dispatch a new worker run.
 
 Use the `-w` (worktree) flag so workers don't interfere with each other or
 your working tree.
 
 ## Merging & Verification
 
-After a ticket passes review:
+After a ticket is **closed** by the reviewer:
 
 1. Merge the worker's worktree branch into the current branch.
 2. Build and test (`{repo_cmd} build`, `{repo_cmd} test`) to confirm
