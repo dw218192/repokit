@@ -220,7 +220,7 @@ class TestBuildCommand:
         assert "notes" in schema["properties"]
 
     def test_headless_reviewer_has_json_schema(self, tmp_path):
-        """Reviewer headless mode includes --json-schema with result/feedback fields."""
+        """Reviewer headless mode includes --json-schema with result/feedback/criteria fields."""
         rules = tmp_path / "rules.toml"
         rules.write_text('default_reason = "no"\n', encoding="utf-8")
 
@@ -237,6 +237,9 @@ class TestBuildCommand:
         assert "result" in schema["properties"]
         assert schema["properties"]["result"]["enum"] == ["pass", "fail"]
         assert "feedback" in schema["properties"]
+        assert "criteria" in schema["properties"]
+        assert schema["properties"]["criteria"]["type"] == "array"
+        assert "criteria" in schema["required"]
 
     def test_headless_no_role_no_schema(self, tmp_path):
         """Headless mode without a role does not include --json-schema."""

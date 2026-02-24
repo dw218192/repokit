@@ -33,10 +33,14 @@ def tool_ctx(tmp_path):
     )
 
 
-def _make_ticket(tool_ctx, ticket_id="G1_1", status="todo"):
+def _make_ticket(tool_ctx, ticket_id="G1_1", status="todo", criteria=None):
     """Helper to create a ticket JSON file for testing."""
     ticket_dir = tool_ctx.workspace_root / "_agent" / "tickets"
     ticket_dir.mkdir(parents=True, exist_ok=True)
+    if criteria is None:
+        criteria_list = []
+    else:
+        criteria_list = [{"criterion": c, "met": False} for c in criteria]
     data = {
         "ticket": {
             "id": ticket_id,
@@ -44,7 +48,7 @@ def _make_ticket(tool_ctx, ticket_id="G1_1", status="todo"):
             "description": "Test description",
             "status": status,
         },
-        "criteria": [],
+        "criteria": criteria_list,
         "progress": {"notes": ""},
         "review": {"result": "", "feedback": ""},
     }
@@ -269,14 +273,15 @@ class TestAgentRunHeadless:
     @patch("repo_tools.agent.tool.subprocess.run")
     @patch("repo_tools.agent.tool._backend")
     def test_headless_reviewer_updates_ticket(self, mock_backend, mock_run, tool_ctx):
-        """Reviewer output updates status, result, and feedback fields."""
-        _make_ticket(tool_ctx, status="verify")
+        """Reviewer output updates status, result, feedback, and marks criteria."""
+        _make_ticket(tool_ctx, status="verify", criteria=["tests pass", "no lint errors"])
 
         mock_backend.build_command.return_value = ["claude", "-p", "test"]
         mock_run.return_value = MagicMock(
             stdout=_claude_envelope({
                 "ticket_id": "G1_1", "status": "closed",
                 "result": "pass", "feedback": "All tests passing",
+                "criteria": [True, True],
             }),
             returncode=0,
         )
@@ -289,6 +294,60 @@ class TestAgentRunHeadless:
         assert data["ticket"]["status"] == "closed"
         assert data["review"]["result"] == "pass"
         assert data["review"]["feedback"] == "All tests passing"
+        assert all(c["met"] for c in data["criteria"])
+
+    @patch("repo_tools.agent.tool.subprocess.run")
+    @patch("repo_tools.agent.tool._backend")
+    def test_headless_reviewer_fail_records_partial_criteria(self, mock_backend, mock_run, tool_ctx):
+        """Reviewer fail marks met criteria and leaves unmet ones unchanged."""
+        _make_ticket(tool_ctx, status="verify", criteria=["A passes", "B passes", "C passes"])
+
+        mock_backend.build_command.return_value = ["claude", "-p", "test"]
+        mock_run.return_value = MagicMock(
+            stdout=_claude_envelope({
+                "ticket_id": "G1_1", "status": "todo",
+                "result": "fail", "feedback": "B failed",
+                "criteria": [True, False, True],
+            }),
+            returncode=0,
+        )
+
+        _agent_run(tool_ctx, role="reviewer", ticket="G1_1")
+
+        data = json.loads(
+            (tool_ctx.workspace_root / "_agent" / "tickets" / "G1_1.json").read_text()
+        )
+        assert data["ticket"]["status"] == "todo"
+        assert data["criteria"][0]["met"] is True
+        assert data["criteria"][1]["met"] is False
+        assert data["criteria"][2]["met"] is True
+
+    @patch("repo_tools.agent.tool.subprocess.run")
+    @patch("repo_tools.agent.tool._backend")
+    def test_headless_reviewer_update_failure_returns_error(self, mock_backend, mock_run, tool_ctx):
+        """When ticket update fails, returned JSON contains an error key."""
+        # Ticket with criteria — reviewer says pass but we don't mark criteria,
+        # so the transition verify->closed will be rejected.
+        # Actually, we need to force a failure. The criteria are marked before
+        # update, so let's use a ticket without criteria that has status=todo
+        # (reviewer can't transition todo->closed).
+        _make_ticket(tool_ctx, status="verify")
+
+        mock_backend.build_command.return_value = ["claude", "-p", "test"]
+        # Reviewer tries to close but result is "fail" with status "closed" — mismatch
+        mock_run.return_value = MagicMock(
+            stdout=_claude_envelope({
+                "ticket_id": "G1_1", "status": "closed",
+                "result": "fail", "feedback": "contradictory",
+                "criteria": [],
+            }),
+            returncode=0,
+        )
+
+        result = _agent_run(tool_ctx, role="reviewer", ticket="G1_1")
+
+        parsed = json.loads(result)
+        assert "error" in parsed
 
     @patch("repo_tools.agent.tool.subprocess.run")
     @patch("repo_tools.agent.tool._backend")
