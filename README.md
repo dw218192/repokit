@@ -20,6 +20,18 @@ git submodule add -b release https://github.com/dw218192/repokit.git tools/frame
 tools/framework/bootstrap.sh   # or bootstrap.ps1 on Windows
 ```
 
+The submodule can live at any path — bootstrap uses `git rev-parse` to find the project root. If auto-detection fails (e.g. no git repo), pass the root explicitly:
+
+```bash
+path/to/repokit/bootstrap.sh /path/to/project
+```
+
+To wipe all bootstrap artifacts (`_tools/`, generated files, shims) and start fresh:
+
+```bash
+tools/framework/bootstrap.sh --clean
+```
+
 Create `config.yaml` in your project root:
 
 ```yaml

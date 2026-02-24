@@ -51,7 +51,7 @@ def init_ctx(make_tool_context, tmp_path, fw_root):
     """ToolContext wired to a temp framework and workspace."""
     ws = tmp_path / "project"
     ws.mkdir()
-    (ws / "tools").mkdir()
+    (ws / "tools" / "framework").mkdir(parents=True)
     (ws / "_tools" / "venv").mkdir(parents=True)
 
     return make_tool_context(
@@ -65,7 +65,7 @@ def init_ctx_with_features(make_tool_context, tmp_path, fw_root):
     """ToolContext with repo.features configured."""
     ws = tmp_path / "project"
     ws.mkdir()
-    (ws / "tools").mkdir()
+    (ws / "tools" / "framework").mkdir(parents=True)
     (ws / "_tools" / "venv").mkdir(parents=True)
 
     return make_tool_context(
@@ -80,7 +80,7 @@ def init_ctx_with_extra_deps(make_tool_context, tmp_path, fw_root):
     """ToolContext with repo.extra_deps configured."""
     ws = tmp_path / "project"
     ws.mkdir()
-    (ws / "tools").mkdir()
+    (ws / "tools" / "framework").mkdir(parents=True)
     (ws / "_tools" / "venv").mkdir(parents=True)
 
     return make_tool_context(
@@ -242,6 +242,11 @@ class TestWritePyproject:
 
 
 class TestInitTool:
+    @pytest.fixture(autouse=True)
+    def _allow_init(self):
+        with patch("repo_tools.init._is_local_venv", return_value=True):
+            yield
+
     @patch("repo_tools._bootstrap.subprocess.run")
     @patch("repo_tools._bootstrap.find_uv", return_value="/bin/uv")
     def test_generates_pyproject_and_syncs(self, _uv, mock_run, init_ctx):
@@ -339,6 +344,18 @@ class TestInitTool:
         assert "UV_PROJECT_ENVIRONMENT" in env
         assert "_tools" in env["UV_PROJECT_ENVIRONMENT"]
         assert "venv" in env["UV_PROJECT_ENVIRONMENT"]
+
+    @patch("repo_tools.init._is_local_venv", return_value=False)
+    def test_refuses_foreign_workspace(self, _venv, make_tool_context, tmp_path):
+        """init must refuse when sys.executable is not in workspace's venv."""
+        ws = tmp_path / "foreign"
+        ws.mkdir()
+        ctx = make_tool_context(workspace_root=ws)
+
+        tool = InitTool()
+        with pytest.raises(SystemExit) as exc_info:
+            tool.execute(ctx, {})
+        assert exc_info.value.code == 1
 
     @patch("repo_tools._bootstrap.subprocess.run")
     @patch("repo_tools._bootstrap.find_uv", return_value="/bin/uv")

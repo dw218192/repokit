@@ -33,12 +33,12 @@ jobs:
       - name: Bootstrap (bash)
         if: matrix.shell == 'bash'
         shell: bash
-        run: test_driver/tools/framework/bootstrap.sh
+        run: test_driver/tools/framework/bootstrap.sh test_driver
 
       - name: Bootstrap (pwsh)
         if: matrix.shell == 'pwsh'
         shell: pwsh
-        run: '& test_driver\tools\framework\bootstrap.ps1'
+        run: '& test_driver\tools\framework\bootstrap.ps1 test_driver'
 
       - name: Run tests (bash, Linux)
         if: matrix.shell == 'bash' && runner.os == 'Linux'
@@ -69,7 +69,7 @@ jobs:
       - name: Bootstrap test_driver
         run: |
           ln -sfn "$PWD" test_driver/tools/framework
-          test_driver/tools/framework/bootstrap.sh
+          test_driver/tools/framework/bootstrap.sh test_driver
 
       - name: Fetch release branch
         run: git fetch origin release:release || true

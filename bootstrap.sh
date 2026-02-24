@@ -2,15 +2,62 @@
 set -e
 
 # Repokit bootstrap: venv + uv + install deps + generate ./repo shim.
-# Run from any project that submodules repokit at tools/framework/.
+# Usage: bootstrap.sh [--clean] [workspace_root]
 
 FRAMEWORK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "$FRAMEWORK_DIR/../.." && pwd)"
+
+# ── Parse args ────────────────────────────────────────────────────────
+
+CLEAN=false
+ROOT=""
+for arg in "$@"; do
+    if [[ "$arg" == "--clean" ]]; then
+        CLEAN=true
+    else
+        ROOT="$arg"
+    fi
+done
+
+# ── Derive project root (mirrors _bootstrap.derive_project_root) ────
+
+if [[ -n "$ROOT" ]]; then
+    ROOT="$(cd "$ROOT" && pwd)"
+    echo "Using explicit project root: $ROOT"
+else
+    GIT_ROOT="$(git -C "$FRAMEWORK_DIR" rev-parse --show-toplevel 2>/dev/null)" || true
+    if [[ -z "$GIT_ROOT" ]]; then
+        echo "ERROR: not a git repository — pass the project root explicitly:" >&2
+        echo "  $0 /path/to/project" >&2
+        exit 1
+    fi
+    if [[ "$GIT_ROOT" == "$FRAMEWORK_DIR" ]]; then
+        # Inside the submodule's own repo — need the parent.
+        ROOT="$(git -C "$FRAMEWORK_DIR" rev-parse --show-superproject-working-tree 2>/dev/null)" || true
+        if [[ -z "$ROOT" ]]; then
+            echo "ERROR: could not determine project root from submodule — pass it explicitly:" >&2
+            echo "  $0 /path/to/project" >&2
+            exit 1
+        fi
+    else
+        ROOT="$GIT_ROOT"
+    fi
+    echo "Derived project root: $ROOT"
+fi
+
 TOOLS="$ROOT/_tools"
 BIN="$TOOLS/bin"
 PYS="$TOOLS/python"
 CACHE="$TOOLS/cache/uv"
 VENV="$TOOLS/venv"
+
+# ── Clean ─────────────────────────────────────────────────────────────
+
+if $CLEAN; then
+    echo "Cleaning bootstrap artifacts..."
+    rm -rf "$TOOLS"
+    rm -f "$ROOT/tools/pyproject.toml" "$ROOT/tools/uv.lock"
+    rm -f "$ROOT/repo" "$ROOT/repo.cmd"
+fi
 
 mkdir -p "$BIN" "$PYS" "$CACHE"
 

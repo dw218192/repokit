@@ -24,6 +24,50 @@ from pathlib import Path
 from .gitignore import patch_gitignore
 
 
+def derive_project_root(framework_dir: Path) -> Path:
+    """Derive the consumer project root from the framework directory.
+
+    Logic (also implemented in bootstrap.sh and bootstrap.ps1):
+
+    1. ``git rev-parse --show-toplevel`` — if different from *framework_dir*,
+       the framework is nested inside a larger repo (monorepo / symlink in CI)
+       and the toplevel IS the project root.
+    2. If the toplevel equals *framework_dir*, the framework is a submodule
+       whose own root is the git toplevel.  Use
+       ``git rev-parse --show-superproject-working-tree`` to find the parent.
+    3. If neither works, raise ``RuntimeError`` — the caller should ask
+       the user for an explicit root.
+    """
+    framework_dir = Path(os.path.normpath(framework_dir))
+
+    r = subprocess.run(
+        ["git", "-C", str(framework_dir), "rev-parse", "--show-toplevel"],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0 or not r.stdout.strip():
+        raise RuntimeError(
+            "Not a git repository — pass the project root explicitly"
+        )
+
+    git_root = Path(os.path.normpath(r.stdout.strip()))
+
+    if os.path.normcase(str(git_root)) == os.path.normcase(str(framework_dir)):
+        r = subprocess.run(
+            ["git", "-C", str(framework_dir), "rev-parse",
+             "--show-superproject-working-tree"],
+            capture_output=True, text=True,
+        )
+        root = r.stdout.strip()
+        if not root:
+            raise RuntimeError(
+                "Could not determine project root from submodule — "
+                "pass the project root explicitly"
+            )
+        return Path(os.path.normpath(root))
+
+    return git_root
+
+
 def find_uv(workspace_root: Path) -> str | None:
     """Locate the uv executable: _tools/bin first, then PATH."""
     suffix = ".exe" if sys.platform == "win32" else ""
