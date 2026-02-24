@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.3
+
+- `sanitized_subprocess_env()` utility: returns env overrides that strip the repo-shim's `PYTHONPATH`, `PYTHONHOME`, and venv `PATH` entries, preventing Python version contamination in Conan/CMake subprocesses.
+
 ## 0.3.1
 
 - Fix reviewer structured output: add `criteria` boolean array to reviewer JSON schema so criteria are marked via structured output, not just MCP calls.
