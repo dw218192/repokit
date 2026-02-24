@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1
+
+- Fix reviewer structured output: add `criteria` boolean array to reviewer JSON schema so criteria are marked via structured output, not just MCP calls.
+- Fix silent failure: when ticket update fails (e.g. unmet criteria blocking `verify -> closed`), the returned JSON now includes an `"error"` key instead of silently reporting success.
+
 ## 0.3.0
 
 **Feature-based optional dependencies.**

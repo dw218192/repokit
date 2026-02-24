@@ -25,10 +25,13 @@ You are a REVIEWER agent reviewing ticket "{ticket_id}".
 
 When your review is finished, report the outcome using the ticket tools:
 
-- **Pass:** Set `result: "pass"`, mark all acceptance criteria as met via
-  `mark_criteria`, then set `status: "closed"`.
-- **Fail:** Set `result: "fail"`, provide `feedback` with actionable details
-  explaining what must change, then set `status: "todo"`.
+- **Pass:** Mark all acceptance criteria as met via `mark_criteria`,
+  set `result: "pass"`, then set `status: "closed"`.
+- **Fail:** Mark criteria that are met (if any), set `result: "fail"`,
+  provide `feedback` with actionable details, then set `status: "todo"`.
+
+Your structured output must include a `criteria` array of booleans — one per
+acceptance criterion, in order — indicating which criteria are met.
 
 ## Rules
 

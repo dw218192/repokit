@@ -19,7 +19,7 @@ import click
 from ..cli import _build_tool_context
 from ..core import RepoTool, ToolContext, logger
 from .claude import Claude
-from .ticket_mcp import _ROLE_ALLOWED_TRANSITIONS, _tool_reset_ticket, _tool_update_ticket
+from .ticket_mcp import _ROLE_ALLOWED_TRANSITIONS, _tool_mark_criteria, _tool_reset_ticket, _tool_update_ticket
 
 _backend = Claude()
 
@@ -281,6 +281,20 @@ def _agent_run(
             print(proc.stdout)
             return proc.stdout
 
+        # Apply criteria from reviewer structured output
+        if role == "reviewer" and "criteria" in output:
+            criteria_bools = output["criteria"]
+            met_indices = [i for i, v in enumerate(criteria_bools) if v]
+            unmet_indices = [i for i, v in enumerate(criteria_bools) if not v]
+            if met_indices:
+                _tool_mark_criteria(tool_ctx.workspace_root,
+                    {"ticket_id": ticket, "indices": met_indices, "met": True},
+                    role=role)
+            if unmet_indices:
+                _tool_mark_criteria(tool_ctx.workspace_root,
+                    {"ticket_id": ticket, "indices": unmet_indices, "met": False},
+                    role=role)
+
         # Apply the update to the ticket JSON
         update_args = {"ticket_id": ticket}
         for field in ("status", "notes", "result", "feedback"):
@@ -290,9 +304,12 @@ def _agent_run(
         update_result = _tool_update_ticket(tool_ctx.workspace_root, update_args, role=role)
         if update_result.get("isError"):
             logger.error(f"Ticket update failed: {update_result['text']}")
-        else:
-            logger.info(f"Ticket {ticket} updated: {update_result['text']}")
+            error_output = {**output, "error": update_result["text"]}
+            result = json.dumps(error_output, indent=2)
+            print(result)
+            return result
 
+        logger.info(f"Ticket {ticket} updated: {update_result['text']}")
         result = json.dumps(output, indent=2)
         print(result)
         return result

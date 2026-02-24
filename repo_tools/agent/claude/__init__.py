@@ -40,8 +40,9 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
             "status": {"type": "string", "enum": ["closed", "todo"]},
             "result": {"type": "string", "enum": ["pass", "fail"]},
             "feedback": {"type": "string"},
+            "criteria": {"type": "array", "items": {"type": "boolean"}},
         },
-        "required": ["ticket_id", "status", "result", "feedback"],
+        "required": ["ticket_id", "status", "result", "feedback", "criteria"],
         "additionalProperties": False,
     },
 }
