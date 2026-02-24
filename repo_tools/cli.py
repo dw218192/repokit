@@ -361,23 +361,15 @@ def main() -> None:
     # --workspace-root can come from argv or be derived from this script's location
     workspace_root = None
 
-    # Check for --workspace-root in sys.argv before click parses
+    # Check for --workspace-root in sys.argv before click parses.
+    # Take the last occurrence so user overrides beat the shim's hardcoded value.
     for i, arg in enumerate(sys.argv[1:], 1):
         if arg == "--workspace-root" and i < len(sys.argv) - 1:
             workspace_root = sys.argv[i + 1]
-            break
-        if arg.startswith("--workspace-root="):
+        elif arg.startswith("--workspace-root="):
             workspace_root = arg.split("=", 1)[1]
-            break
 
-    # Fallback: derive from script location
-    # When installed as submodule at tools/framework/repo_tools/cli.py
-    # workspace root is: cli.py -> repo_tools -> framework -> tools -> project_root
-    if workspace_root is None:
-        script_path = Path(__file__).resolve()
-        candidate = script_path.parent.parent.parent.parent
-        if (candidate / "config.yaml").exists():
-            workspace_root = str(candidate)
+    # Fallback: cwd (workspace_root stays None → defaults to cwd in _build_cli)
 
     # Discover project tool dirs
     project_tool_dirs: list[str] = []

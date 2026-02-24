@@ -20,6 +20,18 @@ git submodule add -b release https://github.com/dw218192/repokit.git tools/frame
 tools/framework/bootstrap.sh   # or bootstrap.ps1 on Windows
 ```
 
+The submodule can live at any path — bootstrap uses `git rev-parse` to find the project root. If auto-detection fails (e.g. no git repo), pass the root explicitly:
+
+```bash
+path/to/repokit/bootstrap.sh /path/to/project
+```
+
+To wipe all bootstrap artifacts (`_tools/`, generated files, shims) and start fresh:
+
+```bash
+tools/framework/bootstrap.sh --clean
+```
+
 Create `config.yaml` in your project root:
 
 ```yaml
@@ -92,21 +104,9 @@ _agent/
     plugin/             ← auto-generated hooks and MCP config
 ```
 
-### Recommended Workflow
+### Usage
 
-**Plan → ticket → execute → merge → verify.**
-
-1. `./repo agent` — start an interactive orchestrator session.
-2. Describe what you want. The orchestrator explores the codebase and enters plan mode.
-3. Approve the plan. The orchestrator creates tickets with short descriptive IDs (e.g. `add-auth-hook`) via the `create_ticket` MCP tool.
-4. The orchestrator dispatches headless workers and reviewers for each ticket.
-5. After review passes, the orchestrator merges the worktree branch, builds, tests, and verifies acceptance criteria before moving on.
-
-**Keep tickets small.** Each ticket should be completable in a single focused agent session. If a ticket needs too many turns, split it.
-
-**Use worktrees for isolation.** The `-w` flag runs workers in a git worktree so they don't interfere with your working tree or each other.
-
-**Let the orchestrator drive.** Resist the urge to implement directly in the orchestrator session — its value is in planning, dispatching, and verifying. The worker/reviewer cycle gives you built-in code review.
+Run `./repo agent` and describe what you want. The orchestrator handles the rest — it explores the codebase, plans the changes, creates tickets, dispatches headless workers and reviewers, merges results, and verifies acceptance criteria. You only need to approve the plan when prompted.
 
 ### Ticket Lifecycle
 
