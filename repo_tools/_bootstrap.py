@@ -205,4 +205,15 @@ if __name__ == "__main__":
     uv_path = sys.argv[3] if len(sys.argv) > 3 else None
     run(fw, ws, uv_path)
     write_shims(fw, ws)
+
+    # Re-run init with full config awareness (extra_deps, features).
+    # The first run() installed core deps (pyyaml, click) so the CLI is
+    # now importable.  This second sync only adds the delta.
+    env = {**os.environ, "PYTHONPATH": str(fw)}
+    subprocess.run(
+        [sys.executable, "-m", "repo_tools.cli",
+         "--workspace-root", str(ws), "init"],
+        env=env,
+    )
+
     print(f"Run ./repo --help to get started.")
