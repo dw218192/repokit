@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.7
+
+- Remove hardcoded dimension special-casing from CLI: delete `_auto_detect_dimension` and `normalize_build_type` usage. Dimensions are now fully generic — first list item is the default, `Click.Choice(case_sensitive=False)` handles normalization.
+- Rename `normalize_build_type` → `to_cmake_build_type` in `core.py`.
+
 ## 0.3.6
 
 - Remove platform-specific `os.execvp` path in interactive agent mode; use `subprocess.run` + `sys.exit` on all platforms.

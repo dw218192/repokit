@@ -786,7 +786,7 @@ class CommandGroup:
 # ── Normalization Helpers ────────────────────────────────────────────
 
 
-def normalize_build_type(value: str | None) -> str:
+def to_cmake_build_type(value: str | None) -> str:
     if not value:
         return "Debug"
     mapping = {

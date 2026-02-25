@@ -281,3 +281,42 @@ def test_init_py_in_project_repo_tools_rejected(make_workspace):
             workspace_root=str(ws),
             project_tool_dirs=[str(ws / "tools")],
         )
+
+
+# ── 12. Dimension flags after subcommand are honoured ──────────────
+
+
+def test_dimension_flag_after_subcommand(make_workspace):
+    """Dimension flags placed after the subcommand name override group defaults."""
+    ws = make_workspace(
+        config_yaml="""\
+        repo:
+            tokens:
+                build_type: [Debug, Release]
+        """
+    )
+    cli = _cli_for(ws)
+    result = CliRunner().invoke(cli, ["context", "--json", "--build-type", "Release"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["build_type"] == "Release"
+
+
+def test_dimension_flag_after_subcommand_dry_run(make_workspace, capture_logs):
+    """Dimension flags after the subcommand propagate into token resolution."""
+    ws = make_workspace(
+        config_yaml="""\
+        repo:
+            tokens:
+                build_type: [Debug, Release]
+        build:
+            steps:
+                - "cmake --config {build_type}"
+        """
+    )
+    cli = _cli_for(ws)
+    result = CliRunner().invoke(cli, ["build", "--dry-run", "--build-type", "Release"])
+    assert result.exit_code == 0
+    log_text = capture_logs.getvalue()
+    assert "Would run" in log_text
+    assert "Release" in log_text

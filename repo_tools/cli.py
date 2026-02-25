@@ -15,10 +15,8 @@ import click
 from .core import (
     RepoTool,
     ToolContext,
-    detect_platform_identifier,
     load_config,
     logger,
-    normalize_build_type,
     register_tool,
     resolve_filters,
     resolve_tokens,
@@ -134,15 +132,6 @@ def _get_dimension_tokens(config: dict[str, Any]) -> dict[str, list[str]]:
     return dims
 
 
-def _auto_detect_dimension(name: str) -> str | None:
-    """Auto-detect a default for known dimension names."""
-    if name == "platform":
-        return detect_platform_identifier()
-    if name == "build_type":
-        return "Debug"
-    return None
-
-
 # ── Click Command Builder ────────────────────────────────────────────
 
 
@@ -170,6 +159,22 @@ def _make_tool_command(
 
     @click.pass_context
     def callback(ctx: click.Context, **kwargs: Any) -> None:
+        # Extract dimension overrides from subcommand-level flags
+        dim_overrides: dict[str, str] = {}
+        for dim_name in dimensions:
+            cli_key = dim_name.replace("-", "_")
+            val = kwargs.pop(cli_key, None)
+            if val is not None:
+                dim_overrides[dim_name] = val
+
+        if dim_overrides:
+            updated_dims = {**ctx.obj["dimensions"], **dim_overrides}
+            config = resolve_filters(load_config(ctx.obj["workspace_root"]), updated_dims)
+            tokens = resolve_tokens(ctx.obj["workspace_root"], config, updated_dims)
+            ctx.obj["dimensions"] = updated_dims
+            ctx.obj["config"] = config
+            ctx.obj["tokens"] = tokens
+
         context = _build_tool_context(ctx.obj, tool.name)
         context = ToolContext(
             workspace_root=context.workspace_root,
@@ -197,6 +202,16 @@ def _make_tool_command(
         callback=callback,
         context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
     )
+
+    # Add dimension options so they work after the subcommand name too
+    for dim_name, choices in dimensions.items():
+        flag_name = f"--{dim_name.replace('_', '-')}"
+        cmd = click.option(
+            flag_name,
+            type=click.Choice(choices, case_sensitive=False),
+            default=None,
+            help=f"{dim_name} selection",
+        )(cmd)
 
     # Let the tool add its own options
     cmd = tool.setup(cmd)
@@ -239,18 +254,7 @@ def _build_cli(
         for dim_name in dimensions:
             cli_key = dim_name.replace("-", "_")
             val = dim_kwargs.get(cli_key)
-            if val:
-                dim_values[dim_name] = val
-            else:
-                auto = _auto_detect_dimension(dim_name)
-                if auto:
-                    dim_values[dim_name] = auto
-                else:
-                    dim_values[dim_name] = dimensions[dim_name][0]
-
-        # Normalize build_type if it was configured as a dimension.
-        if "build_type" in dim_values:
-            dim_values["build_type"] = normalize_build_type(dim_values["build_type"])
+            dim_values[dim_name] = val if val else dimensions[dim_name][0]
 
         # Apply @filter resolution
         filtered_config = resolve_filters(config, dim_values)
@@ -275,7 +279,7 @@ def _build_cli(
             flag_name,
             type=click.Choice(choices, case_sensitive=False),
             default=None,
-            help=f"{dim_name} selection (auto-detected by default)",
+            help=f"{dim_name} selection",
         )(cli)
 
     # Add project tool dirs to sys.path BEFORE any imports so namespace

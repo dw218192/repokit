@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import patch
 
 from click.testing import CliRunner
 
 from repo_tools.cli import (
-    _auto_detect_dimension,
     _auto_register_config_tools,
     _build_cli,
     _build_tool_context,
@@ -33,18 +31,6 @@ class TestGetDimensionTokens:
     def test_no_tokens(self):
         result = _get_dimension_tokens({})
         assert result == {}
-
-
-class TestAutoDetectDimension:
-    @patch("repo_tools.cli.detect_platform_identifier", return_value="linux-x64")
-    def test_platform(self, mock_detect):
-        assert _auto_detect_dimension("platform") == "linux-x64"
-
-    def test_build_type(self):
-        assert _auto_detect_dimension("build_type") == "Debug"
-
-    def test_unknown(self):
-        assert _auto_detect_dimension("unknown_dim") is None
 
 
 class TestBuildToolContext:
