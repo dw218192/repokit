@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -547,37 +546,28 @@ class TestAgentRunHeadless:
 class TestAgentRunInteractive:
     @patch("repo_tools.agent.tool.sys.exit", side_effect=SystemExit(0))
     @patch("repo_tools.agent.tool.subprocess.run", return_value=MagicMock(returncode=0))
-    @patch("repo_tools.agent.tool.os.execvp", side_effect=SystemExit(0))
     @patch("repo_tools.agent.tool._backend")
-    def test_interactive_uses_execvp(self, mock_backend, mock_execvp, mock_run, mock_exit, tool_ctx):
+    def test_interactive_launches_command(self, mock_backend, mock_run, mock_exit, tool_ctx):
         """Interactive mode (no ticket) launches the agent command."""
         mock_backend.build_command.return_value = ["claude", "--allowedTools", "Read"]
 
         with pytest.raises(SystemExit):
             _agent_run(tool_ctx, {})
 
-        if sys.platform == "win32":
-            mock_run.assert_called_once()
-            cmd = mock_run.call_args[0][0]
-        else:
-            mock_execvp.assert_called_once()
-            cmd = mock_execvp.call_args[0][1]
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
         assert cmd[0] == "claude"
         assert "-p" not in cmd
 
     @patch("repo_tools.agent.tool.sys.exit", side_effect=SystemExit(0))
     @patch("repo_tools.agent.tool.subprocess.run", return_value=MagicMock(returncode=0))
-    @patch("repo_tools.agent.tool.os.execvp", side_effect=SystemExit(0))
     @patch("repo_tools.agent.tool._backend")
-    def test_interactive_no_prompt_flag(self, mock_backend, mock_execvp, mock_run, mock_exit, tool_ctx):
+    def test_interactive_no_prompt_flag(self, mock_backend, mock_run, mock_exit, tool_ctx):
         """Interactive mode does not include -p or --output-format."""
         mock_backend.build_command.return_value = ["claude", "--allowedTools", "Read"]
 
         with pytest.raises(SystemExit):
             _agent_run(tool_ctx, {})
 
-        if sys.platform == "win32":
-            cmd = mock_run.call_args[0][0]
-        else:
-            cmd = mock_execvp.call_args[0][1]
+        cmd = mock_run.call_args[0][0]
         assert "--output-format" not in cmd
