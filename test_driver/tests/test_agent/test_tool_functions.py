@@ -547,7 +547,7 @@ class TestAgentRunHeadless:
 class TestAgentRunInteractive:
     @patch("repo_tools.agent.tool.sys.exit", side_effect=SystemExit(0))
     @patch("repo_tools.agent.tool.subprocess.run", return_value=MagicMock(returncode=0))
-    @patch("repo_tools.agent.tool.os.execvp")
+    @patch("repo_tools.agent.tool.os.execvp", side_effect=SystemExit(0))
     @patch("repo_tools.agent.tool._backend")
     def test_interactive_uses_execvp(self, mock_backend, mock_execvp, mock_run, mock_exit, tool_ctx):
         """Interactive mode (no ticket) launches the agent command."""
@@ -567,7 +567,7 @@ class TestAgentRunInteractive:
 
     @patch("repo_tools.agent.tool.sys.exit", side_effect=SystemExit(0))
     @patch("repo_tools.agent.tool.subprocess.run", return_value=MagicMock(returncode=0))
-    @patch("repo_tools.agent.tool.os.execvp")
+    @patch("repo_tools.agent.tool.os.execvp", side_effect=SystemExit(0))
     @patch("repo_tools.agent.tool._backend")
     def test_interactive_no_prompt_flag(self, mock_backend, mock_execvp, mock_run, mock_exit, tool_ctx):
         """Interactive mode does not include -p or --output-format."""
