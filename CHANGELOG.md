@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.4
+
+- `PackageTool`: declarative glob-mapping tool that collects build outputs into a package directory. Supports token expansion in `src` patterns, `{a,b}` brace expansion, `optional` mappings, `--dry-run`, and fail-loud on zero matches.
+
 ## 0.3.3
 
 - `sanitized_subprocess_env()` utility: returns env overrides that strip the repo-shim's `PYTHONPATH`, `PYTHONHOME`, and venv `PATH` entries, preventing Python version contamination in Conan/CMake subprocesses.
