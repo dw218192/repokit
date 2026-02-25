@@ -53,8 +53,7 @@ def _write_plugin(
     rules_path: Path,
     project_root: Path,
     role: str | None = None,
-    ruff_select: str | None = None,
-    ruff_ignore: str | None = None,
+    tool_config: dict | None = None,
 ) -> None:
     """Write a Claude Code plugin directory with hooks and MCP config.
 
@@ -121,11 +120,12 @@ def _write_plugin(
     if role:
         ticket_args.extend(["--role", role])
 
+    config = tool_config or {}
     lint_args = ["-m", "repo_tools.agent.hooks.lint_mcp_stdio"]
-    if ruff_select:
-        lint_args.extend(["--select", ruff_select])
-    if ruff_ignore:
-        lint_args.extend(["--ignore", ruff_ignore])
+    if config.get("ruff_select"):
+        lint_args.extend(["--select", config["ruff_select"]])
+    if config.get("ruff_ignore"):
+        lint_args.extend(["--ignore", config["ruff_ignore"]])
 
     mcp_config: dict = {
         "mcpServers": {
@@ -162,12 +162,10 @@ class Claude:
         role_prompt: str | None = None,
         rules_path: Path | None = None,
         project_root: Path | None = None,
-        debug_hooks: bool = False,
-        worktree: str | None = None,
-        max_turns: int | None = None,
-        ruff_select: str | None = None,
-        ruff_ignore: str | None = None,
+        tool_config: dict | None = None,
     ) -> list[str]:
+        config = tool_config or {}
+
         # Build allowed tools list — roles get Bash
         allowed = list(_ALLOWED_TOOLS)
         if role and "Bash" not in allowed:
@@ -175,7 +173,7 @@ class Claude:
 
         cmd = ["claude", "--allowedTools", *allowed]
 
-        if debug_hooks:
+        if config.get("debug_hooks"):
             cmd.extend(["-d", "hooks"])
 
         if role_prompt:
@@ -191,18 +189,16 @@ class Claude:
             plugin_dir = project_root / "_agent" / (f"plugin-{role}" if role else "plugin")
             _write_plugin(
                 plugin_dir, rules_path, project_root,
-                role=role, ruff_select=ruff_select, ruff_ignore=ruff_ignore,
+                role=role, tool_config=config,
             )
             cmd.extend(["--plugin-dir", str(plugin_dir)])
         else:
             logger.warning("No rules_path/project_root provided; launching Claude without hooks or MCP server")
 
-        if worktree:
-            cmd.extend(["-w", worktree])
-
         # Headless mode: add -p with prompt, JSON output, no session persistence
         if prompt is not None:
             cmd.extend(["-p", prompt, "--output-format", "json", "--no-session-persistence"])
+            max_turns = config.get("max_turns")
             if max_turns is not None:
                 cmd.extend(["--max-turns", str(max_turns)])
             schema = _OUTPUT_SCHEMAS.get(role) if role else None

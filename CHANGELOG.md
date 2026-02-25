@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.5
+
+- Automatic worktree lifecycle: worktrees are created on agent dispatch (no `-w` flag needed) and auto-cleaned when a ticket reaches `closed`. Branch name is deterministic: `worktree-<ID>`. The `worktree_branch` field is stamped on the ticket when it first leaves `todo`. `./repo agent worktree remove <ID>` retained as escape hatch.
+- Extracted `repo_tools/agent/worktree.py` module for shared worktree helpers.
+
 ## 0.3.4
 
 - `PackageTool`: declarative glob-mapping tool that collects build outputs into a package directory. Supports token expansion in `src` patterns, `{a,b}` brace expansion, `optional` mappings, `--dry-run`, and fail-loud on zero matches.

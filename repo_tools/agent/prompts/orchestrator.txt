@@ -62,22 +62,24 @@ If review passes, the reviewer closes the ticket — then you merge and verify.
 
 For each ticket, follow this sequence:
 
-1. **Dispatch worker:** `{repo_cmd} agent --role worker --ticket <ID> -w`
+1. **Dispatch worker:** `{repo_cmd} agent --role worker --ticket <ID>`
 2. Wait for the worker to finish. Check ticket status — it should be `verify`.
 3. **Dispatch reviewer:** `{repo_cmd} agent --role reviewer --ticket <ID>`
+   (uses the same worktree so the reviewer sees the worker's changes)
 4. Check the review outcome:
    - **Pass** (status = closed): Merge the worktree branch and verify.
    - **Fail** (status = todo): Read the feedback, optionally update the
      ticket description, and dispatch a new worker run.
 
-Use the `-w` (worktree) flag so workers don't interfere with each other or
-your working tree.
+Worktrees are auto-created when a worker or reviewer is dispatched, and
+auto-cleaned when the ticket reaches `closed`. The branch name is always
+`worktree-<ID>`.
 
 ## Merging & Verification
 
 After a ticket is **closed** by the reviewer:
 
-1. Merge the worker's worktree branch into the current branch.
+1. Merge the worktree branch: `git merge worktree-<ID>`
 2. Build and test (`{repo_cmd} build`, `{repo_cmd} test`) to confirm
    integration.
 3. Check the ticket's acceptance criteria against the actual result.

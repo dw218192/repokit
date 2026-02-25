@@ -264,26 +264,6 @@ class TestBuildCommand:
         assert "--no-session-persistence" not in cmd
         assert "--json-schema" not in cmd
 
-    def test_worktree_flag(self):
-        """With worktree name, -w <name> is added to the command."""
-        claude = Claude()
-        cmd = claude.build_command(worktree="test-G1_1")
-        assert "-w" in cmd
-        idx = cmd.index("-w")
-        assert cmd[idx + 1] == "test-G1_1"
-
-    def test_worktree_empty_string_passes_bare_flag(self):
-        """Empty worktree string passes -w with empty name (auto-generate)."""
-        claude = Claude()
-        cmd = claude.build_command(worktree="")
-        assert "-w" not in cmd
-
-    def test_no_worktree_by_default(self):
-        """No -w flag without worktree parameter."""
-        claude = Claude()
-        cmd = claude.build_command()
-        assert "-w" not in cmd
-
     def test_ticket_mcp_in_plugin(self, tmp_path):
         """Plugin .mcp.json includes both tickets and coderabbit entries."""
         rules = tmp_path / "rules.toml"
@@ -377,7 +357,7 @@ class TestBuildCommand:
             role="worker",
             rules_path=rules,
             project_root=tmp_path,
-            max_turns=25,
+            tool_config={"max_turns": 25},
         )
         assert "--max-turns" in cmd
         idx = cmd.index("--max-turns")
@@ -400,7 +380,7 @@ class TestBuildCommand:
     def test_max_turns_not_in_interactive(self):
         """max_turns is ignored in interactive mode (no prompt)."""
         claude = Claude()
-        cmd = claude.build_command(max_turns=25)
+        cmd = claude.build_command(tool_config={"max_turns": 25})
         assert "--max-turns" not in cmd
 
     def test_permission_request_hook_for_mcp(self, tmp_path):
@@ -468,7 +448,7 @@ class TestBuildCommand:
         claude.build_command(
             rules_path=rules,
             project_root=tmp_path,
-            ruff_select="E,F,S,B,SIM",
+            tool_config={"ruff_select": "E,F,S,B,SIM"},
         )
         mcp = json.loads(
             (tmp_path / "_agent" / "plugin" / ".mcp.json").read_text()
@@ -488,7 +468,7 @@ class TestBuildCommand:
         claude.build_command(
             rules_path=rules,
             project_root=tmp_path,
-            ruff_ignore="SIM108,B006",
+            tool_config={"ruff_ignore": "SIM108,B006"},
         )
         mcp = json.loads(
             (tmp_path / "_agent" / "plugin" / ".mcp.json").read_text()

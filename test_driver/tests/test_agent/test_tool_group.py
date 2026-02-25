@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import click
 from click.testing import CliRunner
 
@@ -10,7 +12,7 @@ from repo_tools.agent.tool import _make_agent_command
 
 def _wrap_agent_command():
     """Wrap agent command in a parent CLI with mock context."""
-    cmd = _make_agent_command()
+    cmd = _make_agent_command(MagicMock())
 
     @click.group()
     @click.pass_context
@@ -33,11 +35,10 @@ class TestAgentHelp:
         assert result.exit_code == 0
         assert "--role" in result.output
         assert "--ticket" in result.output
-        assert "--worktree" in result.output
 
     def test_agent_is_a_group_with_ticket_subcommand(self):
         """agent is a group with a ticket subcommand."""
-        cmd = _make_agent_command()
+        cmd = _make_agent_command(MagicMock())
         assert isinstance(cmd, click.Group)
         assert "ticket" in cmd.commands
 

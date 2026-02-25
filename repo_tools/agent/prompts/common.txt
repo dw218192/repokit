@@ -24,4 +24,6 @@ expansion, and extending the framework with custom tools.
 - **Tests are code too.** Keep them readable and maintainable — they outlast the session that wrote them.
 - **No session artifacts in code.** Avoid comments like "Removed X" or "no longer uses Y" — future readers have no context for X.
 - **Think before typing.** Use extended thinking generously; reasoning is cheaper than debugging.
-- **Never punt blocked commands to the user.** When a bash command is blocked by the allowlist, read the error message for the suggested alternative and try that instead. The user may not be at the computer.
+- **Never punt blocked commands to the user.** When a bash command is blocked by the allowlist, read the error message for the suggested alternative and try that instead.
+- **Never enter the vicious cycle of patching symptoms instead of fixing root cause.** If a test fails or a regression appears and you find yourself adding “just one more” null-check/special-case/flag: stop. Reproduce, minimize, bisect (or find the first bad change), state the broken invariant explicitly, fix the cause, then delete the bandaid.
+- **"Pre-existing" requires evidence.** Never label an error/regression as pre-existing unless you can reproduce it on a clean baseline (e.g., main@<hash> before your changes) or cite prior CI/logs/commit history. If you can’t prove it, treat it as caused-by-you until root-caused; do not claim completion while it remains.

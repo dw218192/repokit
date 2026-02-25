@@ -82,8 +82,10 @@ class TestFindRulesFile:
 
 
 class TestLifecycleGating:
-    def test_worker_on_todo_proceeds(self, tool_ctx):
+    @patch("repo_tools.agent.tool.ensure_worktree")
+    def test_worker_on_todo_proceeds(self, mock_wt, tool_ctx):
         """Worker on todo ticket should proceed (not exit)."""
+        mock_wt.return_value = tool_ctx.workspace_root
         _make_ticket(tool_ctx, status="todo")
 
         with patch("repo_tools.agent.tool.subprocess.run") as mock_run, \
@@ -96,10 +98,12 @@ class TestLifecycleGating:
                 }),
                 returncode=0,
             )
-            _agent_run(tool_ctx, role="worker", ticket="G1_1")
+            _agent_run(tool_ctx, {"role": "worker", "ticket": "G1_1"})
 
-    def test_worker_on_in_progress_proceeds(self, tool_ctx):
+    @patch("repo_tools.agent.tool.ensure_worktree")
+    def test_worker_on_in_progress_proceeds(self, mock_wt, tool_ctx):
         """Worker on in_progress ticket should proceed (not exit)."""
+        mock_wt.return_value = tool_ctx.workspace_root
         _make_ticket(tool_ctx, status="in_progress")
 
         with patch("repo_tools.agent.tool.subprocess.run") as mock_run, \
@@ -112,24 +116,30 @@ class TestLifecycleGating:
                 }),
                 returncode=0,
             )
-            _agent_run(tool_ctx, role="worker", ticket="G1_1")
+            _agent_run(tool_ctx, {"role": "worker", "ticket": "G1_1"})
 
-    def test_worker_on_verify_exits(self, tool_ctx):
+    @patch("repo_tools.agent.tool.ensure_worktree")
+    def test_worker_on_verify_exits(self, mock_wt, tool_ctx):
         """Worker on verify ticket should exit with error."""
+        mock_wt.return_value = tool_ctx.workspace_root
         _make_ticket(tool_ctx, status="verify")
 
         with pytest.raises(SystemExit):
-            _agent_run(tool_ctx, role="worker", ticket="G1_1")
+            _agent_run(tool_ctx, {"role": "worker", "ticket": "G1_1"})
 
-    def test_worker_on_closed_exits(self, tool_ctx):
+    @patch("repo_tools.agent.tool.ensure_worktree")
+    def test_worker_on_closed_exits(self, mock_wt, tool_ctx):
         """Worker on closed ticket should exit with error."""
+        mock_wt.return_value = tool_ctx.workspace_root
         _make_ticket(tool_ctx, status="closed")
 
         with pytest.raises(SystemExit):
-            _agent_run(tool_ctx, role="worker", ticket="G1_1")
+            _agent_run(tool_ctx, {"role": "worker", "ticket": "G1_1"})
 
-    def test_reviewer_on_verify_proceeds(self, tool_ctx):
+    @patch("repo_tools.agent.tool.ensure_worktree")
+    def test_reviewer_on_verify_proceeds(self, mock_wt, tool_ctx):
         """Reviewer on verify ticket should proceed (not exit)."""
+        mock_wt.return_value = tool_ctx.workspace_root
         _make_ticket(tool_ctx, status="verify")
 
         with patch("repo_tools.agent.tool.subprocess.run") as mock_run, \
@@ -145,36 +155,44 @@ class TestLifecycleGating:
                 }),
                 returncode=0,
             )
-            _agent_run(tool_ctx, role="reviewer", ticket="G1_1")
+            _agent_run(tool_ctx, {"role": "reviewer", "ticket": "G1_1"})
 
-    def test_reviewer_on_todo_exits(self, tool_ctx):
+    @patch("repo_tools.agent.tool.ensure_worktree")
+    def test_reviewer_on_todo_exits(self, mock_wt, tool_ctx):
         """Reviewer on todo ticket should exit with error."""
+        mock_wt.return_value = tool_ctx.workspace_root
         _make_ticket(tool_ctx, status="todo")
 
         with pytest.raises(SystemExit):
-            _agent_run(tool_ctx, role="reviewer", ticket="G1_1")
+            _agent_run(tool_ctx, {"role": "reviewer", "ticket": "G1_1"})
 
-    def test_reviewer_on_in_progress_exits(self, tool_ctx):
+    @patch("repo_tools.agent.tool.ensure_worktree")
+    def test_reviewer_on_in_progress_exits(self, mock_wt, tool_ctx):
         """Reviewer on in_progress ticket should exit with error."""
+        mock_wt.return_value = tool_ctx.workspace_root
         _make_ticket(tool_ctx, status="in_progress")
 
         with pytest.raises(SystemExit):
-            _agent_run(tool_ctx, role="reviewer", ticket="G1_1")
+            _agent_run(tool_ctx, {"role": "reviewer", "ticket": "G1_1"})
 
-    def test_reviewer_on_closed_exits(self, tool_ctx):
+    @patch("repo_tools.agent.tool.ensure_worktree")
+    def test_reviewer_on_closed_exits(self, mock_wt, tool_ctx):
         """Reviewer on closed ticket should exit with error."""
+        mock_wt.return_value = tool_ctx.workspace_root
         _make_ticket(tool_ctx, status="closed")
 
         with pytest.raises(SystemExit):
-            _agent_run(tool_ctx, role="reviewer", ticket="G1_1")
+            _agent_run(tool_ctx, {"role": "reviewer", "ticket": "G1_1"})
 
     @patch("repo_tools.agent.tool._has_reviewable_changes", return_value=False)
-    def test_reviewer_exits_when_no_changes(self, _mock, tool_ctx):
+    @patch("repo_tools.agent.tool.ensure_worktree")
+    def test_reviewer_exits_when_no_changes(self, mock_wt, _mock, tool_ctx):
         """Reviewer exits early when there are no reviewable changes."""
+        mock_wt.return_value = tool_ctx.workspace_root
         _make_ticket(tool_ctx, status="verify")
 
         with pytest.raises(SystemExit):
-            _agent_run(tool_ctx, role="reviewer", ticket="G1_1")
+            _agent_run(tool_ctx, {"role": "reviewer", "ticket": "G1_1"})
 
 
 # ── _has_reviewable_changes ──────────────────────────────────────
@@ -240,10 +258,12 @@ def _claude_envelope(structured_output: dict) -> str:
 
 
 class TestAgentRunHeadless:
+    @patch("repo_tools.agent.tool.ensure_worktree")
     @patch("repo_tools.agent.tool.subprocess.run")
     @patch("repo_tools.agent.tool._backend")
-    def test_headless_updates_ticket(self, mock_backend, mock_run, tool_ctx):
+    def test_headless_updates_ticket(self, mock_backend, mock_run, mock_wt, tool_ctx):
         """Headless mode parses structured output and writes it back to the ticket JSON."""
+        mock_wt.return_value = tool_ctx.workspace_root
         _make_ticket(tool_ctx)
 
         mock_backend.build_command.return_value = [
@@ -254,9 +274,7 @@ class TestAgentRunHeadless:
             returncode=0,
         )
 
-        result = _agent_run(
-            tool_ctx, role="worker", ticket="G1_1",
-        )
+        result = _agent_run(tool_ctx, {"role": "worker", "ticket": "G1_1"})
 
         # Verify the result is returned
         parsed = json.loads(result)
@@ -270,10 +288,12 @@ class TestAgentRunHeadless:
         assert data["ticket"]["status"] == "in_progress"
         assert data["progress"]["notes"] == "implemented and tested"
 
+    @patch("repo_tools.agent.tool.ensure_worktree")
     @patch("repo_tools.agent.tool.subprocess.run")
     @patch("repo_tools.agent.tool._backend")
-    def test_headless_reviewer_updates_ticket(self, mock_backend, mock_run, tool_ctx):
+    def test_headless_reviewer_updates_ticket(self, mock_backend, mock_run, mock_wt, tool_ctx):
         """Reviewer output updates status, result, feedback, and marks criteria."""
+        mock_wt.return_value = tool_ctx.workspace_root
         _make_ticket(tool_ctx, status="verify", criteria=["tests pass", "no lint errors"])
 
         mock_backend.build_command.return_value = ["claude", "-p", "test"]
@@ -286,7 +306,7 @@ class TestAgentRunHeadless:
             returncode=0,
         )
 
-        _agent_run(tool_ctx, role="reviewer", ticket="G1_1")
+        _agent_run(tool_ctx, {"role": "reviewer", "ticket": "G1_1"})
 
         data = json.loads(
             (tool_ctx.workspace_root / "_agent" / "tickets" / "G1_1.json").read_text()
@@ -296,10 +316,12 @@ class TestAgentRunHeadless:
         assert data["review"]["feedback"] == "All tests passing"
         assert all(c["met"] for c in data["criteria"])
 
+    @patch("repo_tools.agent.tool.ensure_worktree")
     @patch("repo_tools.agent.tool.subprocess.run")
     @patch("repo_tools.agent.tool._backend")
-    def test_headless_reviewer_fail_records_partial_criteria(self, mock_backend, mock_run, tool_ctx):
+    def test_headless_reviewer_fail_records_partial_criteria(self, mock_backend, mock_run, mock_wt, tool_ctx):
         """Reviewer fail marks met criteria and leaves unmet ones unchanged."""
+        mock_wt.return_value = tool_ctx.workspace_root
         _make_ticket(tool_ctx, status="verify", criteria=["A passes", "B passes", "C passes"])
 
         mock_backend.build_command.return_value = ["claude", "-p", "test"]
@@ -312,7 +334,7 @@ class TestAgentRunHeadless:
             returncode=0,
         )
 
-        _agent_run(tool_ctx, role="reviewer", ticket="G1_1")
+        _agent_run(tool_ctx, {"role": "reviewer", "ticket": "G1_1"})
 
         data = json.loads(
             (tool_ctx.workspace_root / "_agent" / "tickets" / "G1_1.json").read_text()
@@ -322,19 +344,15 @@ class TestAgentRunHeadless:
         assert data["criteria"][1]["met"] is False
         assert data["criteria"][2]["met"] is True
 
+    @patch("repo_tools.agent.tool.ensure_worktree")
     @patch("repo_tools.agent.tool.subprocess.run")
     @patch("repo_tools.agent.tool._backend")
-    def test_headless_reviewer_update_failure_returns_error(self, mock_backend, mock_run, tool_ctx):
+    def test_headless_reviewer_update_failure_returns_error(self, mock_backend, mock_run, mock_wt, tool_ctx):
         """When ticket update fails, returned JSON contains an error key."""
-        # Ticket with criteria — reviewer says pass but we don't mark criteria,
-        # so the transition verify->closed will be rejected.
-        # Actually, we need to force a failure. The criteria are marked before
-        # update, so let's use a ticket without criteria that has status=todo
-        # (reviewer can't transition todo->closed).
+        mock_wt.return_value = tool_ctx.workspace_root
         _make_ticket(tool_ctx, status="verify")
 
         mock_backend.build_command.return_value = ["claude", "-p", "test"]
-        # Reviewer tries to close but result is "fail" with status "closed" — mismatch
         mock_run.return_value = MagicMock(
             stdout=_claude_envelope({
                 "ticket_id": "G1_1", "status": "closed",
@@ -344,15 +362,17 @@ class TestAgentRunHeadless:
             returncode=0,
         )
 
-        result = _agent_run(tool_ctx, role="reviewer", ticket="G1_1")
+        result = _agent_run(tool_ctx, {"role": "reviewer", "ticket": "G1_1"})
 
         parsed = json.loads(result)
         assert "error" in parsed
 
+    @patch("repo_tools.agent.tool.ensure_worktree")
     @patch("repo_tools.agent.tool.subprocess.run")
     @patch("repo_tools.agent.tool._backend")
-    def test_headless_reads_ticket_json(self, mock_backend, mock_run, tool_ctx):
+    def test_headless_reads_ticket_json(self, mock_backend, mock_run, mock_wt, tool_ctx):
         """Headless mode reads the ticket JSON and passes content in the prompt."""
+        mock_wt.return_value = tool_ctx.workspace_root
         _make_ticket(tool_ctx)
 
         mock_backend.build_command.return_value = ["claude", "-p", "test"]
@@ -361,25 +381,25 @@ class TestAgentRunHeadless:
             returncode=0,
         )
 
-        _agent_run(tool_ctx, role="worker", ticket="G1_1")
+        _agent_run(tool_ctx, {"role": "worker", "ticket": "G1_1"})
 
         call_kwargs = mock_backend.build_command.call_args[1]
         assert call_kwargs["prompt"] is not None
         assert "G1_1" in call_kwargs["prompt"]
         assert "Test ticket" in call_kwargs["prompt"]
 
+    @patch("repo_tools.agent.tool.ensure_worktree")
     @patch("repo_tools.agent.tool.subprocess.run")
     @patch("repo_tools.agent.tool._backend")
-    def test_headless_rejects_non_json(self, mock_backend, mock_run, tool_ctx):
+    def test_headless_rejects_non_json(self, mock_backend, mock_run, mock_wt, tool_ctx):
         """Non-JSON output is rejected — ticket is NOT updated."""
+        mock_wt.return_value = tool_ctx.workspace_root
         _make_ticket(tool_ctx)
 
         mock_backend.build_command.return_value = ["claude", "-p", "test"]
         mock_run.return_value = MagicMock(stdout="plain text output", returncode=0)
 
-        result = _agent_run(
-            tool_ctx, role="worker", ticket="G1_1",
-        )
+        result = _agent_run(tool_ctx, {"role": "worker", "ticket": "G1_1"})
         assert result == "plain text output"
 
         # Ticket must remain unchanged
@@ -388,10 +408,12 @@ class TestAgentRunHeadless:
         )
         assert data["ticket"]["status"] == "todo"
 
+    @patch("repo_tools.agent.tool.ensure_worktree")
     @patch("repo_tools.agent.tool.subprocess.run")
     @patch("repo_tools.agent.tool._backend")
-    def test_headless_rejects_wrong_ticket_id(self, mock_backend, mock_run, tool_ctx):
+    def test_headless_rejects_wrong_ticket_id(self, mock_backend, mock_run, mock_wt, tool_ctx):
         """Output with wrong ticket_id is rejected — ticket is NOT updated."""
+        mock_wt.return_value = tool_ctx.workspace_root
         _make_ticket(tool_ctx)
 
         mock_backend.build_command.return_value = ["claude", "-p", "test"]
@@ -400,17 +422,19 @@ class TestAgentRunHeadless:
             returncode=0,
         )
 
-        _agent_run(tool_ctx, role="worker", ticket="G1_1")
+        _agent_run(tool_ctx, {"role": "worker", "ticket": "G1_1"})
 
         data = json.loads(
             (tool_ctx.workspace_root / "_agent" / "tickets" / "G1_1.json").read_text()
         )
         assert data["ticket"]["status"] == "todo"
 
+    @patch("repo_tools.agent.tool.ensure_worktree")
     @patch("repo_tools.agent.tool.subprocess.run")
     @patch("repo_tools.agent.tool._backend")
-    def test_headless_rejects_generic_error_envelope(self, mock_backend, mock_run, tool_ctx):
+    def test_headless_rejects_generic_error_envelope(self, mock_backend, mock_run, mock_wt, tool_ctx):
         """Non-max-turns error envelope is rejected — ticket is NOT updated."""
+        mock_wt.return_value = tool_ctx.workspace_root
         _make_ticket(tool_ctx)
 
         mock_backend.build_command.return_value = ["claude", "-p", "test"]
@@ -419,17 +443,19 @@ class TestAgentRunHeadless:
             returncode=0,
         )
 
-        _agent_run(tool_ctx, role="worker", ticket="G1_1")
+        _agent_run(tool_ctx, {"role": "worker", "ticket": "G1_1"})
 
         data = json.loads(
             (tool_ctx.workspace_root / "_agent" / "tickets" / "G1_1.json").read_text()
         )
         assert data["ticket"]["status"] == "todo"
 
+    @patch("repo_tools.agent.tool.ensure_worktree")
     @patch("repo_tools.agent.tool.subprocess.run")
     @patch("repo_tools.agent.tool._backend")
-    def test_error_max_turns_sets_in_progress(self, mock_backend, mock_run, tool_ctx):
+    def test_error_max_turns_sets_in_progress(self, mock_backend, mock_run, mock_wt, tool_ctx):
         """Worker hitting turn limit auto-transitions ticket to in_progress."""
+        mock_wt.return_value = tool_ctx.workspace_root
         _make_ticket(tool_ctx)
 
         mock_backend.build_command.return_value = ["claude", "-p", "test"]
@@ -438,7 +464,7 @@ class TestAgentRunHeadless:
             returncode=0,
         )
 
-        _agent_run(tool_ctx, role="worker", ticket="G1_1")
+        _agent_run(tool_ctx, {"role": "worker", "ticket": "G1_1"})
 
         data = json.loads(
             (tool_ctx.workspace_root / "_agent" / "tickets" / "G1_1.json").read_text()
@@ -446,10 +472,12 @@ class TestAgentRunHeadless:
         assert data["ticket"]["status"] == "in_progress"
         assert "turn limit" in data["progress"]["notes"]
 
+    @patch("repo_tools.agent.tool.ensure_worktree")
     @patch("repo_tools.agent.tool.subprocess.run")
     @patch("repo_tools.agent.tool._backend")
-    def test_error_max_turns_reviewer_not_updated(self, mock_backend, mock_run, tool_ctx):
+    def test_error_max_turns_reviewer_not_updated(self, mock_backend, mock_run, mock_wt, tool_ctx):
         """Reviewer hitting turn limit does NOT auto-update the ticket."""
+        mock_wt.return_value = tool_ctx.workspace_root
         _make_ticket(tool_ctx, status="verify")
 
         mock_backend.build_command.return_value = ["claude", "-p", "test"]
@@ -458,17 +486,19 @@ class TestAgentRunHeadless:
             returncode=0,
         )
 
-        _agent_run(tool_ctx, role="reviewer", ticket="G1_1")
+        _agent_run(tool_ctx, {"role": "reviewer", "ticket": "G1_1"})
 
         data = json.loads(
             (tool_ctx.workspace_root / "_agent" / "tickets" / "G1_1.json").read_text()
         )
         assert data["ticket"]["status"] == "verify"
 
+    @patch("repo_tools.agent.tool.ensure_worktree")
     @patch("repo_tools.agent.tool.subprocess.run")
     @patch("repo_tools.agent.tool._backend")
-    def test_headless_rejects_missing_structured_output(self, mock_backend, mock_run, tool_ctx):
+    def test_headless_rejects_missing_structured_output(self, mock_backend, mock_run, mock_wt, tool_ctx):
         """Envelope without structured_output is rejected — ticket is NOT updated."""
+        mock_wt.return_value = tool_ctx.workspace_root
         _make_ticket(tool_ctx)
 
         mock_backend.build_command.return_value = ["claude", "-p", "test"]
@@ -477,19 +507,20 @@ class TestAgentRunHeadless:
             returncode=0,
         )
 
-        _agent_run(tool_ctx, role="worker", ticket="G1_1")
+        _agent_run(tool_ctx, {"role": "worker", "ticket": "G1_1"})
 
         data = json.loads(
             (tool_ctx.workspace_root / "_agent" / "tickets" / "G1_1.json").read_text()
         )
         assert data["ticket"]["status"] == "todo"
 
+    @patch("repo_tools.agent.tool.ensure_worktree")
     @patch("repo_tools.agent.tool.subprocess.run")
     @patch("repo_tools.agent.tool._backend")
-    def test_max_turns_from_config(self, mock_backend, mock_run, tool_ctx):
+    def test_max_turns_from_config(self, mock_backend, mock_run, mock_wt, tool_ctx):
         """max_turns from tool_config is forwarded to build_command."""
+        mock_wt.return_value = tool_ctx.workspace_root
         _make_ticket(tool_ctx)
-        tool_ctx.tool_config["max_turns"] = 30
 
         mock_backend.build_command.return_value = ["claude", "-p", "test"]
         mock_run.return_value = MagicMock(
@@ -497,24 +528,24 @@ class TestAgentRunHeadless:
             returncode=0,
         )
 
-        _agent_run(tool_ctx, role="worker", ticket="G1_1")
+        _agent_run(tool_ctx, {"role": "worker", "ticket": "G1_1", "max_turns": 30})
 
         call_kwargs = mock_backend.build_command.call_args[1]
-        assert call_kwargs["max_turns"] == 30
+        assert call_kwargs["tool_config"]["max_turns"] == 30
 
-    def test_headless_missing_ticket_exits(self, tool_ctx):
+    @patch("repo_tools.agent.tool.ensure_worktree")
+    def test_headless_missing_ticket_exits(self, mock_wt, tool_ctx):
         """Headless mode exits if the ticket file doesn't exist."""
+        mock_wt.return_value = tool_ctx.workspace_root
         with pytest.raises(SystemExit):
-            _agent_run(
-                tool_ctx, role="worker", ticket="G1_1",
-            )
+            _agent_run(tool_ctx, {"role": "worker", "ticket": "G1_1"})
 
 
 # ── _agent_run (interactive mode) ────────────────────────────────
 
 
 class TestAgentRunInteractive:
-    @patch("repo_tools.agent.tool.sys.exit")
+    @patch("repo_tools.agent.tool.sys.exit", side_effect=SystemExit(0))
     @patch("repo_tools.agent.tool.subprocess.run", return_value=MagicMock(returncode=0))
     @patch("repo_tools.agent.tool.os.execvp")
     @patch("repo_tools.agent.tool._backend")
@@ -522,7 +553,8 @@ class TestAgentRunInteractive:
         """Interactive mode (no ticket) launches the agent command."""
         mock_backend.build_command.return_value = ["claude", "--allowedTools", "Read"]
 
-        _agent_run(tool_ctx)
+        with pytest.raises(SystemExit):
+            _agent_run(tool_ctx, {})
 
         if sys.platform == "win32":
             mock_run.assert_called_once()
@@ -533,7 +565,7 @@ class TestAgentRunInteractive:
         assert cmd[0] == "claude"
         assert "-p" not in cmd
 
-    @patch("repo_tools.agent.tool.sys.exit")
+    @patch("repo_tools.agent.tool.sys.exit", side_effect=SystemExit(0))
     @patch("repo_tools.agent.tool.subprocess.run", return_value=MagicMock(returncode=0))
     @patch("repo_tools.agent.tool.os.execvp")
     @patch("repo_tools.agent.tool._backend")
@@ -541,37 +573,11 @@ class TestAgentRunInteractive:
         """Interactive mode does not include -p or --output-format."""
         mock_backend.build_command.return_value = ["claude", "--allowedTools", "Read"]
 
-        _agent_run(tool_ctx)
+        with pytest.raises(SystemExit):
+            _agent_run(tool_ctx, {})
 
         if sys.platform == "win32":
             cmd = mock_run.call_args[0][0]
         else:
             cmd = mock_execvp.call_args[0][1]
         assert "--output-format" not in cmd
-
-    @patch("repo_tools.agent.tool.subprocess.run")
-    @patch("repo_tools.agent.tool._backend")
-    def test_worktree_derives_name_from_ticket(self, mock_backend, mock_run, tool_ctx):
-        """With worktree=True, worktree name is derived from ticket."""
-        _make_ticket(tool_ctx)
-
-        mock_backend.build_command.return_value = ["claude", "-p", "test"]
-        mock_run.return_value = MagicMock(stdout="{}", returncode=0)
-
-        _agent_run(tool_ctx, role="worker", ticket="G1_1", worktree=True)
-
-        call_kwargs = mock_backend.build_command.call_args[1]
-        assert call_kwargs["worktree"] == "G1_1"
-
-    @patch("repo_tools.agent.tool.sys.exit")
-    @patch("repo_tools.agent.tool.subprocess.run", return_value=MagicMock(returncode=0))
-    @patch("repo_tools.agent.tool.os.execvp")
-    @patch("repo_tools.agent.tool._backend")
-    def test_worktree_interactive(self, mock_backend, mock_execvp, mock_run, mock_exit, tool_ctx):
-        """Interactive mode with worktree passes empty string (auto-generate)."""
-        mock_backend.build_command.return_value = ["claude", "-w", ""]
-
-        _agent_run(tool_ctx, worktree=True)
-
-        call_kwargs = mock_backend.build_command.call_args[1]
-        assert call_kwargs["worktree"] == ""
