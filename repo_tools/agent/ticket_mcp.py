@@ -460,15 +460,35 @@ def _tool_update_ticket(root: Path, args: dict, *, role: str | None = None) -> d
     if "status" in updates:
         current_status = data.get("ticket", {}).get("status", "todo")
         target_status = updates["status"]
+        args["_old_status"] = current_status
         if current_status != target_status:
             if err := _validate_transition(current_status, target_status, data, role=role):
                 return {"isError": True, "text": err}
             data["ticket"]["status"] = target_status
 
+    # Worktree lifecycle: stamp branch on transition out of todo
+    if "status" in updates:
+        current_status = data.get("ticket", {}).get("status", "todo")
+        old_status = args.get("_old_status")
+        if old_status == "todo" and current_status != "todo":
+            data["ticket"]["worktree_branch"] = f"worktree-{tid}"
+
     if err := _validate_ticket(data):
         return {"isError": True, "text": f"Validation error after update: {err}"}
 
     ticket_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+    # Worktree lifecycle: remove worktree on close (best-effort)
+    if "status" in updates and data["ticket"]["status"] == "closed":
+        try:
+            from .worktree import remove_worktree
+            remove_worktree(root, tid)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning(
+                f"Failed to remove worktree for {tid}: {exc}"
+            )
+
     return {"text": f"Ticket '{tid}' updated: {', '.join(updates.keys())}"}
 
 
