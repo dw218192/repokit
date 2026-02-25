@@ -314,15 +314,11 @@ def _agent_run(tool_ctx: ToolContext, args: dict[str, Any]) -> str | None:
         tool_config=args,
     )
 
-    # Interactive mode — replace process
+    # Interactive mode
     if prompt is None:
         logger.info("Starting interactive agent session")
-        if sys.platform == "win32":
-            proc = subprocess.run(cmd, cwd=str(agent_cwd))
-            sys.exit(proc.returncode)
-        else:
-            os.chdir(agent_cwd)
-            os.execvp(cmd[0], cmd)
+        proc = subprocess.run(cmd, cwd=str(agent_cwd))
+        sys.exit(proc.returncode)
 
     # Headless mode
     logger.info(f"Running headless agent: role={role}, ticket={ticket}")

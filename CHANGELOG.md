@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.6
+
+- Remove platform-specific `os.execvp` path in interactive agent mode; use `subprocess.run` + `sys.exit` on all platforms.
+
 ## 0.3.5
 
 - Automatic worktree lifecycle: worktrees are created on agent dispatch (no `-w` flag needed) and auto-cleaned when a ticket reaches `closed`. Branch name is deterministic: `worktree-<ID>`. The `worktree_branch` field is stamped on the ticket when it first leaves `todo`. `./repo agent worktree remove <ID>` retained as escape hatch.
