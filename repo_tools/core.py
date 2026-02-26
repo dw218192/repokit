@@ -629,7 +629,7 @@ def run_command(
             run_cmd = f'call "{script}" >nul 2>&1 && {cmd_str}'
         else:
             cmd_str = shlex.join(cmd)
-            run_cmd = f'source "{script}" >/dev/null 2>&1 && {cmd_str}'
+            run_cmd = f'. "{script}" >/dev/null 2>&1 && {cmd_str}'
         use_shell = True
 
     proc_env = {**os.environ, **env} if env else None

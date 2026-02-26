@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.8
+
+- Fix `run_command` env_script sourcing on POSIX: use `.` instead of `source` (bashism) so it works with `/bin/sh` (dash) on Ubuntu.
+
 ## 0.3.7
 
 - Remove hardcoded dimension special-casing from CLI: delete `_auto_detect_dimension` and `normalize_build_type` usage. Dimensions are now fully generic — first list item is the default, `Click.Choice(case_sensitive=False)` handles normalization.
