@@ -578,7 +578,7 @@ def sanitized_subprocess_env() -> dict[str, str]:
     venv's Python 3.14 stdlib, resulting in ``SRE module mismatch`` or
     ``_thread`` attribute errors.
 
-    Returns a dict suitable for the *env* parameter of :func:`run_command`
+    Returns a dict suitable for the *env* parameter of :class:`ShellCommand`
     or :class:`CommandGroup`.  The dict is merged **on top of**
     ``os.environ``, so only the keys that need overriding are present.
     """
@@ -603,63 +603,82 @@ def sanitized_subprocess_env() -> dict[str, str]:
     return env
 
 
-def run_command(
-    cmd: list[str],
-    log_file: Path | None = None,
-    env_script: Path | None = None,
-    cwd: Path | None = None,
-    env: dict[str, str] | None = None,
-) -> None:
-    """Run a command and optionally tee output to a log file.
+class ShellCommand:
+    """A command prepared for subprocess execution.
 
-    If *env_script* is provided, the command is executed inside a shell
-    that sources the script first.  Errors out when the script doesn't exist.
+    Constructor handles env-script shell wrapping (platform-correct),
+    suffix resolution, and environment merging.  Execution methods
+    pass through to subprocess with the prepared state.
     """
-    use_shell = False
-    run_cmd: list[str] | str = cmd
-    if env_script is not None:
-        script = env_script
-        if not script.suffix:
-            script = script.with_suffix(".bat" if is_windows() else ".sh")
-        if not script.exists():
-            logger.error(f"env_script not found: {script}")
+
+    def __init__(
+        self,
+        cmd: list[str],
+        *,
+        env_script: Path | None = None,
+        env: dict[str, str] | None = None,
+        cwd: Path | None = None,
+    ) -> None:
+        self._cmd: list[str] | str = cmd
+        self._shell = False
+        self._env = {**os.environ, **env} if env else None
+        self._cwd = cwd
+        self._env_script: Path | None = None
+
+        if env_script is not None:
+            script = env_script
+            if not script.suffix:
+                script = script.with_suffix(".bat" if is_windows() else ".sh")
+            self._env_script = script
+            if is_windows():
+                cmd_str = subprocess.list2cmdline(cmd)
+                self._cmd = f'call "{script}" >nul 2>&1 && {cmd_str}'
+            else:
+                cmd_str = shlex.join(cmd)
+                self._cmd = f'. "{script}" >/dev/null 2>&1 && {cmd_str}'
+            self._shell = True
+
+    def run(self, **kwargs: Any) -> subprocess.CompletedProcess:
+        """Execute via subprocess.run. Extra kwargs override defaults."""
+        return subprocess.run(
+            self._cmd, shell=self._shell, env=self._env, cwd=self._cwd,
+            **kwargs,
+        )
+
+    def popen(self, **kwargs: Any) -> subprocess.Popen:
+        """Execute via subprocess.Popen. Extra kwargs override defaults."""
+        return subprocess.Popen(
+            self._cmd, shell=self._shell, env=self._env, cwd=self._cwd,
+            **kwargs,
+        )
+
+    def exec(self, log_file: Path | None = None) -> None:
+        """Run with fail-loud semantics.
+
+        Checks that the env script exists, optionally tees output to
+        *log_file*, and calls ``sys.exit`` on non-zero return code.
+        """
+        if self._env_script is not None and not self._env_script.exists():
+            logger.error(f"env_script not found: {self._env_script}")
             sys.exit(1)
-        if is_windows():
-            cmd_str = subprocess.list2cmdline(cmd)
-            run_cmd = f'call "{script}" >nul 2>&1 && {cmd_str}'
+        if log_file:
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(log_file, "w", encoding="utf-8", errors="replace") as f:
+                process = self.popen(
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, encoding="utf-8", errors="replace", bufsize=1,
+                )
+                for line in process.stdout:
+                    print_subprocess_line(line)
+                    f.write(line)
+                process.wait()
+                if process.returncode != 0:
+                    sys.exit(process.returncode)
         else:
-            cmd_str = shlex.join(cmd)
-            run_cmd = f'. "{script}" >/dev/null 2>&1 && {cmd_str}'
-        use_shell = True
-
-    proc_env = {**os.environ, **env} if env else None
-
-    if log_file:
-        log_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(log_file, "w", encoding="utf-8", errors="replace") as f:
-            process = subprocess.Popen(
-                run_cmd,
-                shell=use_shell,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                bufsize=1,
-                cwd=cwd,
-                env=proc_env,
-            )
-            for line in process.stdout:
-                print_subprocess_line(line)
-                f.write(line)
-            process.wait()
-            if process.returncode != 0:
-                sys.exit(process.returncode)
-    else:
-        try:
-            subprocess.run(run_cmd, shell=use_shell, check=True, cwd=cwd, env=proc_env)
-        except subprocess.CalledProcessError as e:
-            sys.exit(e.returncode)
+            try:
+                self.run(check=True)
+            except subprocess.CalledProcessError as e:
+                sys.exit(e.returncode)
 
 
 def remove_tree_with_retries(
@@ -776,7 +795,7 @@ class CommandGroup:
         cw = cwd or self.cwd
         merged_env = {**(self.env or {}), **(env or {})} or None
         try:
-            run_command(cmd, log_file=lf, env_script=es, cwd=cw, env=merged_env)
+            ShellCommand(cmd, env_script=es, env=merged_env, cwd=cw).exec(log_file=lf)
             self._commands_run += 1
         except SystemExit:
             self._failed = True

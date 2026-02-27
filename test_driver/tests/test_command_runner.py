@@ -82,10 +82,11 @@ class TestCommandRunnerExecute:
         tool.name = "test"
         args = {"steps": ["echo {build_type}"]}
 
-        with patch("repo_tools.command_runner.run_command") as mock_run:
+        with patch("repo_tools.command_runner.ShellCommand") as MockSC:
             tool.execute(ctx, args)
-            mock_run.assert_called_once()
-            assert mock_run.call_args[0][0] == ["echo", "Debug"]
+            MockSC.assert_called_once()
+            assert MockSC.call_args[0][0] == ["echo", "Debug"]
+            MockSC.return_value.exec.assert_called_once()
 
     def test_missing_steps_exits(self, make_tool_context):
         """Omitting 'steps' from args raises SystemExit(1)."""
@@ -105,34 +106,35 @@ class TestCommandRunnerExecute:
         tool.name = "test"
         args = {"steps": ["deploy --env {target_env}"], "target_env": "staging"}
 
-        with patch("repo_tools.command_runner.run_command") as mock_run:
+        with patch("repo_tools.command_runner.ShellCommand") as MockSC:
             tool.execute(ctx, args)
-            assert mock_run.call_args[0][0] == ["deploy", "--env", "staging"]
+            assert MockSC.call_args[0][0] == ["deploy", "--env", "staging"]
 
     def test_dry_run_skips_execution(self, make_tool_context):
-        """dry_run=True logs the resolved command without calling run_command."""
+        """dry_run=True logs the resolved command without executing."""
         ctx = make_tool_context(dimensions={"platform": "linux-x64", "build_type": "Debug"})
         tool = CommandRunnerTool()
         tool.name = "test"
         args = {"steps": ["cmake --build . --config {build_type}"], "dry_run": True}
 
-        with patch("repo_tools.command_runner.run_command") as mock_run:
+        with patch("repo_tools.command_runner.ShellCommand") as MockSC:
             tool.execute(ctx, args)
-            mock_run.assert_not_called()
+            MockSC.assert_not_called()
 
 
 class TestSingleVsMultipleSteps:
-    def test_single_step_uses_run_command(self, make_tool_context):
-        """A single step calls run_command directly (no CommandGroup)."""
+    def test_single_step_uses_shell_command(self, make_tool_context):
+        """A single step calls ShellCommand.exec() directly (no CommandGroup)."""
         ctx = make_tool_context()
         tool = CommandRunnerTool()
         tool.name = "test"
         args = {"steps": ["echo hello"]}
 
-        with patch("repo_tools.command_runner.run_command") as mock_run, \
+        with patch("repo_tools.command_runner.ShellCommand") as MockSC, \
              patch("repo_tools.command_runner.CommandGroup") as MockGroup:
             tool.execute(ctx, args)
-            mock_run.assert_called_once()
+            MockSC.assert_called_once()
+            MockSC.return_value.exec.assert_called_once()
             MockGroup.assert_not_called()
 
     def test_multiple_steps_use_command_group(self, make_tool_context):
@@ -166,38 +168,38 @@ class TestSingleVsMultipleSteps:
 
 
 class TestStepOverrides:
-    def test_env_in_step_passed_to_run_command(self, make_tool_context):
-        """env list in a step dict is parsed and passed to run_command."""
+    def test_env_in_step_passed_to_shell_command(self, make_tool_context):
+        """env list in a step dict is parsed and passed to ShellCommand."""
         ctx = make_tool_context()
         tool = CommandRunnerTool()
         tool.name = "test"
         args = {"steps": [{"command": "echo hi", "env": ["FOO=bar"]}]}
 
-        with patch("repo_tools.command_runner.run_command") as mock_run:
+        with patch("repo_tools.command_runner.ShellCommand") as MockSC:
             tool.execute(ctx, args)
-            assert mock_run.call_args[1]["env"] == {"FOO": "bar"}
+            assert MockSC.call_args[1]["env"] == {"FOO": "bar"}
 
-    def test_cwd_in_step_passed_to_run_command(self, make_tool_context, tmp_path):
-        """cwd in a step dict is resolved and passed to run_command."""
+    def test_cwd_in_step_passed_to_shell_command(self, make_tool_context, tmp_path):
+        """cwd in a step dict is resolved and passed to ShellCommand."""
         ctx = make_tool_context()
         tool = CommandRunnerTool()
         tool.name = "test"
         args = {"steps": [{"command": "echo hi", "cwd": str(tmp_path)}]}
 
-        with patch("repo_tools.command_runner.run_command") as mock_run:
+        with patch("repo_tools.command_runner.ShellCommand") as MockSC:
             tool.execute(ctx, args)
-            assert mock_run.call_args[1]["cwd"] == tmp_path
+            assert MockSC.call_args[1]["cwd"] == tmp_path
 
-    def test_env_script_in_step_passed_to_run_command(self, make_tool_context, tmp_path):
-        """env_script in a step dict is resolved and passed to run_command."""
+    def test_env_script_in_step_passed_to_shell_command(self, make_tool_context, tmp_path):
+        """env_script in a step dict is resolved and passed to ShellCommand."""
         ctx = make_tool_context()
         tool = CommandRunnerTool()
         tool.name = "test"
         args = {"steps": [{"command": "echo hi", "env_script": str(tmp_path / "setup")}]}
 
-        with patch("repo_tools.command_runner.run_command") as mock_run:
+        with patch("repo_tools.command_runner.ShellCommand") as MockSC:
             tool.execute(ctx, args)
-            assert mock_run.call_args[1]["env_script"] == tmp_path / "setup"
+            assert MockSC.call_args[1]["env_script"] == tmp_path / "setup"
 
     def test_env_token_expansion(self, make_tool_context):
         """Token placeholders in env values are expanded."""
@@ -209,9 +211,9 @@ class TestStepOverrides:
         tool.name = "test"
         args = {"steps": [{"command": "echo hi", "env": ["PATH={my_dir}/bin"]}]}
 
-        with patch("repo_tools.command_runner.run_command") as mock_run:
+        with patch("repo_tools.command_runner.ShellCommand") as MockSC:
             tool.execute(ctx, args)
-            assert mock_run.call_args[1]["env"] == {"PATH": "/opt/tools/bin"}
+            assert MockSC.call_args[1]["env"] == {"PATH": "/opt/tools/bin"}
 
     def test_env_flows_to_command_group(self, make_tool_context):
         """env in multi-step is forwarded through CommandGroup.run."""

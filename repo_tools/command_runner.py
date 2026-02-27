@@ -9,7 +9,7 @@ from typing import Any
 
 import click
 
-from .core import CommandGroup, RepoTool, TokenFormatter, ToolContext, logger, run_command
+from .core import CommandGroup, RepoTool, ShellCommand, TokenFormatter, ToolContext, logger
 
 _STEP_KEYS = {"command", "cwd", "env_script", "env"}
 
@@ -134,12 +134,12 @@ class CommandRunnerTool(RepoTool):
         if n == 1:
             step = resolved[0]
             logger.info(f"Running: {step['command']}")
-            run_command(
+            ShellCommand(
                 shlex.split(step["command"]),
                 env_script=step.get("env_script"),
                 cwd=step.get("cwd"),
                 env=step.get("env"),
-            )
+            ).exec()
         else:
             with CommandGroup(self.name) as group:
                 for step in resolved:

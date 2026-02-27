@@ -10,6 +10,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from repo_tools.core import (
+    ShellCommand,
     TokenFormatter,
     detect_platform_identifier,
     find_venv_executable,
@@ -222,27 +223,24 @@ class TestFindVenvExecutable:
         find_venv_executable.cache_clear()
 
 
-# ── run_command shell quoting ─────────────────────────────────
+# ── ShellCommand shell quoting ────────────────────────────────
 
 
-class TestRunCommandShellQuoting:
-    """Issue 2: run_command should use shlex.join on Unix, list2cmdline on Windows."""
+class TestShellCommandQuoting:
+    """ShellCommand uses shlex.join on Unix, list2cmdline on Windows."""
 
     @patch("repo_tools.core.is_windows", return_value=False)
     @patch("repo_tools.core.subprocess.run")
     def test_unix_uses_shlex_join(self, mock_run, _mock_win, tmp_path):
         """On Unix the env_script path uses shlex.join (single-quotes)."""
-        import shlex
         script = tmp_path / "env.sh"
         script.write_text("# env", encoding="utf-8")
 
-        from repo_tools.core import run_command
+        sc = ShellCommand(["echo", "hello world"], env_script=script)
         mock_run.return_value = MagicMock(returncode=0)
-        run_command(["echo", "hello world"], env_script=script)
+        sc.run()
 
-        call_args = mock_run.call_args
-        cmd_str = call_args[0][0]
-        # shlex.join quotes args with spaces
+        cmd_str = mock_run.call_args[0][0]
         assert "echo 'hello world'" in cmd_str or 'echo "hello world"' in cmd_str or "echo hello\\ world" in cmd_str
 
     @patch("repo_tools.core.is_windows", return_value=True)
@@ -253,53 +251,49 @@ class TestRunCommandShellQuoting:
         script = tmp_path / "env.bat"
         script.write_text("REM env", encoding="utf-8")
 
-        from repo_tools.core import run_command
+        sc = ShellCommand(["echo", "hello world"], env_script=script)
         mock_run.return_value = MagicMock(returncode=0)
-        run_command(["echo", "hello world"], env_script=script)
+        sc.run()
 
-        call_args = mock_run.call_args
-        cmd_str = call_args[0][0]
+        cmd_str = mock_run.call_args[0][0]
         assert "call" in cmd_str
         expected = sp.list2cmdline(["echo", "hello world"])
         assert expected in cmd_str
 
 
-class TestRunCommandCwd:
-    """run_command passes cwd to subprocess."""
+class TestShellCommandCwd:
+    """ShellCommand passes cwd to subprocess."""
 
     @patch("repo_tools.core.subprocess.run")
     def test_cwd_passed_to_subprocess_run(self, mock_run, tmp_path):
-        from repo_tools.core import run_command
-        run_command(["echo", "hi"], cwd=tmp_path)
+        sc = ShellCommand(["echo", "hi"], cwd=tmp_path)
+        sc.run()
         assert mock_run.call_args[1]["cwd"] == tmp_path
 
     @patch("repo_tools.core.subprocess.Popen")
     def test_cwd_passed_to_popen(self, mock_popen, tmp_path):
-        from repo_tools.core import run_command
+        sc = ShellCommand(["echo", "hi"], cwd=tmp_path)
         mock_proc = MagicMock()
-        mock_proc.stdout = iter([])
-        mock_proc.returncode = 0
         mock_popen.return_value = mock_proc
-        log_file = tmp_path / "log.txt"
-        run_command(["echo", "hi"], log_file=log_file, cwd=tmp_path)
+        sc.popen()
         assert mock_popen.call_args[1]["cwd"] == tmp_path
 
 
-class TestRunCommandEnvScriptFailLoud:
-    """run_command errors out when env_script doesn't exist."""
+class TestShellCommandExecFailLoud:
+    """ShellCommand.exec() errors out when env_script doesn't exist."""
 
     def test_missing_env_script_exits(self, tmp_path):
-        from repo_tools.core import run_command
         missing = tmp_path / "nonexistent.sh"
+        sc = ShellCommand(["echo", "hi"], env_script=missing)
         with pytest.raises(SystemExit):
-            run_command(["echo", "hi"], env_script=missing)
+            sc.exec()
 
     def test_missing_env_script_auto_suffix(self, tmp_path):
         """Auto-suffixed env_script that doesn't exist also fails."""
-        from repo_tools.core import run_command
         missing = tmp_path / "nonexistent"  # no suffix — will try .bat/.sh
+        sc = ShellCommand(["echo", "hi"], env_script=missing)
         with pytest.raises(SystemExit):
-            run_command(["echo", "hi"], env_script=missing)
+            sc.exec()
 
 
 class TestIsWindows:
@@ -314,15 +308,15 @@ class TestIsWindows:
         assert is_windows() is False
 
 
-# ── run_command env parameter ─────────────────────────────────
+# ── ShellCommand env parameter ────────────────────────────────
 
 
-class TestRunCommandEnv:
+class TestShellCommandEnv:
     @patch("repo_tools.core.subprocess.run")
     def test_env_passed_to_subprocess_run(self, mock_run):
-        from repo_tools.core import run_command
         custom_env = {"MY_VAR": "hello"}
-        run_command(["echo", "hi"], env=custom_env)
+        sc = ShellCommand(["echo", "hi"], env=custom_env)
+        sc.run()
         call_env = mock_run.call_args[1]["env"]
         assert call_env["MY_VAR"] == "hello"
         # Should also contain os.environ entries
@@ -330,20 +324,20 @@ class TestRunCommandEnv:
 
     @patch("repo_tools.core.subprocess.Popen")
     def test_env_passed_to_popen(self, mock_popen, tmp_path):
-        from repo_tools.core import run_command
         mock_proc = MagicMock()
         mock_proc.stdout = iter([])
         mock_proc.returncode = 0
         mock_popen.return_value = mock_proc
         custom_env = {"MY_VAR": "world"}
-        run_command(["echo", "hi"], log_file=tmp_path / "log.txt", env=custom_env)
+        sc = ShellCommand(["echo", "hi"], env=custom_env)
+        sc.exec(log_file=tmp_path / "log.txt")
         call_env = mock_popen.call_args[1]["env"]
         assert call_env["MY_VAR"] == "world"
 
     @patch("repo_tools.core.subprocess.run")
     def test_env_none_no_override(self, mock_run):
-        from repo_tools.core import run_command
-        run_command(["echo", "hi"], env=None)
+        sc = ShellCommand(["echo", "hi"])
+        sc.run()
         assert mock_run.call_args[1]["env"] is None
 
 
@@ -351,24 +345,24 @@ class TestRunCommandEnv:
 
 
 class TestCommandGroupEnv:
-    @patch("repo_tools.core.run_command")
-    def test_group_env_forwarded(self, mock_run):
+    @patch("repo_tools.core.ShellCommand")
+    def test_group_env_forwarded(self, MockSC):
         from repo_tools.core import CommandGroup
         with CommandGroup("test", env={"A": "1"}) as g:
             g.run(["echo", "hi"])
-        assert mock_run.call_args[1]["env"] == {"A": "1"}
+        assert MockSC.call_args[1]["env"] == {"A": "1"}
 
-    @patch("repo_tools.core.run_command")
-    def test_per_step_env_overrides_group(self, mock_run):
+    @patch("repo_tools.core.ShellCommand")
+    def test_per_step_env_overrides_group(self, MockSC):
         from repo_tools.core import CommandGroup
         with CommandGroup("test", env={"A": "1", "B": "2"}) as g:
             g.run(["echo", "hi"], env={"B": "override", "C": "3"})
-        merged = mock_run.call_args[1]["env"]
+        merged = MockSC.call_args[1]["env"]
         assert merged == {"A": "1", "B": "override", "C": "3"}
 
-    @patch("repo_tools.core.run_command")
-    def test_no_env_passes_none(self, mock_run):
+    @patch("repo_tools.core.ShellCommand")
+    def test_no_env_passes_none(self, MockSC):
         from repo_tools.core import CommandGroup
         with CommandGroup("test") as g:
             g.run(["echo", "hi"])
-        assert mock_run.call_args[1]["env"] is None
+        assert MockSC.call_args[1]["env"] is None
