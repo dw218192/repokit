@@ -226,7 +226,7 @@ CLI flags map 1:1 to `config.yaml` fields under the tool name. Precedence: tool 
 
 | Function / Class | Purpose |
 |---|---|
-| `run_command(cmd, log_file=, env_script=, cwd=, env=)` | Run a subprocess, optionally tee to log and source an env script |
+| `ShellCommand(cmd, env_script=, env=, cwd=)` | Prepared command with `.run(**kw)`, `.popen(**kw)`, and `.exec(log_file=)` (fail-loud) |
 | `CommandGroup(label, log_file=, env_script=, cwd=, env=)` | Context manager for build phases with pass/fail tracking and CI fold markers |
 | `find_venv_executable(name)` | Find executable in the venv, fallback to system PATH |
 | `invoke_tool(name, tokens, config, ...)` | Call another registered tool programmatically |

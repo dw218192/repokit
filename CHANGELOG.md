@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.9
+
+- `ShellCommand` class replaces `run_command()`. Separates command preparation (env-script wrapping, suffix resolution, env merging) from execution: `.run(**kw)` returns `CompletedProcess`, `.popen(**kw)` returns `Popen`, `.exec(log_file=)` provides fail-loud semantics with optional log tee.
+- Removed `run_command()` — all callers migrated to `ShellCommand`.
+
 ## 0.3.8
 
 - Fix `run_command` env_script sourcing on POSIX: use `.` instead of `source` (bashism) so it works with `/bin/sh` (dash) on Ubuntu.
