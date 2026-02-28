@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from repo_tools.core import load_config, resolve_filters
+from repo_tools.core import _deep_merge, load_config, resolve_filters
 
 
 # ── load_config ───────────────────────────────────────────────────────
@@ -112,3 +112,86 @@ class TestResolveFilters:
         result = resolve_filters(config, self._dims)
         assert result["build"]["flags"] == "--windows-optimized"
         assert result["build"]["inner"]["tool"] == "nmake"
+
+
+# ── _deep_merge ──────────────────────────────────────────────────────
+
+
+class TestDeepMerge:
+    """Unit tests for the _deep_merge() helper."""
+
+    def test_empty_overlay(self):
+        base = {"a": 1, "b": {"c": 2}}
+        assert _deep_merge(base, {}) == base
+
+    def test_empty_base(self):
+        overlay = {"x": 10, "y": {"z": 20}}
+        assert _deep_merge({}, overlay) == overlay
+
+    def test_nested_merge(self):
+        base = {"a": {"b": 1, "c": 2}, "d": 3}
+        overlay = {"a": {"c": 99, "e": 5}}
+        result = _deep_merge(base, overlay)
+        assert result == {"a": {"b": 1, "c": 99, "e": 5}, "d": 3}
+
+    def test_list_replaced(self):
+        base = {"steps": ["a", "b"]}
+        overlay = {"steps": ["c"]}
+        assert _deep_merge(base, overlay) == {"steps": ["c"]}
+
+    def test_mixed_types(self):
+        # dict in base replaced by scalar in overlay
+        assert _deep_merge({"k": {"nested": 1}}, {"k": "flat"}) == {"k": "flat"}
+        # scalar in base replaced by dict in overlay
+        assert _deep_merge({"k": "flat"}, {"k": {"nested": 1}}) == {"k": {"nested": 1}}
+
+
+# ── config.local.yaml merge ──────────────────────────────────────────
+
+
+class TestConfigLocalMerge:
+    """Tests for config.local.yaml deep-merge in load_config()."""
+
+    def test_local_overrides_scalar(self, tmp_path: Path):
+        (tmp_path / "config.yaml").write_text("key: a\n", encoding="utf-8")
+        (tmp_path / "config.local.yaml").write_text("key: b\n", encoding="utf-8")
+        assert load_config(str(tmp_path)) == {"key": "b"}
+
+    def test_local_deep_merges_dicts(self, tmp_path: Path):
+        (tmp_path / "config.yaml").write_text(
+            "build:\n  flags: --std\n  opt: O2\n", encoding="utf-8"
+        )
+        (tmp_path / "config.local.yaml").write_text(
+            "build:\n  opt: O0\n  extra: true\n", encoding="utf-8"
+        )
+        result = load_config(str(tmp_path))
+        assert result == {"build": {"flags": "--std", "opt": "O0", "extra": True}}
+
+    def test_local_replaces_lists(self, tmp_path: Path):
+        (tmp_path / "config.yaml").write_text("steps:\n  - a\n", encoding="utf-8")
+        (tmp_path / "config.local.yaml").write_text("steps:\n  - b\n", encoding="utf-8")
+        assert load_config(str(tmp_path)) == {"steps": ["b"]}
+
+    def test_local_adds_new_keys(self, tmp_path: Path):
+        (tmp_path / "config.yaml").write_text("existing: 1\n", encoding="utf-8")
+        (tmp_path / "config.local.yaml").write_text("new_key: 2\n", encoding="utf-8")
+        assert load_config(str(tmp_path)) == {"existing": 1, "new_key": 2}
+
+    def test_local_absent_returns_base(self, tmp_path: Path):
+        (tmp_path / "config.yaml").write_text("key: value\n", encoding="utf-8")
+        assert load_config(str(tmp_path)) == {"key": "value"}
+
+    def test_local_empty_returns_base(self, tmp_path: Path):
+        (tmp_path / "config.yaml").write_text("key: value\n", encoding="utf-8")
+        (tmp_path / "config.local.yaml").write_text("", encoding="utf-8")
+        assert load_config(str(tmp_path)) == {"key": "value"}
+
+    def test_local_non_dict_raises(self, tmp_path: Path):
+        (tmp_path / "config.yaml").write_text("key: value\n", encoding="utf-8")
+        (tmp_path / "config.local.yaml").write_text("- item1\n- item2\n", encoding="utf-8")
+        with pytest.raises(TypeError, match="config.local.yaml must contain a top-level mapping"):
+            load_config(str(tmp_path))
+
+    def test_local_without_base_ignored(self, tmp_path: Path):
+        (tmp_path / "config.local.yaml").write_text("key: value\n", encoding="utf-8")
+        assert load_config(str(tmp_path)) == {}
