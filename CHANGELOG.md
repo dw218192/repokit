@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.0
+
+- **Env-var-backed tokens**: Dict tokens now support an `env` key that resolves the value from an environment variable at runtime, with optional `value` fallback. Combine with `path: true` for cross-platform tool paths (e.g., `UNITY_EDITOR`).
+- **`config.local.yaml` overlay**: A git-ignored `config.local.yaml` is deep-merged on top of `config.yaml` for machine-specific overrides. Dicts merge recursively (local wins); lists and scalars are replaced. `./repo init` automatically adds it to `.gitignore`.
+
 ## 0.3.9
 
 - `ShellCommand` class replaces `run_command()`. Separates command preparation (env-script wrapping, suffix resolution, env merging) from execution: `.run(**kw)` returns `CompletedProcess`, `.popen(**kw)` returns `Popen`, `.exec(log_file=)` provides fail-loud semantics with optional log tee.
