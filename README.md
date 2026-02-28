@@ -180,6 +180,20 @@ build:
     - "make -C {build_dir} -j$(nproc)"
 ```
 
+**Local overrides** — Create `config.local.yaml` (gitignored) for machine-specific settings. It is deep-merged on top of `config.yaml`: nested dicts merge recursively, everything else (including lists) is replaced.
+
+```yaml
+# config.local.yaml (not committed)
+test:
+  steps:
+    - "{repo} python -m pytest tests/ -x --pdb"
+repo:
+  tokens:
+    unity_editor:
+      env: UNITY_EDITOR
+      path: true
+```
+
 Built-in tokens (always available, cannot be overridden):
 
 | Token | Expands to |

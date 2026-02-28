@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-ENTRIES = ["_tools/", "tools/pyproject.toml", "tools/uv.lock", "repo", "repo.cmd", "_agent/"]
+ENTRIES = ["_tools/", "tools/pyproject.toml", "tools/uv.lock", "repo", "repo.cmd", "_agent/", "config.local.yaml"]
 MARKER = "# repokit"
 
 
