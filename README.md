@@ -157,7 +157,13 @@ repo:
     install_dir:
       value: "{build_dir}/install"
       path: true                                         # normalized to forward slashes
+    unity_editor:
+      env: UNITY_EDITOR              # resolve from environment variable
+      value: "/usr/bin/unity"         # fallback when env var is unset
+      path: true                      # normalize slashes (applied after env resolution)
 ```
+
+Dict tokens with `env` resolve from environment variables at runtime, falling back to `value` if the variable is unset. Combine with `path: true` for cross-platform path tokens.
 
 **List-valued tokens** become CLI dimension flags (`--platform`, `--build-type`). Use `@filter` to vary steps by dimension:
 
@@ -172,6 +178,20 @@ build:
     - "msbuild {build_dir}/project.sln /p:Configuration={build_type}"
   steps@linux-x64:
     - "make -C {build_dir} -j$(nproc)"
+```
+
+**Local overrides** — Create `config.local.yaml` (gitignored) for machine-specific settings. It is deep-merged on top of `config.yaml`: nested dicts merge recursively, everything else (including lists) is replaced.
+
+```yaml
+# config.local.yaml (not committed)
+test:
+  steps:
+    - "{repo} python -m pytest tests/ -x --pdb"
+repo:
+  tokens:
+    unity_editor:
+      env: UNITY_EDITOR
+      path: true
 ```
 
 Built-in tokens (always available, cannot be overridden):

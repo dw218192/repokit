@@ -191,6 +191,16 @@ def resolve_tokens(
             continue
         if isinstance(value, dict):
             raw = str(value.get("value", ""))
+            env_key = value.get("env")
+            if env_key:
+                env_val = os.environ.get(env_key, "")
+                if env_val:
+                    raw = env_val
+                elif not raw:
+                    logger.warning(
+                        "Token '%s': env var '%s' is not set and no fallback value provided.",
+                        key, env_key,
+                    )
             if value.get("path"):
                 raw = posix_path(raw)
             tokens[key] = raw
@@ -225,16 +235,40 @@ def resolve_tokens(
 # ── Config Loading & @filter ─────────────────────────────────────────
 
 
+def _deep_merge(base: dict, overlay: dict) -> dict:
+    """Recursively merge *overlay* into *base* (overlay wins).
+
+    Dicts are merged recursively. All other types (including lists)
+    are replaced wholesale by the overlay value.
+    """
+    result = dict(base)
+    for key, value in overlay.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
 def load_config(workspace_root: str) -> dict[str, Any]:
-    """Load config.yaml from workspace root."""
+    """Load config.yaml from workspace root, merged with config.local.yaml if present."""
     config_path = Path(workspace_root) / "config.yaml"
     if not config_path.exists():
         return {}
     data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     if data is None:
-        return {}
+        data = {}
     if not isinstance(data, dict):
         raise TypeError("config.yaml must contain a top-level mapping.")
+
+    local_path = Path(workspace_root) / "config.local.yaml"
+    if local_path.exists():
+        local_data = yaml.safe_load(local_path.read_text(encoding="utf-8"))
+        if local_data is not None:
+            if not isinstance(local_data, dict):
+                raise TypeError("config.local.yaml must contain a top-level mapping.")
+            data = _deep_merge(data, local_data)
+
     return data
 
 
