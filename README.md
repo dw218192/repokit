@@ -157,7 +157,13 @@ repo:
     install_dir:
       value: "{build_dir}/install"
       path: true                                         # normalized to forward slashes
+    unity_editor:
+      env: UNITY_EDITOR              # resolve from environment variable
+      value: "/usr/bin/unity"         # fallback when env var is unset
+      path: true                      # normalize slashes (applied after env resolution)
 ```
+
+Dict tokens with `env` resolve from environment variables at runtime, falling back to `value` if the variable is unset. Combine with `path: true` for cross-platform path tokens.
 
 **List-valued tokens** become CLI dimension flags (`--platform`, `--build-type`). Use `@filter` to vary steps by dimension:
 

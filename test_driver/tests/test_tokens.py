@@ -298,3 +298,84 @@ class TestPathTokens:
         }}}
         tokens = resolve_tokens(str(tmp_path), config, {})
         assert tokens["out"] == "C:/Repos/proj/build"
+
+
+# ── Env-var tokens ────────────────────────────────────────────────
+
+
+class TestEnvVarTokens:
+    """Tests for env-var-backed dict tokens."""
+
+    def test_env_var_resolves_from_environment(self, tmp_path, monkeypatch):
+        """When env var is set, its value is used."""
+        monkeypatch.setenv("TEST_REPOKIT_EDITOR", "/usr/local/bin/editor")
+        config = {"repo": {"tokens": {
+            "editor": {"env": "TEST_REPOKIT_EDITOR", "value": "/default/editor"},
+        }}}
+        tokens = resolve_tokens(str(tmp_path), config, {})
+        assert tokens["editor"] == "/usr/local/bin/editor"
+
+    def test_env_var_fallback_to_value(self, tmp_path, monkeypatch):
+        """When env var is unset, fall back to value."""
+        monkeypatch.delenv("TEST_REPOKIT_MISSING", raising=False)
+        config = {"repo": {"tokens": {
+            "editor": {"env": "TEST_REPOKIT_MISSING", "value": "/default/editor"},
+        }}}
+        tokens = resolve_tokens(str(tmp_path), config, {})
+        assert tokens["editor"] == "/default/editor"
+
+    def test_env_var_empty_string_uses_fallback(self, tmp_path, monkeypatch):
+        """An empty env var is treated as unset; fallback is used."""
+        monkeypatch.setenv("TEST_REPOKIT_EMPTY", "")
+        config = {"repo": {"tokens": {
+            "editor": {"env": "TEST_REPOKIT_EMPTY", "value": "/default/editor"},
+        }}}
+        tokens = resolve_tokens(str(tmp_path), config, {})
+        assert tokens["editor"] == "/default/editor"
+
+    def test_env_var_no_fallback_warns(self, tmp_path, monkeypatch, caplog):
+        """No env var + no value logs a warning and produces empty string."""
+        monkeypatch.delenv("TEST_REPOKIT_MISSING", raising=False)
+        config = {"repo": {"tokens": {
+            "editor": {"env": "TEST_REPOKIT_MISSING"},
+        }}}
+        repo_logger = logging.getLogger("repo_tools")
+        repo_logger.propagate = True
+        try:
+            with caplog.at_level(logging.WARNING, logger="repo_tools"):
+                tokens = resolve_tokens(str(tmp_path), config, {})
+            assert tokens["editor"] == ""
+            assert any(
+                "TEST_REPOKIT_MISSING" in r.message and "not set" in r.message
+                for r in caplog.records
+            )
+        finally:
+            repo_logger.propagate = False
+
+    def test_env_var_with_path_normalization(self, tmp_path, monkeypatch):
+        """Env var with backslashes + path: true produces forward slashes."""
+        monkeypatch.setenv("TEST_REPOKIT_PATH", "C:\\Program Files\\Unity\\Editor")
+        config = {"repo": {"tokens": {
+            "editor": {"env": "TEST_REPOKIT_PATH", "path": True, "value": "/usr/bin/unity"},
+        }}}
+        tokens = resolve_tokens(str(tmp_path), config, {})
+        assert tokens["editor"] == "C:/Program Files/Unity/Editor"
+
+    def test_env_var_cross_reference(self, tmp_path, monkeypatch):
+        """An env-backed token can be referenced by another token."""
+        monkeypatch.setenv("TEST_REPOKIT_ROOT", "/opt/tools")
+        config = {"repo": {"tokens": {
+            "tools_root": {"env": "TEST_REPOKIT_ROOT", "value": "/default"},
+            "tools_bin": "{tools_root}/bin",
+        }}}
+        tokens = resolve_tokens(str(tmp_path), config, {})
+        assert tokens["tools_bin"] == "/opt/tools/bin"
+
+    def test_env_var_overrides_value(self, tmp_path, monkeypatch):
+        """When both env and value are set, env wins."""
+        monkeypatch.setenv("TEST_REPOKIT_OVERRIDE", "from_env")
+        config = {"repo": {"tokens": {
+            "setting": {"env": "TEST_REPOKIT_OVERRIDE", "value": "from_value"},
+        }}}
+        tokens = resolve_tokens(str(tmp_path), config, {})
+        assert tokens["setting"] == "from_env"

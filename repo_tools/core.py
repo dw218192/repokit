@@ -191,6 +191,16 @@ def resolve_tokens(
             continue
         if isinstance(value, dict):
             raw = str(value.get("value", ""))
+            env_key = value.get("env")
+            if env_key:
+                env_val = os.environ.get(env_key, "")
+                if env_val:
+                    raw = env_val
+                elif not raw:
+                    logger.warning(
+                        "Token '%s': env var '%s' is not set and no fallback value provided.",
+                        key, env_key,
+                    )
             if value.get("path"):
                 raw = posix_path(raw)
             tokens[key] = raw
