@@ -11,3 +11,4 @@ coverage.md
 # repokit
 tools/pyproject.toml
 tools/uv.lock
+config.local.yaml
