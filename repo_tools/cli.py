@@ -320,10 +320,12 @@ def _build_cli(
 
     tools = _resolve_tools(framework_tools, project_tools)
 
-    # Auto-generate CommandRunnerTools for config sections not already covered.
-    registered_names = {t.name for t in tools}
-    auto_tools = _auto_register_config_tools(early_config, registered_names)
+    # Config steps override framework tools but not project tools.
+    project_names = {t.name for t in project_tools}
+    auto_tools = _auto_register_config_tools(early_config, project_names)
     if auto_tools:
+        auto_names = {t.name for t in auto_tools}
+        tools = [t for t in tools if t.name not in auto_names]
         tools = sorted(tools + auto_tools, key=lambda t: t.name)
 
     # Feature-gating: hide tools whose feature is not enabled in repo.features.

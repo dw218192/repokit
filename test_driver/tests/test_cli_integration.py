@@ -320,3 +320,23 @@ def test_dimension_flag_after_subcommand_dry_run(make_workspace, capture_logs):
     log_text = capture_logs.getvalue()
     assert "Would run" in log_text
     assert "Release" in log_text
+
+
+# ── 13. Config steps override framework tool ────────────────────────
+
+
+def test_config_steps_override_framework_tool(make_workspace, capture_logs):
+    """A config section with steps: overrides a same-named framework tool (e.g. package)."""
+    ws = make_workspace(
+        config_yaml="""\
+        package:
+            steps:
+                - "echo hello"
+        """
+    )
+    cli = _build_cli(workspace_root=str(ws))
+    result = CliRunner().invoke(cli, ["package", "--dry-run"])
+    assert result.exit_code == 0
+    log_text = capture_logs.getvalue()
+    assert "Would run" in log_text
+    assert "echo hello" in log_text

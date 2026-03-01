@@ -96,10 +96,23 @@ class TestAutoRegisterConfigTools:
         result = _auto_register_config_tools(config, set())
         assert result == []
 
-    def test_registered_name_skipped(self):
+    def test_project_tool_name_not_overridden(self):
+        """Only project Python tools block auto-registration; framework tools do not."""
         config = {"format": {"steps": ["ruff format ."]}}
         result = _auto_register_config_tools(config, {"format"})
         assert result == []
+
+    def test_config_steps_override_framework_tool(self):
+        """A config section with steps: whose name collides with a framework tool produces a CommandRunnerTool."""
+        from repo_tools.command_runner import CommandRunnerTool
+
+        # "package" is a framework tool name — auto-register should NOT skip it
+        config = {"package": {"steps": ["echo hello"]}}
+        # Pass empty registered_names (simulating no project tools)
+        result = _auto_register_config_tools(config, set())
+        assert len(result) == 1
+        assert result[0].name == "package"
+        assert isinstance(result[0], CommandRunnerTool)
 
     def test_multiple_tools(self):
         config = {
