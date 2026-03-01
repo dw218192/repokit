@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1
+
+- Fix: config sections with `steps:` now override same-named built-in framework tools (e.g. `package`). Previously the built-in tool always ran, ignoring the user's custom steps. Priority order: project Python tools > config `steps:` > framework tools.
+
 ## 0.4.0
 
 - **Env-var-backed tokens**: Dict tokens now support an `env` key that resolves the value from an environment variable at runtime, with optional `value` fallback. Combine with `path: true` for cross-platform tool paths (e.g., `UNITY_EDITOR`).
