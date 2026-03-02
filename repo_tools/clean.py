@@ -33,16 +33,18 @@ class CleanTool(RepoTool):
         )(cmd)
         return cmd
 
+    _DEFAULT_PATHS = ["{workspace_root}/_build"]
+
     def default_args(self, tokens: dict[str, str]) -> dict[str, Any]:
         return {
             "dry_run": False,
-            "paths": ["{workspace_root}/_build"],
+            "paths": [],
         }
 
     def execute(self, ctx: ToolContext, args: dict[str, Any]) -> None:
         formatter = TokenFormatter(ctx.tokens, ctx.config)
         dry_run = bool(args.get("dry_run"))
-        paths: list[str] = args.get("paths", [])
+        paths: list[str] = self._DEFAULT_PATHS + list(args.get("paths", []))
 
         with log_section("Cleaning"):
             removed = 0

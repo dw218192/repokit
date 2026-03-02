@@ -29,10 +29,13 @@ class TestCleanTool:
 
         assert not build_dir.exists()
 
-    def test_config_paths(self, tmp_path, make_tool_context):
-        """Custom paths in tool_config, verifies those removed."""
+    def test_config_paths_append_to_defaults(self, tmp_path, make_tool_context):
+        """Config paths append to defaults — both _build/ and custom dir removed."""
         ws = tmp_path / "ws"
         ws.mkdir()
+        build_dir = ws / "_build"
+        build_dir.mkdir()
+        (build_dir / "artifact.o").write_text("obj")
         out_dir = ws / "output"
         out_dir.mkdir()
         (out_dir / "data.bin").write_text("binary")
@@ -46,7 +49,8 @@ class TestCleanTool:
 
         tool.execute(ctx, args)
 
-        assert not out_dir.exists()
+        assert not build_dir.exists(), "default _build/ should still be cleaned"
+        assert not out_dir.exists(), "config path should also be cleaned"
 
     def test_cross_ref(self, tmp_path, make_tool_context):
         """{cfg:package.output_dir} in paths, verifies resolution."""
