@@ -40,18 +40,29 @@ if ($Root) {
     Write-Host "Derived project root: $Root"
 }
 
-$Tools = "$Root\_tools"
-$Bin = "$Tools\bin"
-$Pys = "$Tools\python"
-$Cache = "$Tools\cache\uv"
-$Venv = "$Tools\venv"
+$Managed = "$FrameworkDir\_managed"
+$ToolsDir = Split-Path $FrameworkDir -Parent
+
+# Validate: framework must not be at workspace root
+if ((Resolve-Path $ToolsDir).Path -eq (Resolve-Path $Root).Path) {
+    Write-Error "ERROR: framework must not be at the workspace root. Place it in a subdirectory (e.g. tools\framework\)."
+    exit 1
+}
+
+$Bin = "$Managed\bin"
+$Pys = "$Managed\python"
+$Cache = "$Managed\cache\uv"
+$Venv = "$Managed\venv"
 
 # ── Clean ─────────────────────────────────────────────────────────────
 
 if ($Clean) {
     Write-Host "Cleaning bootstrap artifacts..."
-    if (Test-Path $Tools) { Remove-Item -Recurse -Force $Tools }
-    Remove-Item -Force -ErrorAction SilentlyContinue "$Root\tools\pyproject.toml", "$Root\tools\uv.lock"
+    # Clean old layout (one-time migration)
+    if (Test-Path "$Root\_tools") { Remove-Item -Recurse -Force "$Root\_tools" }
+    Remove-Item -Force -ErrorAction SilentlyContinue "$ToolsDir\pyproject.toml", "$ToolsDir\uv.lock"
+    # Clean current managed dir
+    if (Test-Path $Managed) { Remove-Item -Recurse -Force $Managed }
     Remove-Item -Force -ErrorAction SilentlyContinue "$Root\repo", "$Root\repo.cmd"
 }
 
