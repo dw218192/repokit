@@ -37,7 +37,7 @@ patterns = [
     'git\s+push\s.*--force',
     'git\s+push\s+-f\b',
     'git\s+reset\s+--hard',
-    'git\s+rebase',
+    'git\s+rebase\b(?!\s+--(continue|abort|skip))',
     'git\s+commit\s.*--amend',
     'git\s+filter-branch',
     'git\s+reflog\s+expire',

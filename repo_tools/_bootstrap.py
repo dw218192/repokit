@@ -1,6 +1,6 @@
 """Stdlib-only bootloader for repo init.
 
-Generates tools/pyproject.toml from the framework's pyproject.toml and runs
+Generates _managed/pyproject.toml from the framework's pyproject.toml and runs
 ``uv sync``.  No third-party imports — bootstrap calls this before any pip
 packages are installed.
 
@@ -68,13 +68,13 @@ def derive_project_root(framework_dir: Path) -> Path:
     return git_root
 
 
-def find_uv(workspace_root: Path) -> str | None:
-    """Locate the uv executable: _tools/bin first, then PATH."""
+def find_uv(managed_dir: Path) -> str | None:
+    """Locate the uv executable: managed_dir/bin first, then PATH."""
     suffix = ".exe" if sys.platform == "win32" else ""
 
-    tools_bin = workspace_root / "_tools" / "bin" / f"uv{suffix}"
-    if tools_bin.exists():
-        return str(tools_bin)
+    local_uv = managed_dir / "bin" / f"uv{suffix}"
+    if local_uv.exists():
+        return str(local_uv)
 
     return shutil.which("uv")
 
@@ -132,7 +132,7 @@ def write_pyproject(
     path: Path,
     groups: dict[str, list[str]],
 ) -> None:
-    """Write the generated tools/pyproject.toml."""
+    """Write the generated pyproject.toml."""
     def _q(items: list[str]) -> str:
         return ", ".join(f'"{d}"' for d in items)
 
@@ -165,13 +165,26 @@ def run(
     features: list[str] | None = None,
     tool_deps: list[str] | None = None,
 ) -> None:
-    """Generate tools/pyproject.toml and run uv sync.
+    """Generate _managed/pyproject.toml and run uv sync.
 
     *features*: list of enabled features, or None/empty for all.
     *tool_deps*: deps declared by registered tools via ``RepoTool.deps``.
     """
+    managed_dir = framework_root / "_managed"
+    tools_dir = framework_root.parent
+
+    if tools_dir.resolve() == workspace_root.resolve():
+        print(
+            "ERROR: framework cannot live at the project root. "
+            "Place it in a subdirectory (e.g. tools/framework).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    managed_dir.mkdir(exist_ok=True)
+
     if uv is None:
-        uv = find_uv(workspace_root)
+        uv = find_uv(managed_dir)
     if uv is None:
         print("ERROR: uv not found", file=sys.stderr)
         sys.exit(1)
@@ -183,13 +196,13 @@ def run(
     if tool_deps:
         groups["tools"] = tool_deps
 
-    tools_pyproject = workspace_root / "tools" / "pyproject.toml"
+    tools_pyproject = managed_dir / "pyproject.toml"
 
     write_pyproject(tools_pyproject, groups)
     print(f"Generated {tools_pyproject}")
 
-    venv_dir = workspace_root / "_tools" / "venv"
-    uv_sync(uv, tools_pyproject.parent, venv_dir)
+    venv_dir = managed_dir / "venv"
+    uv_sync(uv, managed_dir, venv_dir)
 
     patch_gitignore(workspace_root / ".gitignore")
 

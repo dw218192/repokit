@@ -151,7 +151,10 @@ def _builtin_tokens() -> dict[str, str]:
     is_win = system == "Windows"
     is_mac = system == "Darwin"
     # Framework root: parent of the repo_tools package (the submodule dir).
-    framework_root = posix_path(str(Path(__file__).resolve().parent.parent))
+    framework_root_path = Path(os.path.abspath(__file__)).parent.parent
+    framework_root = posix_path(str(framework_root_path))
+    tools_dir = posix_path(str(framework_root_path.parent))
+    managed_dir = posix_path(str(framework_root_path / "_managed"))
     return {
         "exe_ext": ".exe" if is_win else "",
         "shell_ext": ".cmd" if is_win else ".sh",
@@ -159,11 +162,13 @@ def _builtin_tokens() -> dict[str, str]:
         "path_sep": ";" if is_win else ":",
         "repo": f'"{posix_path(sys.executable)}" -m repo_tools.cli --workspace-root "{{workspace_root}}"',
         "framework_root": framework_root,
+        "tools_dir": tools_dir,
+        "managed_dir": managed_dir,
     }
 
 
 # Tokens set by the framework that config.yaml must not override.
-_RESERVED_TOKENS = {"workspace_root", "repo", "framework_root", "cfg", "env"}
+_RESERVED_TOKENS = {"workspace_root", "repo", "framework_root", "tools_dir", "managed_dir", "cfg", "env"}
 
 
 def _extract_references(template: str) -> set[str]:

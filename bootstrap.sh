@@ -44,18 +44,26 @@ else
     echo "Derived project root: $ROOT"
 fi
 
-TOOLS="$ROOT/_tools"
-BIN="$TOOLS/bin"
-PYS="$TOOLS/python"
-CACHE="$TOOLS/cache/uv"
-VENV="$TOOLS/venv"
+TOOLS_DIR="$(dirname "$FRAMEWORK_DIR")"
+MANAGED="$FRAMEWORK_DIR/_managed"
+
+# Validate: framework must not be at workspace root
+if [[ "$(cd "$TOOLS_DIR" && pwd)" == "$(cd "$ROOT" && pwd)" ]]; then
+    echo "ERROR: framework must not be at the workspace root." >&2
+    echo "Place it in a subdirectory (e.g. tools/framework/)." >&2
+    exit 1
+fi
+
+BIN="$MANAGED/bin"
+PYS="$MANAGED/python"
+CACHE="$MANAGED/cache/uv"
+VENV="$MANAGED/venv"
 
 # ── Clean ─────────────────────────────────────────────────────────────
 
 if $CLEAN; then
     echo "Cleaning bootstrap artifacts..."
-    rm -rf "$TOOLS"
-    rm -f "$ROOT/tools/pyproject.toml" "$ROOT/tools/uv.lock"
+    rm -rf "$MANAGED"
     rm -f "$ROOT/repo" "$ROOT/repo.cmd"
 fi
 

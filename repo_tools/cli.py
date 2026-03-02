@@ -309,11 +309,11 @@ def _build_cli(
     # Separate into framework vs project tools based on file location
     framework_tools: list[RepoTool] = []
     project_tools: list[RepoTool] = []
-    project_prefixes = tuple(str(Path(d).resolve()) for d in (project_tool_dirs or []))
+    project_prefixes = tuple(os.path.abspath(d) for d in (project_tool_dirs or []))
     for t in all_tools:
         mod = sys.modules.get(t.__class__.__module__)
         mod_file = getattr(mod, "__file__", "") or ""
-        if project_prefixes and str(Path(mod_file).resolve()).startswith(project_prefixes):
+        if project_prefixes and os.path.abspath(mod_file).startswith(project_prefixes):
             project_tools.append(t)
         else:
             framework_tools.append(t)
@@ -379,10 +379,10 @@ def main() -> None:
 
     # Discover project tool dirs
     project_tool_dirs: list[str] = []
-    if workspace_root:
-        project_tools_dir = Path(workspace_root) / "tools"
-        if (project_tools_dir / "repo_tools").exists():
-            project_tool_dirs.append(str(project_tools_dir))
+    framework_root = Path(os.path.abspath(__file__)).parent.parent
+    tools_dir = framework_root.parent
+    if (tools_dir / "repo_tools").exists():
+        project_tool_dirs.append(str(tools_dir))
 
     cli = _build_cli(
         workspace_root=workspace_root,
