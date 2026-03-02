@@ -42,48 +42,59 @@ def _norm(p: Path) -> str:
 
 
 class TestIsLocalVenv:
-    def test_python_in_managed_venv_unix(self, tmp_path, monkeypatch):
-        fw = tmp_path / "project" / "tools" / "framework"
-        fw.mkdir(parents=True)
-        monkeypatch.setattr(sys, "executable", str(fw / "_managed/venv/bin/python"))
-        assert _is_local_venv(fw) is True
+    @staticmethod
+    def _make_venv(fw: Path) -> Path:
+        """Create a minimal fake venv with pyvenv.cfg."""
+        venv = fw / "_managed" / "venv"
+        venv.mkdir(parents=True, exist_ok=True)
+        (venv / "pyvenv.cfg").write_text("home = /usr/bin\n")
+        return venv
 
-    def test_python_in_managed_venv_win(self, tmp_path, monkeypatch):
+    def test_python_in_managed_venv(self, tmp_path, monkeypatch):
         fw = tmp_path / "project" / "tools" / "framework"
-        fw.mkdir(parents=True)
-        monkeypatch.setattr(sys, "executable", str(fw / "_managed/venv/Scripts/python.exe"))
+        venv = self._make_venv(fw)
+        monkeypatch.setattr(sys, "prefix", str(venv))
         assert _is_local_venv(fw) is True
 
     def test_python_outside_framework(self, tmp_path, monkeypatch):
         fw = tmp_path / "project" / "tools" / "framework"
-        fw.mkdir(parents=True)
-        monkeypatch.setattr(sys, "executable", "/usr/bin/python3")
+        self._make_venv(fw)
+        monkeypatch.setattr(sys, "prefix", "/usr")
+        assert _is_local_venv(fw) is False
+
+    def test_no_pyvenv_cfg(self, tmp_path, monkeypatch):
+        """No venv at all → False, even if prefix would match."""
+        fw = tmp_path / "project" / "tools" / "framework"
+        venv = fw / "_managed" / "venv"
+        venv.mkdir(parents=True)
+        monkeypatch.setattr(sys, "prefix", str(venv))
         assert _is_local_venv(fw) is False
 
     def test_python_in_different_framework(self, tmp_path, monkeypatch):
         fw_a = tmp_path / "project_a" / "tools" / "framework"
-        fw_a.mkdir(parents=True)
+        self._make_venv(fw_a)
         fw_b = tmp_path / "project_b" / "tools" / "framework"
-        monkeypatch.setattr(sys, "executable", str(fw_b / "_managed/venv/bin/python"))
+        venv_b = self._make_venv(fw_b)
+        monkeypatch.setattr(sys, "prefix", str(venv_b))
         assert _is_local_venv(fw_a) is False
 
-    def test_symlink_venv_python(self, tmp_path, monkeypatch):
-        """Venv python symlinked to uv-managed python must still return True."""
-        fw = tmp_path / "project" / "tools" / "framework"
-        venv_bin = fw / "_managed" / "venv" / "bin"
-        venv_bin.mkdir(parents=True)
-        uv_python = fw / "_managed" / "python" / "cpython-3.14" / "python"
-        uv_python.parent.mkdir(parents=True)
-        uv_python.write_text("fake")
+    def test_symlink_framework_dir(self, tmp_path, monkeypatch):
+        """Framework dir is a symlink — realpath resolves both sides."""
+        real_fw = tmp_path / "real_framework"
+        venv = real_fw / "_managed" / "venv"
+        venv.mkdir(parents=True)
+        (venv / "pyvenv.cfg").write_text("home = /usr/bin\n")
 
-        venv_py = venv_bin / "python"
+        link_fw = tmp_path / "project" / "tools" / "framework"
+        link_fw.parent.mkdir(parents=True)
         try:
-            venv_py.symlink_to(uv_python)
+            link_fw.symlink_to(real_fw)
         except OSError:
             pytest.skip("symlink creation requires elevated privileges")
 
-        monkeypatch.setattr(sys, "executable", str(venv_py))
-        assert _is_local_venv(fw) is True
+        # prefix goes through the symlink, realpath resolves both
+        monkeypatch.setattr(sys, "prefix", str(link_fw / "_managed" / "venv"))
+        assert _is_local_venv(link_fw) is True
 
 
 # ── derive_project_root ──────────────────────────────────────────────────

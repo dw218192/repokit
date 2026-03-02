@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -13,16 +14,20 @@ from .core import RepoTool, ToolContext, registered_tool_deps
 
 
 def _is_local_venv(framework_root: Path) -> bool:
-    """True when the running Python lives under framework_root/_managed/venv/.
+    """True when the running Python belongs to framework_root/_managed/venv/.
 
-    Avoids resolve() — venv Python is often a symlink to uv-managed Python
-    which would break the path check.
+    Uses os.path.realpath() to resolve all symlinks on both sides — this
+    handles two layers of indirection that break naive path checks:
+      1. The framework dir itself may be a symlink (CI junction/symlink).
+      2. The venv python may be a symlink to uv-managed Python (common on
+         Linux), so sys.executable resolves outside the venv dir.
+    Comparing sys.prefix (the venv dir Python detected at startup) avoids
+    both problems.
     """
-    try:
-        Path(sys.executable).relative_to(framework_root / "_managed" / "venv")
-        return True
-    except ValueError:
+    venv = framework_root / "_managed" / "venv"
+    if not (venv / "pyvenv.cfg").is_file():
         return False
+    return os.path.realpath(sys.prefix) == os.path.realpath(str(venv))
 
 
 class InitTool(RepoTool):
