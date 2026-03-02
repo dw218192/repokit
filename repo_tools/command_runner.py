@@ -107,7 +107,7 @@ class CommandRunnerTool(RepoTool):
             if k not in _skip and v is not None:
                 tokens[k] = str(v)
 
-        formatter = TokenFormatter(tokens)
+        formatter = TokenFormatter(tokens, ctx.config)
         steps = _validate_steps(self.name, raw_steps)
 
         # Resolve each step through token expansion.

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0
+
+- **`{cfg:section.key}` config cross-references**: Token templates can now reference values from other config sections. `{cfg:package.output_dir}` resolves to `config["package"]["output_dir"]`. Values are transitively expanded through the normal multi-pass token resolver.
+- **`{env:VAR_NAME}` inline env var access**: Lightweight alternative to declaring env-backed tokens in `repo.tokens`. `{env:UNITY_EDITOR}` resolves to the environment variable directly.
+- **`./repo clean` tool**: Built-in tool for removing build artifacts. Defaults to `_build/`; configure additional paths in `clean.paths`. Supports glob patterns, `{cfg:...}` cross-refs, `--dry-run`, and safety checks (protected dirs, workspace boundary).
+
 ## 0.4.1
 
 - Fix: config sections with `steps:` now override same-named built-in framework tools (e.g. `package`). Previously the built-in tool always ran, ignoring the user's custom steps. Priority order: project Python tools > config `steps:` > framework tools.

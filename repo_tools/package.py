@@ -100,7 +100,7 @@ class PackageTool(RepoTool):
         }
 
     def execute(self, ctx: ToolContext, args: dict[str, Any]) -> None:
-        formatter = TokenFormatter(ctx.tokens)
+        formatter = TokenFormatter(ctx.tokens, ctx.config)
 
         # Resolve output directory: CLI > config > default
         output_dir_raw = args.get("output_dir")
