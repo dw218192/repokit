@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1
+
+- `{cfg:...}` now supports arbitrary nesting depth (e.g. `{cfg:repo.tokens.unity_project}`).
+- `clean` tool: config `paths` append to defaults instead of replacing them.
+
 ## 0.5.0
 
 - **`{cfg:section.key}` config cross-references**: Token templates can now reference values from other config sections. `{cfg:package.output_dir}` resolves to `config["package"]["output_dir"]`. Values are transitively expanded through the normal multi-pass token resolver.

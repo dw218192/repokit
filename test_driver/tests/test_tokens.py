@@ -406,14 +406,14 @@ class TestConfigCrossRefs:
         """{cfg:nonexistent.key} raises KeyError."""
         config = {"package": {"output_dir": "/out"}}
         fmt = TokenFormatter({}, config)
-        with pytest.raises(KeyError, match="No config section 'nonexistent'"):
+        with pytest.raises(KeyError, match="No config key 'nonexistent'"):
             fmt.resolve("{cfg:nonexistent.key}")
 
     def test_missing_key(self):
         """{cfg:package.nonexistent} raises KeyError."""
         config = {"package": {"output_dir": "/out"}}
         fmt = TokenFormatter({}, config)
-        with pytest.raises(KeyError, match="'package' has no key 'nonexistent'"):
+        with pytest.raises(KeyError, match="No config key 'package.nonexistent'"):
             fmt.resolve("{cfg:package.nonexistent}")
 
     def test_non_string_value(self):
@@ -422,6 +422,19 @@ class TestConfigCrossRefs:
         fmt = TokenFormatter({}, config)
         with pytest.raises(KeyError, match="'package.mappings' is not a string"):
             fmt.resolve("{cfg:package.mappings}")
+
+    def test_deep_nesting(self):
+        """{cfg:repo.tokens.unity_project} walks config→repo→tokens→unity_project."""
+        config = {"repo": {"tokens": {"unity_project": "C:/Projects/MyGame"}}}
+        fmt = TokenFormatter({}, config)
+        assert fmt.resolve("{cfg:repo.tokens.unity_project}") == "C:/Projects/MyGame"
+
+    def test_deep_nesting_mid_level_not_dict(self):
+        """Error when a mid-level key is not a dict."""
+        config = {"repo": {"tokens": "not-a-dict"}}
+        fmt = TokenFormatter({}, config)
+        with pytest.raises(KeyError, match="'repo.tokens' is not a dict"):
+            fmt.resolve("{cfg:repo.tokens.unity_project}")
 
     def test_invalid_spec(self):
         """{cfg:noperiod} raises KeyError."""

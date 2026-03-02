@@ -60,28 +60,32 @@ class _ConfigProxy:
     """Proxy enabling {cfg:section.key} config cross-references.
 
     When format_map encounters {cfg:package.output_dir}, Python calls
-    _ConfigProxy.__format__("package.output_dir"), which returns
-    config["package"]["output_dir"]. The returned value may itself
-    contain token placeholders — multi-pass resolution handles them.
+    _ConfigProxy.__format__("package.output_dir"), which walks
+    config["package"]["output_dir"]. Arbitrary nesting is supported:
+    {cfg:repo.tokens.unity_project} walks config→repo→tokens→unity_project.
+    The leaf value must be a string; it may contain token placeholders
+    that are resolved by subsequent passes.
     """
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict[str, Any]):
         self._config = config
 
-    def __format__(self, spec):
-        parts = spec.split(".", 1)
-        if len(parts) != 2:
+    def __format__(self, spec: str) -> str:
+        parts = spec.split(".")
+        if len(parts) < 2:
             raise KeyError(f"Invalid config reference: cfg:{spec}")
-        section_name, key = parts
-        section = self._config.get(section_name)
-        if not isinstance(section, dict):
-            raise KeyError(f"No config section '{section_name}'")
-        if key not in section:
-            raise KeyError(f"'{section_name}' has no key '{key}'")
-        value = section[key]
-        if not isinstance(value, str):
-            raise KeyError(f"'{section_name}.{key}' is not a string")
-        return value
+        current: Any = self._config
+        for i, part in enumerate(parts):
+            if not isinstance(current, dict):
+                path = ".".join(parts[:i])
+                raise KeyError(f"'{path}' is not a dict in config")
+            if part not in current:
+                path = ".".join(parts[: i + 1])
+                raise KeyError(f"No config key '{path}'")
+            current = current[part]
+        if not isinstance(current, str):
+            raise KeyError(f"'{spec}' is not a string")
+        return current
 
 
 class _EnvProxy:
