@@ -56,6 +56,34 @@ if not logger.handlers:
 # ── Token System ─────────────────────────────────────────────────────
 
 
+class _ConfigProxy:
+    """Proxy enabling {cfg:section.key} config cross-references.
+
+    When format_map encounters {cfg:package.output_dir}, Python calls
+    _ConfigProxy.__format__("package.output_dir"), which returns
+    config["package"]["output_dir"]. The returned value may itself
+    contain token placeholders — multi-pass resolution handles them.
+    """
+
+    def __init__(self, config: dict):
+        self._config = config
+
+    def __format__(self, spec):
+        parts = spec.split(".", 1)
+        if len(parts) != 2:
+            raise KeyError(f"Invalid config reference: cfg:{spec}")
+        section_name, key = parts
+        section = self._config.get(section_name)
+        if not isinstance(section, dict):
+            raise KeyError(f"No config section '{section_name}'")
+        if key not in section:
+            raise KeyError(f"'{section_name}' has no key '{key}'")
+        value = section[key]
+        if not isinstance(value, str):
+            raise KeyError(f"'{section_name}.{key}' is not a string")
+        return value
+
+
 class TokenFormatter(string.Formatter):
     """Format string subclass with circular-reference detection.
 
@@ -66,7 +94,10 @@ class TokenFormatter(string.Formatter):
 
     MAX_DEPTH = 10
 
-    def __init__(self, tokens: dict[str, str]) -> None:
+    def __init__(self, tokens: dict[str, str], config: dict[str, Any] | None = None) -> None:
+        if config:
+            tokens = dict(tokens)  # don't mutate caller's dict
+            tokens["cfg"] = _ConfigProxy(config)
         self._tokens = tokens
 
     def resolve(self, template: str) -> str:
@@ -110,7 +141,7 @@ def _builtin_tokens() -> dict[str, str]:
 
 
 # Tokens set by the framework that config.yaml must not override.
-_RESERVED_TOKENS = {"workspace_root", "repo", "framework_root"}
+_RESERVED_TOKENS = {"workspace_root", "repo", "framework_root", "cfg"}
 
 
 def _extract_references(template: str) -> set[str]:
@@ -217,7 +248,7 @@ def resolve_tokens(
     _validate_token_graph(tokens)
 
     # Resolve any cross-references in variable tokens
-    formatter = TokenFormatter(tokens)
+    formatter = TokenFormatter(tokens, config)
     resolved: dict[str, str] = {}
     for key, value in tokens.items():
         if "{" in str(value):

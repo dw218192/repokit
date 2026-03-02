@@ -10,6 +10,8 @@ import pytest
 
 from repo_tools.core import (
     TokenFormatter,
+    _ConfigProxy,
+    _RESERVED_TOKENS,
     _extract_references,
     _validate_token_graph,
     resolve_tokens,
@@ -379,3 +381,59 @@ class TestEnvVarTokens:
         }}}
         tokens = resolve_tokens(str(tmp_path), config, {})
         assert tokens["setting"] == "from_env"
+
+
+# ── Config Cross-References ──────────────────────────────────────────
+
+
+class TestConfigCrossRefs:
+    """Tests for {cfg:section.key} config cross-references."""
+
+    def test_basic_cross_ref(self):
+        """{cfg:package.output_dir} resolves to config value."""
+        config = {"package": {"output_dir": "/out/dir"}}
+        fmt = TokenFormatter({"greeting": "hello"}, config)
+        assert fmt.resolve("{cfg:package.output_dir}") == "/out/dir"
+
+    def test_transitive_resolution(self):
+        """Config value containing tokens like {workspace_root} gets fully expanded."""
+        config = {"package": {"output_dir": "{workspace_root}/_package"}}
+        fmt = TokenFormatter({"workspace_root": "/home/proj"}, config)
+        assert fmt.resolve("{cfg:package.output_dir}") == "/home/proj/_package"
+
+    def test_missing_section(self):
+        """{cfg:nonexistent.key} raises KeyError."""
+        config = {"package": {"output_dir": "/out"}}
+        fmt = TokenFormatter({}, config)
+        with pytest.raises(KeyError, match="No config section 'nonexistent'"):
+            fmt.resolve("{cfg:nonexistent.key}")
+
+    def test_missing_key(self):
+        """{cfg:package.nonexistent} raises KeyError."""
+        config = {"package": {"output_dir": "/out"}}
+        fmt = TokenFormatter({}, config)
+        with pytest.raises(KeyError, match="'package' has no key 'nonexistent'"):
+            fmt.resolve("{cfg:package.nonexistent}")
+
+    def test_non_string_value(self):
+        """{cfg:package.mappings} (a list) raises KeyError."""
+        config = {"package": {"mappings": [{"src": "a", "dest": "b"}]}}
+        fmt = TokenFormatter({}, config)
+        with pytest.raises(KeyError, match="'package.mappings' is not a string"):
+            fmt.resolve("{cfg:package.mappings}")
+
+    def test_invalid_spec(self):
+        """{cfg:noperiod} raises KeyError."""
+        config = {"package": {"output_dir": "/out"}}
+        fmt = TokenFormatter({}, config)
+        with pytest.raises(KeyError, match="Invalid config reference: cfg:noperiod"):
+            fmt.resolve("{cfg:noperiod}")
+
+    def test_backward_compat(self):
+        """TokenFormatter(tokens) without config resolves normal tokens."""
+        fmt = TokenFormatter({"a": "hello", "b": "world"})
+        assert fmt.resolve("{a} {b}") == "hello world"
+
+    def test_cfg_reserved(self):
+        """'cfg' is in _RESERVED_TOKENS."""
+        assert "cfg" in _RESERVED_TOKENS
