@@ -58,10 +58,6 @@ $Venv = "$Managed\venv"
 
 if ($Clean) {
     Write-Host "Cleaning bootstrap artifacts..."
-    # Clean old layout (one-time migration)
-    if (Test-Path "$Root\_tools") { Remove-Item -Recurse -Force "$Root\_tools" }
-    Remove-Item -Force -ErrorAction SilentlyContinue "$ToolsDir\pyproject.toml", "$ToolsDir\uv.lock"
-    # Clean current managed dir
     if (Test-Path $Managed) { Remove-Item -Recurse -Force $Managed }
     Remove-Item -Force -ErrorAction SilentlyContinue "$Root\repo", "$Root\repo.cmd"
 }

@@ -63,10 +63,6 @@ VENV="$MANAGED/venv"
 
 if $CLEAN; then
     echo "Cleaning bootstrap artifacts..."
-    # Clean old layout (one-time migration)
-    rm -rf "$ROOT/_tools"
-    rm -f "$TOOLS_DIR/pyproject.toml" "$TOOLS_DIR/uv.lock"
-    # Clean current managed dir
     rm -rf "$MANAGED"
     rm -f "$ROOT/repo" "$ROOT/repo.cmd"
 fi

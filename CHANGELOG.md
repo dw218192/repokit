@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0
+
+- **`framework_root/_managed/` layout**: All generated content (venv, `pyproject.toml`, `uv.lock`, uv binary, Python installations, cache) now lives under `framework_root/_managed/` instead of split across `_tools/` and `tools/`. The framework's own `.gitignore` handles `_managed/`, simplifying the consumer's `.gitignore`. This allows the framework submodule to be placed anywhere (e.g. `dev_tools/blah/framework`), not just `tools/framework`.
+- **`tools_dir` and `managed_dir` built-in tokens**: New reserved tokens for referencing the tools directory (`framework_root.parent`) and managed directory (`framework_root/_managed`).
+- **Framework-at-root validation**: Bootstrap and CLI reject placing the framework directly at the workspace root with a clear error message.
+- **Project tool discovery**: `cli.py` derives the project tool directory from `framework_root.parent` instead of hardcoding `workspace_root/tools`.
+- Fix allowlist: `git rebase --continue`, `--abort`, and `--skip` are now permitted (recovery commands).
+
 ## 0.5.1
 
 - `{cfg:...}` now supports arbitrary nesting depth (e.g. `{cfg:repo.tokens.unity_project}`).
