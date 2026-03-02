@@ -101,6 +101,20 @@ class TestCheckCommand:
         allowed, reason = check_command("", rules)
         assert allowed is False
 
+    def test_git_rebase_blocked(self):
+        """Destructive rebase commands are denied."""
+        rules = _default_rules()
+        for cmd in ("git rebase main", "git rebase -i HEAD~3", "git rebase origin/main"):
+            allowed, _ = check_command(cmd, rules)
+            assert allowed is False, f"should block: {cmd}"
+
+    def test_git_rebase_recovery_allowed(self):
+        """Non-destructive rebase recovery commands are allowed."""
+        rules = _default_rules()
+        for cmd in ("git rebase --continue", "git rebase --abort", "git rebase --skip"):
+            allowed, _ = check_command(cmd, rules)
+            assert allowed is True, f"should allow: {cmd}"
+
 
 # ── Role-filtered rules ────────────────────────────────────────────────
 
