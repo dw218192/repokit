@@ -84,6 +84,23 @@ class _ConfigProxy:
         return value
 
 
+class _EnvProxy:
+    """Proxy enabling {env:VAR_NAME} inline environment variable access.
+
+    When format_map encounters {env:UNITY_EDITOR}, Python calls
+    _EnvProxy.__format__("UNITY_EDITOR"), which returns
+    os.environ["UNITY_EDITOR"].
+    """
+
+    def __format__(self, spec: str) -> str:
+        if not spec:
+            raise KeyError("Empty env var name in {env:...}")
+        value = os.environ.get(spec)
+        if value is None:
+            raise KeyError(f"Environment variable '{spec}' is not set")
+        return value
+
+
 class TokenFormatter(string.Formatter):
     """Format string subclass with circular-reference detection.
 
@@ -95,9 +112,10 @@ class TokenFormatter(string.Formatter):
     MAX_DEPTH = 10
 
     def __init__(self, tokens: dict[str, str], config: dict[str, Any] | None = None) -> None:
+        tokens = dict(tokens)  # don't mutate caller's dict
         if config:
-            tokens = dict(tokens)  # don't mutate caller's dict
             tokens["cfg"] = _ConfigProxy(config)
+        tokens["env"] = _EnvProxy()
         self._tokens = tokens
 
     def resolve(self, template: str) -> str:
@@ -141,7 +159,7 @@ def _builtin_tokens() -> dict[str, str]:
 
 
 # Tokens set by the framework that config.yaml must not override.
-_RESERVED_TOKENS = {"workspace_root", "repo", "framework_root", "cfg"}
+_RESERVED_TOKENS = {"workspace_root", "repo", "framework_root", "cfg", "env"}
 
 
 def _extract_references(template: str) -> set[str]:

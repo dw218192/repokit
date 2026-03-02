@@ -11,6 +11,7 @@ import pytest
 from repo_tools.core import (
     TokenFormatter,
     _ConfigProxy,
+    _EnvProxy,
     _RESERVED_TOKENS,
     _extract_references,
     _validate_token_graph,
@@ -437,3 +438,44 @@ class TestConfigCrossRefs:
     def test_cfg_reserved(self):
         """'cfg' is in _RESERVED_TOKENS."""
         assert "cfg" in _RESERVED_TOKENS
+
+
+# ── Env Proxy ────────────────────────────────────────────────────────
+
+
+class TestEnvProxy:
+    """Tests for {env:VAR_NAME} inline environment variable access."""
+
+    def test_basic_env_ref(self, monkeypatch):
+        """{env:MY_VAR} resolves to the environment variable value."""
+        monkeypatch.setenv("MY_TEST_REPOKIT_VAR", "hello_world")
+        fmt = TokenFormatter({"a": "x"})
+        assert fmt.resolve("{env:MY_TEST_REPOKIT_VAR}") == "hello_world"
+
+    def test_missing_env_var(self):
+        """{env:NONEXISTENT_12345} raises KeyError."""
+        fmt = TokenFormatter({})
+        with pytest.raises(KeyError, match="Environment variable 'NONEXISTENT_12345' is not set"):
+            fmt.resolve("{env:NONEXISTENT_12345}")
+
+    def test_empty_spec(self):
+        """{env:} raises KeyError."""
+        fmt = TokenFormatter({})
+        with pytest.raises(KeyError, match="Empty env var name"):
+            fmt.resolve("{env:}")
+
+    def test_transitive(self, monkeypatch):
+        """{env:MY_VAR} resolves to a value containing {workspace_root}, verifies full expansion."""
+        monkeypatch.setenv("MY_TEST_REPOKIT_DIR", "{workspace_root}/subdir")
+        fmt = TokenFormatter({"workspace_root": "/home/proj"})
+        assert fmt.resolve("{env:MY_TEST_REPOKIT_DIR}") == "/home/proj/subdir"
+
+    def test_env_reserved(self):
+        """'env' is in _RESERVED_TOKENS."""
+        assert "env" in _RESERVED_TOKENS
+
+    def test_env_without_config(self, monkeypatch):
+        """TokenFormatter(tokens) (no config) still supports {env:VAR}."""
+        monkeypatch.setenv("MY_TEST_REPOKIT_NOCONF", "works")
+        fmt = TokenFormatter({"x": "y"})
+        assert fmt.resolve("{env:MY_TEST_REPOKIT_NOCONF}") == "works"
