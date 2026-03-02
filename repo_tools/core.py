@@ -151,7 +151,7 @@ def _builtin_tokens() -> dict[str, str]:
     is_win = system == "Windows"
     is_mac = system == "Darwin"
     # Framework root: parent of the repo_tools package (the submodule dir).
-    framework_root_path = Path(__file__).resolve().parent.parent
+    framework_root_path = Path(os.path.abspath(__file__)).parent.parent
     framework_root = posix_path(str(framework_root_path))
     tools_dir = posix_path(str(framework_root_path.parent))
     managed_dir = posix_path(str(framework_root_path / "_managed"))
