@@ -51,8 +51,7 @@ def init_ctx(make_tool_context, tmp_path, fw_root):
     """ToolContext wired to a temp framework and workspace."""
     ws = tmp_path / "project"
     ws.mkdir()
-    (ws / "tools" / "framework").mkdir(parents=True)
-    (ws / "_tools" / "venv").mkdir(parents=True)
+    (fw_root / "_managed").mkdir(parents=True, exist_ok=True)
 
     return make_tool_context(
         workspace_root=ws,
@@ -65,8 +64,7 @@ def init_ctx_with_features(make_tool_context, tmp_path, fw_root):
     """ToolContext with repo.features configured."""
     ws = tmp_path / "project"
     ws.mkdir()
-    (ws / "tools" / "framework").mkdir(parents=True)
-    (ws / "_tools" / "venv").mkdir(parents=True)
+    (fw_root / "_managed").mkdir(parents=True, exist_ok=True)
 
     return make_tool_context(
         config={"repo": {"features": ["python"]}},
@@ -80,8 +78,7 @@ def init_ctx_with_extra_deps(make_tool_context, tmp_path, fw_root):
     """ToolContext with repo.extra_deps configured."""
     ws = tmp_path / "project"
     ws.mkdir()
-    (ws / "tools" / "framework").mkdir(parents=True)
-    (ws / "_tools" / "venv").mkdir(parents=True)
+    (fw_root / "_managed").mkdir(parents=True, exist_ok=True)
 
     return make_tool_context(
         config={"repo": {"extra_deps": ["somelib>=1.0", "otherlib>=2.0"]}},
@@ -94,27 +91,27 @@ def init_ctx_with_extra_deps(make_tool_context, tmp_path, fw_root):
 
 
 class TestFindUv:
-    def test_finds_uv_in_tools_bin(self, tmp_path):
-        ws = tmp_path / "project"
-        tools_bin = ws / "_tools" / "bin"
-        tools_bin.mkdir(parents=True)
+    def test_finds_uv_in_managed_bin(self, tmp_path):
+        managed = tmp_path / "framework" / "_managed"
+        managed_bin = managed / "bin"
+        managed_bin.mkdir(parents=True)
         suffix = ".exe" if sys.platform == "win32" else ""
-        uv = tools_bin / f"uv{suffix}"
+        uv = managed_bin / f"uv{suffix}"
         uv.write_text("fake")
 
-        assert find_uv(ws) == str(uv)
+        assert find_uv(managed) == str(uv)
 
     @patch("repo_tools._bootstrap.shutil.which", return_value="/usr/bin/uv")
     def test_falls_back_to_path(self, _which, tmp_path):
-        ws = tmp_path / "project"
-        ws.mkdir()
-        assert find_uv(ws) == "/usr/bin/uv"
+        managed = tmp_path / "framework" / "_managed"
+        managed.mkdir(parents=True)
+        assert find_uv(managed) == "/usr/bin/uv"
 
     @patch("repo_tools._bootstrap.shutil.which", return_value=None)
     def test_returns_none_when_missing(self, _which, tmp_path):
-        ws = tmp_path / "project"
-        ws.mkdir()
-        assert find_uv(ws) is None
+        managed = tmp_path / "framework" / "_managed"
+        managed.mkdir(parents=True)
+        assert find_uv(managed) is None
 
 
 # ── pyproject helpers ────────────────────────────────────────────────────────
@@ -249,14 +246,14 @@ class TestInitTool:
 
     @patch("repo_tools._bootstrap.subprocess.run")
     @patch("repo_tools._bootstrap.find_uv", return_value="/bin/uv")
-    def test_generates_pyproject_and_syncs(self, _uv, mock_run, init_ctx):
+    def test_generates_pyproject_and_syncs(self, _uv, mock_run, init_ctx, fw_root):
         mock_run.return_value = MagicMock(returncode=0)
         tool = InitTool()
 
         tool.execute(init_ctx, {})
 
-        # Should have generated tools/pyproject.toml
-        pyproject = init_ctx.workspace_root / "tools" / "pyproject.toml"
+        # Should have generated _managed/pyproject.toml
+        pyproject = fw_root / "_managed" / "pyproject.toml"
         assert pyproject.exists()
         content = pyproject.read_text()
         assert '"click>=8.0"' in content
@@ -272,13 +269,13 @@ class TestInitTool:
 
     @patch("repo_tools._bootstrap.subprocess.run")
     @patch("repo_tools._bootstrap.find_uv", return_value="/bin/uv")
-    def test_includes_only_selected_feature_groups(self, _uv, mock_run, init_ctx_with_features):
+    def test_includes_only_selected_feature_groups(self, _uv, mock_run, init_ctx_with_features, fw_root):
         mock_run.return_value = MagicMock(returncode=0)
         tool = InitTool()
 
         tool.execute(init_ctx_with_features, {})
 
-        pyproject = init_ctx_with_features.workspace_root / "tools" / "pyproject.toml"
+        pyproject = fw_root / "_managed" / "pyproject.toml"
         content = pyproject.read_text()
         assert '"ruff>=0.4"' in content
         assert "clang-format" not in content
@@ -286,7 +283,7 @@ class TestInitTool:
 
     @patch("repo_tools._bootstrap.subprocess.run")
     @patch("repo_tools._bootstrap.find_uv", return_value="/bin/uv")
-    def test_passes_tool_deps_to_bootstrap(self, _uv, mock_run, init_ctx):
+    def test_passes_tool_deps_to_bootstrap(self, _uv, mock_run, init_ctx, fw_root):
         mock_run.return_value = MagicMock(returncode=0)
         saved = dict(_TOOL_REGISTRY)
         try:
@@ -299,7 +296,7 @@ class TestInitTool:
             tool = InitTool()
             tool.execute(init_ctx, {})
 
-            content = (init_ctx.workspace_root / "tools" / "pyproject.toml").read_text()
+            content = (fw_root / "_managed" / "pyproject.toml").read_text()
             assert '"requests>=2.0"' in content
             assert "tools = [" in content
         finally:
@@ -308,7 +305,7 @@ class TestInitTool:
 
     @patch("repo_tools._bootstrap.subprocess.run")
     @patch("repo_tools._bootstrap.find_uv", return_value="/bin/uv")
-    def test_merges_extra_deps_with_tool_deps(self, _uv, mock_run, init_ctx_with_extra_deps):
+    def test_merges_extra_deps_with_tool_deps(self, _uv, mock_run, init_ctx_with_extra_deps, fw_root):
         mock_run.return_value = MagicMock(returncode=0)
         saved = dict(_TOOL_REGISTRY)
         try:
@@ -321,7 +318,7 @@ class TestInitTool:
             tool = InitTool()
             tool.execute(init_ctx_with_extra_deps, {})
 
-            content = (init_ctx_with_extra_deps.workspace_root / "tools" / "pyproject.toml").read_text()
+            content = (fw_root / "_managed" / "pyproject.toml").read_text()
             # extra_deps from config
             assert '"somelib>=1.0"' in content
             assert '"otherlib>=2.0"' in content
@@ -342,7 +339,7 @@ class TestInitTool:
 
         env = mock_run.call_args.kwargs.get("env", {})
         assert "UV_PROJECT_ENVIRONMENT" in env
-        assert "_tools" in env["UV_PROJECT_ENVIRONMENT"]
+        assert "_managed" in env["UV_PROJECT_ENVIRONMENT"]
         assert "venv" in env["UV_PROJECT_ENVIRONMENT"]
 
     @patch("repo_tools.init._is_local_venv", return_value=False)
@@ -386,18 +383,18 @@ class TestInitTool:
         gitignore = init_ctx.workspace_root / ".gitignore"
         assert gitignore.exists()
         content = gitignore.read_text()
-        assert "_tools/" in content
         assert "repo" in content
+        assert "config.local.yaml" in content
 
     @patch("repo_tools._bootstrap.subprocess.run")
     @patch("repo_tools._bootstrap.find_uv", return_value="/bin/uv")
-    def test_clean_removes_pyproject_and_lock(self, _uv, mock_run, init_ctx):
+    def test_clean_removes_pyproject_and_lock(self, _uv, mock_run, init_ctx, fw_root):
         mock_run.return_value = MagicMock(returncode=0)
-        ws = init_ctx.workspace_root
-        pyproject = ws / "tools" / "pyproject.toml"
-        pyproject.parent.mkdir(parents=True, exist_ok=True)
+        managed = fw_root / "_managed"
+        managed.mkdir(parents=True, exist_ok=True)
+        pyproject = managed / "pyproject.toml"
         pyproject.write_text("[invalid")
-        lock = ws / "tools" / "uv.lock"
+        lock = managed / "uv.lock"
         lock.write_text("stale")
 
         tool = InitTool()
@@ -477,3 +474,65 @@ class TestWriteShims:
         write_shims(fw, ws)
 
         assert not (ws / "repo.cmd").exists()
+
+
+# ── Framework at root rejected ───────────────────────────────────────────────
+
+
+class TestFrameworkAtRootRejected:
+    """framework_root.parent == workspace_root should be rejected."""
+
+    @patch("repo_tools._bootstrap.find_uv", return_value="/bin/uv")
+    def test_rejects_framework_at_project_root(self, _uv, tmp_path):
+        """run() exits with error when framework lives at the project root."""
+        from repo_tools._bootstrap import run
+
+        # framework_root = tmp_path/framework, so framework_root.parent = tmp_path
+        # workspace_root = tmp_path  →  tools_dir == workspace_root
+        fw = tmp_path / "framework"
+        fw.mkdir()
+        (fw / "pyproject.toml").write_text(_FRAMEWORK_TOML)
+
+        with pytest.raises(SystemExit):
+            run(fw, tmp_path)
+
+
+# ── managed_dir paths correct ────────────────────────────────────────────────
+
+
+class TestManagedDirPaths:
+    """Verify find_uv, run, write_shims all use _managed/ paths."""
+
+    @patch("repo_tools._bootstrap.subprocess.run")
+    @patch("repo_tools._bootstrap.find_uv", return_value="/bin/uv")
+    def test_run_creates_managed_dir(self, _uv, mock_run, tmp_path):
+        from repo_tools._bootstrap import run
+
+        fw = tmp_path / "tools" / "framework"
+        fw.mkdir(parents=True)
+        (fw / "pyproject.toml").write_text(_FRAMEWORK_TOML)
+        ws = tmp_path
+
+        mock_run.return_value = MagicMock(returncode=0)
+        run(fw, ws)
+
+        managed = fw / "_managed"
+        assert managed.is_dir()
+        assert (managed / "pyproject.toml").exists()
+
+    @patch("repo_tools._bootstrap.subprocess.run")
+    @patch("repo_tools._bootstrap.find_uv", return_value="/bin/uv")
+    def test_run_passes_managed_venv_to_uv_sync(self, _uv, mock_run, tmp_path):
+        from repo_tools._bootstrap import run
+
+        fw = tmp_path / "tools" / "framework"
+        fw.mkdir(parents=True)
+        (fw / "pyproject.toml").write_text(_FRAMEWORK_TOML)
+        ws = tmp_path
+
+        mock_run.return_value = MagicMock(returncode=0)
+        run(fw, ws)
+
+        env = mock_run.call_args.kwargs.get("env", {})
+        assert "_managed" in env["UV_PROJECT_ENVIRONMENT"]
+        assert "venv" in env["UV_PROJECT_ENVIRONMENT"]

@@ -379,10 +379,10 @@ def main() -> None:
 
     # Discover project tool dirs
     project_tool_dirs: list[str] = []
-    if workspace_root:
-        project_tools_dir = Path(workspace_root) / "tools"
-        if (project_tools_dir / "repo_tools").exists():
-            project_tool_dirs.append(str(project_tools_dir))
+    framework_root = Path(__file__).resolve().parent.parent
+    tools_dir = framework_root.parent
+    if (tools_dir / "repo_tools").exists():
+        project_tool_dirs.append(str(tools_dir))
 
     cli = _build_cli(
         workspace_root=workspace_root,

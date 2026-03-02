@@ -60,11 +60,11 @@ class TestPatchGitignore:
     def test_some_entries_present(self, tmp_path: Path):
         """Only adds missing entries, not duplicates."""
         gi = tmp_path / ".gitignore"
-        gi.write_text("_tools/\n")
+        gi.write_text("repo\n")
         patch_gitignore(gi)
 
         content = gi.read_text()
-        assert content.count("_tools/") == 1
+        assert content.count("repo\n") == 1
         for entry in ENTRIES:
             assert entry in content.splitlines()
 
