@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.1
+
+- **Event subscriptions in orchestrator prompt**: Orchestrator sessions can now subscribe to external events (e.g. CI completion) via `list_events()` and `subscribe()` tools. Sessions suspend and auto-resume when the event fires.
+- **Example event config**: `test_driver/config.yaml` includes a `github.ci_complete` event definition demonstrating the poll/payload pattern.
+
 ## 0.6.0
 
 - **`framework_root/_managed/` layout**: All generated content (venv, `pyproject.toml`, `uv.lock`, uv binary, Python installations, cache) now lives under `framework_root/_managed/` instead of split across `_tools/` and `tools/`. The framework's own `.gitignore` handles `_managed/`, simplifying the consumer's `.gitignore`. This allows the framework submodule to be placed anywhere (e.g. `dev_tools/blah/framework`), not just `tools/framework`.

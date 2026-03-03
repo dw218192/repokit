@@ -15,3 +15,12 @@ test-cov:
 
 agent:
   debug_hooks: true
+
+events:
+  github:
+    ci_complete:
+      doc: "GitHub Actions run completes"
+      params:
+        run_id: { required: true }
+      poll: "gh run watch {run_id} --exit-status"
+      payload: "gh run view {run_id} --json conclusion,url"
