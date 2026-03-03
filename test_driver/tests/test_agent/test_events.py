@@ -1,14 +1,21 @@
-"""Tests for repo_tools.agent.events — data model, config parsing, signal I/O."""
+"""Tests for repo_tools.agent.events — data model, config parsing, signal I/O, polling."""
 
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from repo_tools.agent.events import (
     EventDef,
     Subscription,
+    collect_payload,
     expand_command,
     load_events,
+    poll_delta,
+    poll_exit,
+    poll_for_event,
     read_signal,
     write_signal,
 )
@@ -172,3 +179,155 @@ class TestSignalIO:
         result = read_signal(sig)
         assert result is not None
         assert result.params == {}
+
+
+# ── poll_exit ─────────────────────────────────────────────────────
+
+
+class TestPollExit:
+    @patch("repo_tools.agent.events.subprocess.run")
+    def test_returns_zero_on_success(self, mock_run):
+        mock_run.return_value.returncode = 0
+        assert poll_exit("gh run watch 123", Path("/repo")) == 0
+        mock_run.assert_called_once_with("gh run watch 123", shell=True, cwd="/repo")
+
+    @patch("repo_tools.agent.events.subprocess.run")
+    def test_returns_nonzero_on_failure(self, mock_run):
+        mock_run.return_value.returncode = 1
+        assert poll_exit("false", Path("/repo")) == 1
+
+
+# ── poll_delta ────────────────────────────────────────────────────
+
+
+class TestPollDelta:
+    @patch("repo_tools.agent.events.time.sleep")
+    @patch("repo_tools.agent.events.subprocess.run")
+    def test_detects_output_change(self, mock_run, mock_sleep):
+        """Returns new stdout when output changes on second poll."""
+        run1 = MagicMock(stdout="5\n")
+        run2 = MagicMock(stdout="6\n")
+        mock_run.side_effect = [run1, run2]
+
+        result = poll_delta("git rev-list --count HEAD", 10, Path("/repo"))
+        assert result == "6\n"
+        mock_sleep.assert_called_once_with(10)
+
+    @patch("repo_tools.agent.events.time.sleep")
+    @patch("repo_tools.agent.events.subprocess.run")
+    def test_keeps_polling_when_stable(self, mock_run, mock_sleep):
+        """Continues polling when output hasn't changed yet."""
+        stable = MagicMock(stdout="same")
+        changed = MagicMock(stdout="different")
+        # initial, then two stable re-polls, then change
+        mock_run.side_effect = [stable, stable, stable, changed]
+
+        result = poll_delta("cmd", 5, Path("/repo"))
+        assert result == "different"
+        assert mock_sleep.call_count == 3
+
+    @patch("repo_tools.agent.events.time.sleep")
+    @patch("repo_tools.agent.events.subprocess.run")
+    def test_respects_interval(self, mock_run, mock_sleep):
+        """Sleeps for the specified interval between polls."""
+        r1 = MagicMock(stdout="a")
+        r2 = MagicMock(stdout="b")
+        mock_run.side_effect = [r1, r2]
+
+        poll_delta("cmd", 42, Path("/repo"))
+        mock_sleep.assert_called_with(42)
+
+
+# ── collect_payload ───────────────────────────────────────────────
+
+
+class TestCollectPayload:
+    @patch("repo_tools.agent.events.subprocess.run")
+    def test_returns_stdout(self, mock_run):
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = "  payload data  \n"
+        mock_run.return_value.stderr = ""
+        assert collect_payload("get-log 42", Path("/repo")) == "payload data"
+
+    @patch("repo_tools.agent.events.subprocess.run")
+    def test_handles_failure_with_stderr(self, mock_run):
+        mock_run.return_value.returncode = 1
+        mock_run.return_value.stdout = ""
+        mock_run.return_value.stderr = "command not found\n"
+        result = collect_payload("bad-cmd", Path("/repo"))
+        assert result == "command not found"
+
+    @patch("repo_tools.agent.events.subprocess.run")
+    def test_handles_failure_without_stderr(self, mock_run):
+        mock_run.return_value.returncode = 2
+        mock_run.return_value.stdout = ""
+        mock_run.return_value.stderr = ""
+        result = collect_payload("bad-cmd", Path("/repo"))
+        assert "failed" in result.lower()
+
+
+# ── poll_for_event ────────────────────────────────────────────────
+
+
+class TestPollForEvent:
+    @patch("repo_tools.agent.events.collect_payload", return_value="log output")
+    @patch("repo_tools.agent.events.poll_exit", return_value=0)
+    def test_dispatches_exit_mode(self, mock_poll_exit, mock_payload):
+        ev = EventDef(
+            group="ci", name="done", doc="", params={},
+            poll="check-ci {id}", payload="get-log {id}", detect="exit",
+        )
+        sub = Subscription(event_type="ci.done", params={"id": "99"})
+
+        result = poll_for_event(ev, sub, Path("/repo"))
+        mock_poll_exit.assert_called_once_with("check-ci 99", Path("/repo"))
+        mock_payload.assert_called_once_with("get-log 99", Path("/repo"))
+        assert result == "log output"
+
+    @patch("repo_tools.agent.events.collect_payload", return_value="new data")
+    @patch("repo_tools.agent.events.poll_delta", return_value="changed")
+    def test_dispatches_delta_mode(self, mock_poll_delta, mock_payload):
+        ev = EventDef(
+            group="repo", name="push", doc="", params={},
+            poll="git ls-remote {branch}", payload="git log {branch}",
+            detect="delta", poll_interval=15,
+        )
+        sub = Subscription(event_type="repo.push", params={"branch": "main"})
+
+        result = poll_for_event(ev, sub, Path("/repo"))
+        mock_poll_delta.assert_called_once_with("git ls-remote main", 15, Path("/repo"))
+        mock_payload.assert_called_once_with("git log main", Path("/repo"))
+        assert result == "new data"
+
+    @patch("repo_tools.agent.events.poll_exit", return_value=0)
+    def test_no_payload_returns_status(self, mock_poll_exit):
+        ev = EventDef(
+            group="ci", name="done", doc="", params={},
+            poll="wait-for {id}", payload="", detect="exit",
+        )
+        sub = Subscription(event_type="ci.done", params={"id": "1"})
+
+        result = poll_for_event(ev, sub, Path("/repo"))
+        assert result == "Event fired."
+
+    @patch("repo_tools.agent.events.poll_exit", return_value=0)
+    def test_expands_params(self, mock_poll_exit):
+        ev = EventDef(
+            group="ci", name="done", doc="", params={},
+            poll="check {x} --flag {y}", payload="", detect="exit",
+        )
+        sub = Subscription(event_type="ci.done", params={"x": "A", "y": "B"})
+
+        poll_for_event(ev, sub, Path("/repo"))
+        mock_poll_exit.assert_called_once_with("check A --flag B", Path("/repo"))
+
+    @patch("repo_tools.agent.events.poll_exit", return_value=1)
+    def test_exit_mode_raises_on_failure(self, mock_poll_exit):
+        ev = EventDef(
+            group="ci", name="done", doc="", params={},
+            poll="bad-cmd", payload="", detect="exit",
+        )
+        sub = Subscription(event_type="ci.done", params={})
+
+        with pytest.raises(RuntimeError, match="Poll command failed"):
+            poll_for_event(ev, sub, Path("/repo"))
