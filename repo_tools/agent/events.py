@@ -36,26 +36,8 @@ class Subscription:
     params: dict[str, Any] = field(default_factory=dict)
 
 
-def load_events(config: dict[str, Any]) -> dict[str, EventDef]:
-    """Parse the ``events:`` section of config.yaml.
-
-    Structure::
-
-        events:
-          <group>:
-            <event_name>:
-              doc: "..."
-              params:
-                branch: {required: true}
-                interval: {default: "60"}
-              poll: "git ls-remote {branch}"
-              payload: "git log --oneline -5"
-              detect: exit          # optional, default "exit"
-              poll_interval: 30     # optional, default 30
-
-    Returns a dict keyed by dotted name ``"group.name"``.
-    """
-    events_section = config.get("events", {})
+def _parse_events_section(events_section: dict[str, Any]) -> dict[str, EventDef]:
+    """Parse a nested group/event dict into a flat ``{dotted: EventDef}`` map."""
     if not isinstance(events_section, dict):
         return {}
 
@@ -78,6 +60,16 @@ def load_events(config: dict[str, Any]) -> dict[str, EventDef]:
                 poll_interval=int(event_dict.get("poll_interval", 30)),
             )
     return result
+
+
+def load_events(config: dict[str, Any]) -> dict[str, EventDef]:
+    """Parse the ``events:`` section of an already-merged config.
+
+    Returns a dict keyed by dotted name ``"group.name"``.
+    Built-in events are included via the framework defaults layer in
+    ``load_config()`` — this function is a pure config parser with no file I/O.
+    """
+    return _parse_events_section(config.get("events", {}))
 
 
 def expand_command(template: str, params: dict[str, Any]) -> str:

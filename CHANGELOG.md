@@ -4,6 +4,10 @@
 
 - **Event subscriptions in orchestrator prompt**: Orchestrator sessions can now subscribe to external events (e.g. CI completion) via `list_events()` and `subscribe()` tools. Sessions suspend and auto-resume when the event fires.
 - **Example event config**: `test_driver/config.yaml` includes a `github.ci_complete` event definition demonstrating the poll/payload pattern.
+- **3-layer config merge**: `load_config()` now loads framework defaults (`config.defaults.yaml`) as a base layer, then project `config.yaml`, then `config.local.yaml`. Built-in event definitions are now part of the framework defaults rather than custom merge logic in `events.py`.
+- `config.local.yaml` is now loaded even when `config.yaml` is absent (previously silently skipped).
+- **`key+` list extension**: `_deep_merge` now supports a `key+` suffix to append to a base list instead of replacing it (e.g. `paths+: [extra]` extends `paths`). A `+` in the middle of a key name is not special.
+- **Clean tool redesign**: Default paths (`_agent/`, `**/__pycache__`) moved to `config.defaults.yaml`. Use `paths+` in project config to extend them. `PROTECTED` reduced to `.git` only — `_tools`, `_agent`, and `node_modules` removed. Clean handles framework tool artifacts; init owns its own cleanup (`./repo init --clean`).
 
 ## 0.6.0
 

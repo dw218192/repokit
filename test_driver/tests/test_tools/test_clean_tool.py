@@ -13,29 +13,10 @@ from repo_tools.cli import _build_cli
 class TestCleanTool:
     """Unit tests for CleanTool.execute()."""
 
-    def test_default_paths(self, tmp_path, make_tool_context):
-        """No config: creates _build/ dir, verifies removed."""
+    def test_config_paths(self, tmp_path, make_tool_context):
+        """User-configured paths are cleaned."""
         ws = tmp_path / "ws"
         ws.mkdir()
-        build_dir = ws / "_build"
-        build_dir.mkdir()
-        (build_dir / "artifact.o").write_text("obj")
-
-        ctx = make_tool_context(workspace_root=ws)
-        tool = CleanTool()
-        args = tool.default_args(ctx.tokens)
-
-        tool.execute(ctx, args)
-
-        assert not build_dir.exists()
-
-    def test_config_paths_append_to_defaults(self, tmp_path, make_tool_context):
-        """Config paths append to defaults — both _build/ and custom dir removed."""
-        ws = tmp_path / "ws"
-        ws.mkdir()
-        build_dir = ws / "_build"
-        build_dir.mkdir()
-        (build_dir / "artifact.o").write_text("obj")
         out_dir = ws / "output"
         out_dir.mkdir()
         (out_dir / "data.bin").write_text("binary")
@@ -49,8 +30,7 @@ class TestCleanTool:
 
         tool.execute(ctx, args)
 
-        assert not build_dir.exists(), "default _build/ should still be cleaned"
-        assert not out_dir.exists(), "config path should also be cleaned"
+        assert not out_dir.exists()
 
     def test_cross_ref(self, tmp_path, make_tool_context):
         """{cfg:package.output_dir} in paths, verifies resolution."""
@@ -110,8 +90,10 @@ class TestCleanTool:
 
         ctx = make_tool_context(workspace_root=ws)
         tool = CleanTool()
-        args = tool.default_args(ctx.tokens)
-        args["dry_run"] = True
+        args = {
+            "dry_run": True,
+            "paths": [str(build_dir)],
+        }
 
         tool.execute(ctx, args)
 
@@ -183,12 +165,17 @@ class TestCleanTool:
         """_build_cli + CliRunner, clean --dry-run."""
         ws = tmp_path / "ws"
         ws.mkdir()
-        build_dir = ws / "_build"
-        build_dir.mkdir()
-        (build_dir / "artifact.o").write_text("obj")
+        # Create a config that adds a custom clean path
+        (ws / "config.yaml").write_text(
+            "clean:\n  paths+:\n    - \"{workspace_root}/out\"\n",
+            encoding="utf-8",
+        )
+        out_dir = ws / "out"
+        out_dir.mkdir()
+        (out_dir / "artifact.o").write_text("obj")
 
         cli = _build_cli(workspace_root=str(ws))
         result = CliRunner().invoke(cli, ["clean", "--dry-run"])
 
         assert result.exit_code == 0
-        assert build_dir.exists(), "dry-run must not delete anything"
+        assert out_dir.exists(), "dry-run must not delete anything"

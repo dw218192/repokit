@@ -19,9 +19,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from .events import EventDef, Subscription, load_events, write_signal
+from ..core import load_config
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -233,13 +232,7 @@ def main() -> None:
     project_root = Path(parsed.project_root)
     _signal_file = Path(parsed.signal_file)
 
-    # Load config and parse events
-    config_path = project_root / "config.yaml"
-    if config_path.exists():
-        config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    else:
-        config = {}
-    _events = load_events(config)
+    _events = load_events(load_config(str(project_root)))
 
     for raw_line in sys.stdin:
         line = raw_line.strip()

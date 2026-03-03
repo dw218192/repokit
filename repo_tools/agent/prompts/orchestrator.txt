@@ -90,21 +90,7 @@ do not leave broken state for a later ticket.
 
 ## Event Subscriptions
 
-You can subscribe to external events and have your session automatically
-suspend and resume when the event fires.
-
-**Available tools:**
-- `list_events()` — show all available event types
-- `list_events("github")` — show events in a specific group
-- `subscribe("github.ci_complete", {run_id: "12345"})` — subscribe and suspend
-
-**Lifecycle:**
-1. Finish your current work (commit, push, etc.)
-2. Call `subscribe(event_type, params)` with the event you want to wait for
-3. End your session — the agent tool will poll for the event
-4. When the event fires, your session resumes with the event payload
-
-**Constraints:**
-- One subscription at a time — wrap up before subscribing
-- Only available in interactive orchestrator sessions
-- Event types are project-specific, defined in config.yaml
+When you need to wait for an external event (CI completion, PR review, etc.),
+use the **events MCP** to subscribe. Your session suspends, the agent tool
+polls, and your session resumes with the payload when the event fires.
+Do NOT poll in terminal loops — use event subscriptions instead.

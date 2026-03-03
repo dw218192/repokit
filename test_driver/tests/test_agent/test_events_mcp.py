@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -12,6 +13,7 @@ import yaml
 from repo_tools.agent.events_mcp import main
 
 _MOD = "repo_tools.agent.events_mcp"
+_NO_DEFAULTS = patch("repo_tools.core._CONFIG_DEFAULTS", Path("/nonexistent"))
 
 # ── Sample config ─────────────────────────────────────────────────
 
@@ -71,13 +73,12 @@ def _call(
     *requests: dict,
     project_root: str,
     signal_file: str,
+    no_defaults: bool = True,
 ) -> list[dict]:
     """Run main() with the given requests, return parsed JSON responses."""
-    from unittest.mock import patch
-
     lines = "\n".join(json.dumps(r) for r in requests) + "\n"
     captured = io.StringIO()
-    with (
+    ctx = (
         patch("sys.stdin", io.StringIO(lines)),
         patch("sys.stdout", captured),
         patch("sys.argv", [
@@ -85,7 +86,13 @@ def _call(
             "--project-root", project_root,
             "--signal-file", signal_file,
         ]),
-    ):
+    )
+    if no_defaults:
+        ctx = (*ctx, _NO_DEFAULTS)
+    from contextlib import ExitStack
+    with ExitStack() as stack:
+        for cm in ctx:
+            stack.enter_context(cm)
         main()
     output = captured.getvalue().strip()
     if not output:
@@ -98,6 +105,7 @@ def _tool_call(
     signal_file: str,
     name: str,
     arguments: dict,
+    no_defaults: bool = True,
 ) -> dict:
     """Call a single tool and return the result dict."""
     responses = _call(
@@ -107,6 +115,7 @@ def _tool_call(
         },
         project_root=project_root,
         signal_file=signal_file,
+        no_defaults=no_defaults,
     )
     assert len(responses) == 1
     result = responses[0]["result"]
@@ -200,7 +209,19 @@ class TestListEvents:
         )
         assert "No events found" in result["text"]
 
-    def test_empty_config(self, tmp_path):
+    def test_empty_config_shows_builtins(self, tmp_path):
+        """With empty project config, framework default events are still available."""
+        project = tmp_path / "empty_proj"
+        project.mkdir()
+        (project / "config.yaml").write_text("{}", encoding="utf-8")
+        result = _tool_call(
+            str(project), str(tmp_path / "sig.json"), "list_events", {},
+            no_defaults=False,
+        )
+        assert "github.ci_complete" in result["text"]
+
+    def test_no_events_when_defaults_missing(self, tmp_path):
+        """With no framework defaults and no project events, returns no events."""
         project = tmp_path / "empty_proj"
         project.mkdir()
         (project / "config.yaml").write_text("{}", encoding="utf-8")

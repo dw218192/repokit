@@ -10,6 +10,7 @@ import pytest
 from repo_tools.agent.events import (
     EventDef,
     Subscription,
+    _parse_events_section,
     collect_payload,
     expand_command,
     load_events,
@@ -64,13 +65,15 @@ SAMPLE_CONFIG = {
 # ── load_events ───────────────────────────────────────────────────
 
 
-class TestLoadEvents:
+class TestParseEventsSection:
+    """Tests for _parse_events_section (pure config parsing, no built-ins)."""
+
     def test_parses_all_events(self):
-        events = load_events(SAMPLE_CONFIG)
+        events = _parse_events_section(SAMPLE_CONFIG["events"])
         assert set(events.keys()) == {"repo.push", "repo.tag", "ci.complete"}
 
     def test_event_fields(self):
-        events = load_events(SAMPLE_CONFIG)
+        events = _parse_events_section(SAMPLE_CONFIG["events"])
         push = events["repo.push"]
         assert push.group == "repo"
         assert push.name == "push"
@@ -81,16 +84,36 @@ class TestLoadEvents:
         assert push.poll_interval == 30  # default
 
     def test_custom_detect_and_interval(self):
-        events = load_events(SAMPLE_CONFIG)
+        events = _parse_events_section(SAMPLE_CONFIG["events"])
         tag = events["repo.tag"]
         assert tag.detect == "output_change"
         assert tag.poll_interval == 60
 
     def test_params_parsed(self):
-        events = load_events(SAMPLE_CONFIG)
+        events = _parse_events_section(SAMPLE_CONFIG["events"])
         push = events["repo.push"]
         assert push.params["branch"]["required"] is True
         assert push.params["remote"]["default"] == "origin"
+
+    def test_empty_dict(self):
+        assert _parse_events_section({}) == {}
+
+    def test_non_dict(self):
+        assert _parse_events_section("not a dict") == {}
+
+    def test_non_dict_group(self):
+        assert _parse_events_section({"repo": "not a dict"}) == {}
+
+    def test_non_dict_event(self):
+        assert _parse_events_section({"repo": {"push": "not a dict"}}) == {}
+
+
+class TestLoadEvents:
+    """Tests for load_events (pure config parser, no file I/O)."""
+
+    def test_parses_events_section(self):
+        events = load_events(SAMPLE_CONFIG)
+        assert set(events.keys()) == {"repo.push", "repo.tag", "ci.complete"}
 
     def test_empty_config(self):
         assert load_events({}) == {}
@@ -100,14 +123,6 @@ class TestLoadEvents:
 
     def test_non_dict_events_section(self):
         assert load_events({"events": "not a dict"}) == {}
-
-    def test_non_dict_group(self):
-        events = load_events({"events": {"repo": "not a dict"}})
-        assert events == {}
-
-    def test_non_dict_event(self):
-        events = load_events({"events": {"repo": {"push": "not a dict"}}})
-        assert events == {}
 
 
 # ── expand_command ────────────────────────────────────────────────
@@ -188,8 +203,9 @@ class TestPollExit:
     @patch("repo_tools.agent.events.subprocess.run")
     def test_returns_zero_on_success(self, mock_run):
         mock_run.return_value.returncode = 0
-        assert poll_exit("gh run watch 123", Path("/repo")) == 0
-        mock_run.assert_called_once_with("gh run watch 123", shell=True, cwd="/repo")
+        cwd = Path("/repo")
+        assert poll_exit("gh run watch 123", cwd) == 0
+        mock_run.assert_called_once_with("gh run watch 123", shell=True, cwd=str(cwd))
 
     @patch("repo_tools.agent.events.subprocess.run")
     def test_returns_nonzero_on_failure(self, mock_run):
