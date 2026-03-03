@@ -305,6 +305,55 @@ def _agent_run(tool_ctx: ToolContext, args: dict[str, Any]) -> str | None:
         tool_ctx.workspace_root,
         configured=args.get("allowlist"),
     )
+
+    # Interactive mode
+    if prompt is None:
+        import uuid
+        from .events import load_events, read_signal, poll_for_event
+
+        session_id = str(uuid.uuid4())
+        signal_file = tool_ctx.workspace_root / "_agent" / ".event_signal"
+        events_config = load_events(tool_ctx.config)
+
+        # Clean up stale signal file from previous crash
+        signal_file.unlink(missing_ok=True)
+
+        resume_message = None
+        logger.info("Starting interactive agent session")
+
+        while True:
+            if resume_message is None:
+                cmd = _backend.build_command(
+                    prompt=prompt, role=role, role_prompt=role_prompt,
+                    rules_path=rules_path, project_root=tool_ctx.workspace_root,
+                    tool_config=args, session_id=session_id,
+                )
+                proc = subprocess.run(cmd, cwd=str(agent_cwd))
+            else:
+                cmd = _backend.build_resume_command(session_id, resume_message)
+                proc = subprocess.run(cmd, cwd=str(agent_cwd))
+
+            sub = read_signal(signal_file)
+            if sub is None:
+                sys.exit(proc.returncode)
+
+            event_def = events_config.get(sub.event_type)
+            if event_def is None:
+                logger.error(f"Subscribed to unknown event type: {sub.event_type}")
+                sys.exit(1)
+
+            logger.info(f"Waiting for event: {sub.event_type}")
+            try:
+                payload = poll_for_event(event_def, sub, cwd=agent_cwd)
+            except KeyboardInterrupt:
+                logger.info("Event polling interrupted")
+                signal_file.unlink(missing_ok=True)
+                sys.exit(130)
+
+            resume_message = f"Event: {sub.event_type} \u2014 {payload}"
+            logger.info(f"Event fired, resuming session: {sub.event_type}")
+
+    # Headless mode
     cmd = _backend.build_command(
         prompt=prompt,
         role=role,
@@ -313,14 +362,6 @@ def _agent_run(tool_ctx: ToolContext, args: dict[str, Any]) -> str | None:
         project_root=tool_ctx.workspace_root,
         tool_config=args,
     )
-
-    # Interactive mode
-    if prompt is None:
-        logger.info("Starting interactive agent session")
-        proc = subprocess.run(cmd, cwd=str(agent_cwd))
-        sys.exit(proc.returncode)
-
-    # Headless mode
     logger.info(f"Running headless agent: role={role}, ticket={ticket}")
     env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
     proc = subprocess.run(

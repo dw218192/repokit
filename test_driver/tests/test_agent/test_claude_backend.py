@@ -495,3 +495,114 @@ class TestBuildCommand:
 
         lint_args = mcp["mcpServers"]["lint"]["args"]
         assert "--ignore" not in lint_args
+
+    def test_session_id_in_command(self):
+        """session_id adds --session-id flag."""
+        claude = Claude()
+        cmd = claude.build_command(session_id="abc-123")
+        assert "--session-id" in cmd
+        idx = cmd.index("--session-id")
+        assert cmd[idx + 1] == "abc-123"
+
+    def test_no_session_id_by_default(self):
+        """Without session_id, --session-id is not added."""
+        claude = Claude()
+        cmd = claude.build_command()
+        assert "--session-id" not in cmd
+
+    def test_build_resume_command(self):
+        """build_resume_command returns correct --resume command."""
+        claude = Claude()
+        cmd = claude.build_resume_command("sess-id-42", "Event: ci.done — payload")
+        assert cmd == ["claude", "--resume", "sess-id-42", "Event: ci.done — payload"]
+
+    def test_events_mcp_for_orchestrator(self, tmp_path):
+        """Events MCP is present when role is None (orchestrator)."""
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        claude = Claude()
+        claude.build_command(
+            rules_path=rules,
+            project_root=tmp_path,
+        )
+        mcp = json.loads(
+            (tmp_path / "_agent" / "plugin" / ".mcp.json").read_text()
+        )
+
+        assert "events" in mcp["mcpServers"]
+        ev = mcp["mcpServers"]["events"]
+        assert ev["type"] == "stdio"
+        assert "events_mcp" in " ".join(ev["args"])
+        assert "--project-root" in ev["args"]
+        assert "--signal-file" in ev["args"]
+
+    def test_events_mcp_for_explicit_orchestrator(self, tmp_path):
+        """Events MCP is present when role is 'orchestrator'."""
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        claude = Claude()
+        claude.build_command(
+            role="orchestrator",
+            rules_path=rules,
+            project_root=tmp_path,
+        )
+        mcp = json.loads(
+            (tmp_path / "_agent" / "plugin-orchestrator" / ".mcp.json").read_text()
+        )
+
+        assert "events" in mcp["mcpServers"]
+
+    def test_events_mcp_absent_for_worker(self, tmp_path):
+        """Events MCP is NOT present when role is 'worker'."""
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        claude = Claude()
+        claude.build_command(
+            role="worker",
+            rules_path=rules,
+            project_root=tmp_path,
+        )
+        mcp = json.loads(
+            (tmp_path / "_agent" / "plugin-worker" / ".mcp.json").read_text()
+        )
+
+        assert "events" not in mcp["mcpServers"]
+
+    def test_events_mcp_absent_for_reviewer(self, tmp_path):
+        """Events MCP is NOT present when role is 'reviewer'."""
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        claude = Claude()
+        claude.build_command(
+            role="reviewer",
+            rules_path=rules,
+            project_root=tmp_path,
+        )
+        mcp = json.loads(
+            (tmp_path / "_agent" / "plugin-reviewer" / ".mcp.json").read_text()
+        )
+
+        assert "events" not in mcp["mcpServers"]
+
+    def test_events_mcp_signal_file_path(self, tmp_path):
+        """Events MCP --signal-file points to _agent/.event_signal."""
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        claude = Claude()
+        claude.build_command(
+            rules_path=rules,
+            project_root=tmp_path,
+        )
+        mcp = json.loads(
+            (tmp_path / "_agent" / "plugin" / ".mcp.json").read_text()
+        )
+
+        ev_args = mcp["mcpServers"]["events"]["args"]
+        sf_idx = ev_args.index("--signal-file")
+        signal_path = ev_args[sf_idx + 1]
+        assert signal_path.endswith("_agent/.event_signal")

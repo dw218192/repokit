@@ -146,6 +146,18 @@ def _write_plugin(
             },
         }
     }
+
+    if role is None or role == "orchestrator":
+        events_args = ["-m", "repo_tools.agent.events_mcp",
+                       "--project-root", project_root.as_posix()]
+        signal_file = project_root / "_agent" / ".event_signal"
+        events_args.extend(["--signal-file", signal_file.as_posix()])
+        mcp_config["mcpServers"]["events"] = {
+            "type": "stdio",
+            "command": posix_path(sys.executable),
+            "args": events_args,
+        }
+
     (plugin_dir / ".mcp.json").write_text(
         json.dumps(mcp_config, indent=2), encoding="utf-8",
     )
@@ -163,6 +175,7 @@ class Claude:
         rules_path: Path | None = None,
         project_root: Path | None = None,
         tool_config: dict | None = None,
+        session_id: str | None = None,
     ) -> list[str]:
         config = tool_config or {}
 
@@ -195,6 +208,9 @@ class Claude:
         else:
             logger.warning("No rules_path/project_root provided; launching Claude without hooks or MCP server")
 
+        if session_id is not None:
+            cmd.extend(["--session-id", session_id])
+
         # Headless mode: add -p with prompt, JSON output, no session persistence
         if prompt is not None:
             cmd.extend(["-p", prompt, "--output-format", "json", "--no-session-persistence"])
@@ -206,3 +222,7 @@ class Claude:
                 cmd.extend(["--json-schema", json.dumps(schema)])
 
         return cmd
+
+    def build_resume_command(self, session_id: str, message: str) -> list[str]:
+        """Build a ``claude --resume`` command to continue an existing session."""
+        return ["claude", "--resume", session_id, message]
