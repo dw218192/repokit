@@ -12,7 +12,7 @@ dependencies = [
 [dependency-groups]
 cpp = ["clang-format>=19.0", "clang-tidy>=19.0"]
 python = ["ruff>=0.4"]
-sdk = ["claude-agent-sdk>=0.1.0", "rich>=13.0"]
+sdk = ["claude-agent-sdk>=0.1.0", "rich>=13.0", "textual>=1.0"]
 
 [tool.uv]
 package = false

@@ -402,22 +402,11 @@ async def _run_headless(prompt: str, options: Any) -> tuple[str, int]:
 
 
 async def _run_interactive(options: Any) -> int:
-    """Run an interactive REPL session."""
-    from claude_agent_sdk import ClaudeSDKClient
+    """Run an interactive TUI session."""
+    from ..tui import AgentApp
 
-    from ..render import render_message
-
-    async with ClaudeSDKClient(options=options) as client:
-        while True:
-            try:
-                user_input = input("\n> ")
-            except (EOFError, KeyboardInterrupt):
-                break
-            if not user_input.strip():
-                continue
-            await client.query(user_input)
-            async for msg in client.receive_response():
-                render_message(msg)
+    app = AgentApp(options=options)
+    await app.run_async()
     return 0
 
 
