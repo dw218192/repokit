@@ -296,29 +296,58 @@ def resolve_tokens(
 def _deep_merge(base: dict, overlay: dict) -> dict:
     """Recursively merge *overlay* into *base* (overlay wins).
 
-    Dicts are merged recursively. All other types (including lists)
-    are replaced wholesale by the overlay value.
+    Dicts are merged recursively.  A key ending in ``+`` whose value is a
+    list extends the base list instead of replacing it (e.g. ``paths+: [x]``
+    appends to ``paths``).  All other types (including plain lists) are
+    replaced wholesale by the overlay value.
     """
     result = dict(base)
     for key, value in overlay.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+        if key.endswith("+") and isinstance(value, list):
+            base_key = key[:-1]
+            existing = result.get(base_key, [])
+            if isinstance(existing, list):
+                result[base_key] = existing + value
+            else:
+                result[base_key] = value
+        elif key in result and isinstance(result[key], dict) and isinstance(value, dict):
             result[key] = _deep_merge(result[key], value)
         else:
             result[key] = value
     return result
 
 
-def load_config(workspace_root: str) -> dict[str, Any]:
-    """Load config.yaml from workspace root, merged with config.local.yaml if present."""
-    config_path = Path(workspace_root) / "config.yaml"
-    if not config_path.exists():
-        return {}
-    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    if data is None:
-        data = {}
-    if not isinstance(data, dict):
-        raise TypeError("config.yaml must contain a top-level mapping.")
+_CONFIG_DEFAULTS = Path(__file__).parent / "config.defaults.yaml"
 
+
+def load_config(workspace_root: str) -> dict[str, Any]:
+    """Load config with 3-layer merge: defaults ← config.yaml ← config.local.yaml.
+
+    Framework defaults (``config.defaults.yaml`` shipped with repo_tools) form
+    the base layer.  The project's ``config.yaml`` extends or overrides them,
+    and ``config.local.yaml`` (gitignored) overrides everything.
+
+    Dicts are deep-merged; all other types are replaced by the higher layer.
+    """
+    # Layer 1: framework defaults
+    data: dict[str, Any] = {}
+    if _CONFIG_DEFAULTS.exists():
+        defaults = yaml.safe_load(_CONFIG_DEFAULTS.read_text(encoding="utf-8"))
+        if defaults is not None:
+            if not isinstance(defaults, dict):
+                raise TypeError("config.defaults.yaml must contain a top-level mapping.")
+            data = defaults
+
+    # Layer 2: project config
+    config_path = Path(workspace_root) / "config.yaml"
+    if config_path.exists():
+        project = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        if project is not None:
+            if not isinstance(project, dict):
+                raise TypeError("config.yaml must contain a top-level mapping.")
+            data = _deep_merge(data, project)
+
+    # Layer 3: local overrides
     local_path = Path(workspace_root) / "config.local.yaml"
     if local_path.exists():
         local_data = yaml.safe_load(local_path.read_text(encoding="utf-8"))

@@ -1,0 +1,32 @@
+# Framework defaults — merged under project config.yaml and config.local.yaml.
+# Project config.yaml overrides these; use key+ to extend lists instead of replacing.
+
+clean:
+  paths:
+    - "{workspace_root}/_agent"
+    - "{workspace_root}/**/__pycache__"
+
+events:
+  github:
+    ci_complete:
+      doc: "GitHub Actions workflow run completes"
+      params:
+        run_id: { required: true }
+      poll: "gh run watch {run_id} --exit-status"
+      payload: "gh run view {run_id} --json conclusion,url,name"
+
+    pr_checks_pass:
+      doc: "All PR status checks pass"
+      params:
+        pr_number: { required: true }
+      poll: "gh pr checks {pr_number} --watch"
+      payload: "gh pr checks {pr_number}"
+
+    pr_review_posted:
+      doc: "New review appears on a PR"
+      params:
+        pr_number: { required: true }
+      detect: delta
+      poll_interval: 30
+      poll: "gh api repos/{owner}/{repo}/pulls/{pr_number}/reviews --jq length"
+      payload: "gh api repos/{owner}/{repo}/pulls/{pr_number}/reviews"

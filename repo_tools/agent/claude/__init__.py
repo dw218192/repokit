@@ -106,6 +106,19 @@ def _write_plugin(
         ],
     }
 
+    # After subscribe() returns, stop the session so the parent event loop
+    # can poll for the event and resume later.
+    if role is None or role == "orchestrator":
+        hook_events["PostToolUse"] = [
+            {
+                "matcher": "events__subscribe$",
+                "hooks": [{
+                    "type": "command",
+                    "command": shlex.join([*base_cmd, "post_subscribe"]),
+                }],
+            }
+        ]
+
     hooks_dir = plugin_dir / "hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
     (hooks_dir / "hooks.json").write_text(
@@ -146,6 +159,16 @@ def _write_plugin(
             },
         }
     }
+
+    if role is None or role == "orchestrator":
+        events_args = ["-m", "repo_tools.agent.events_mcp",
+                       "--project-root", project_root.as_posix()]
+        mcp_config["mcpServers"]["events"] = {
+            "type": "stdio",
+            "command": posix_path(sys.executable),
+            "args": events_args,
+        }
+
     (plugin_dir / ".mcp.json").write_text(
         json.dumps(mcp_config, indent=2), encoding="utf-8",
     )
@@ -163,6 +186,7 @@ class Claude:
         rules_path: Path | None = None,
         project_root: Path | None = None,
         tool_config: dict | None = None,
+        session_id: str | None = None,
     ) -> list[str]:
         config = tool_config or {}
 
@@ -195,6 +219,9 @@ class Claude:
         else:
             logger.warning("No rules_path/project_root provided; launching Claude without hooks or MCP server")
 
+        if session_id is not None:
+            cmd.extend(["--session-id", session_id])
+
         # Headless mode: add -p with prompt, JSON output, no session persistence
         if prompt is not None:
             cmd.extend(["-p", prompt, "--output-format", "json", "--no-session-persistence"])
@@ -204,5 +231,33 @@ class Claude:
             schema = _OUTPUT_SCHEMAS.get(role) if role else None
             if schema is not None:
                 cmd.extend(["--json-schema", json.dumps(schema)])
+
+        return cmd
+
+    def build_resume_command(
+        self,
+        session_id: str,
+        resume_prompt: str,
+        *,
+        rules_path: Path | None = None,
+        project_root: Path | None = None,
+        role: str | None = None,
+        tool_config: dict | None = None,
+    ) -> list[str]:
+        """Build a ``claude --resume`` command to continue an existing session.
+
+        Uses ``-p`` (headless) mode so the event payload is injected as a
+        user message.  The ``--plugin-dir`` flag is re-applied so hooks and
+        MCP servers are available in the resumed session.
+        """
+        config = tool_config or {}
+        cmd = ["claude", "-p", resume_prompt, "--resume", session_id]
+
+        if config.get("debug_hooks"):
+            cmd.extend(["-d", "hooks"])
+
+        if rules_path is not None and project_root is not None:
+            plugin_dir = project_root / "_agent" / (f"plugin-{role}" if role else "plugin")
+            cmd.extend(["--plugin-dir", str(plugin_dir)])
 
         return cmd

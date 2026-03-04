@@ -180,7 +180,7 @@ build:
     - "make -C {build_dir} -j$(nproc)"
 ```
 
-**Local overrides** — Create `config.local.yaml` (gitignored) for machine-specific settings. It is deep-merged on top of `config.yaml`: nested dicts merge recursively, everything else (including lists) is replaced.
+**Local overrides** — Create `config.local.yaml` (gitignored) for machine-specific settings. It is deep-merged on top of `config.yaml`: nested dicts merge recursively, everything else (including lists) is replaced. Use `key+` to extend a list instead of replacing it (see [Config key syntax](#config-key-syntax)).
 
 ```yaml
 # config.local.yaml (not committed)
@@ -193,6 +193,19 @@ repo:
       env: UNITY_EDITOR
       path: true
 ```
+
+**Framework defaults** — The framework ships `config.defaults.yaml` with sensible defaults (e.g. built-in event definitions, clean paths). These form the base layer — project config extends or overrides them. Merge order: `config.defaults.yaml` ← `config.yaml` ← `config.local.yaml`.
+
+### Config key syntax
+
+Config keys support two special suffixes:
+
+| Suffix | Meaning | Example |
+|---|---|---|
+| `key@filter` | Dimension-based variant — selected when the filter matches | `steps@windows-x64: [...]` |
+| `key+` | List extension — append to the base layer's list | `paths+: ["{workspace_root}/dist"]` |
+
+`@filter` is resolved after all three config layers are merged. A `+` in the middle of a key name (e.g. `c++_flags`) is **not** special — only a trailing `+` triggers list extension, and only when the value is a list.
 
 Built-in tokens (always available, cannot be overridden):
 
@@ -300,6 +313,16 @@ class MyTool(RepoTool):
 ```
 
 Both sources are merged, deduplicated, and installed via `uv sync` when `./repo init` runs.
+
+## Lifecycle
+
+| Command | Creates / Removes | Undo with |
+|---|---|---|
+| `bootstrap.sh` | uv, `./repo` shims, `.gitignore` entry | `bootstrap.sh --clean` |
+| `./repo init` | `_managed/venv`, `_managed/pyproject.toml`, `_managed/uv.lock` | `./repo init --clean` |
+| `./repo clean` | Removes framework tool artifacts (`_agent/`, `__pycache__/`, etc.) | Re-run the tool |
+
+Setup: `bootstrap.sh` → `./repo init` → use. Teardown: `./repo clean` → `bootstrap.sh --clean`. Each layer owns its own cleanup — `./repo clean` handles transient tool output, not init artifacts.
 
 ## Versioning & Publishing
 

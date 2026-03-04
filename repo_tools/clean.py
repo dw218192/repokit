@@ -22,7 +22,7 @@ class CleanTool(RepoTool):
     name = "clean"
     help = "Remove build artifacts and temporary files"
 
-    PROTECTED = {".git", "_tools", "_agent", "node_modules"}
+    PROTECTED = {".git"}
 
     def setup(self, cmd: click.Command) -> click.Command:
         cmd = click.option(
@@ -33,8 +33,6 @@ class CleanTool(RepoTool):
         )(cmd)
         return cmd
 
-    _DEFAULT_PATHS = ["{workspace_root}/_build"]
-
     def default_args(self, tokens: dict[str, str]) -> dict[str, Any]:
         return {
             "dry_run": False,
@@ -44,7 +42,7 @@ class CleanTool(RepoTool):
     def execute(self, ctx: ToolContext, args: dict[str, Any]) -> None:
         formatter = TokenFormatter(ctx.tokens, ctx.config)
         dry_run = bool(args.get("dry_run"))
-        paths: list[str] = self._DEFAULT_PATHS + list(args.get("paths", []))
+        paths: list[str] = list(args.get("paths", []))
 
         with log_section("Cleaning"):
             removed = 0

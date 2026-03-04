@@ -28,6 +28,95 @@ _backend = Claude()
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
+def _read_subscription(cwd: Path, session_id: str | None) -> Any:
+    """Check if the last tool call in the session was a subscribe.
+
+    Parses the Claude session JSONL file backwards to find the last
+    ``tool_use`` block.  If its name matches ``events__subscribe``,
+    returns a ``Subscription`` with the event_type and params.
+    Otherwise returns ``None``.
+    """
+    from .events import Subscription
+
+    if session_id is None:
+        return None
+
+    session_file = _session_file_for(cwd, session_id)
+    if session_file is None or not session_file.exists():
+        return None
+
+    # Scan backwards for the last tool_use block.
+    last_subscribe: dict | None = None
+    for line in reversed(session_file.read_text(encoding="utf-8").splitlines()):
+        if not line.strip():
+            continue
+        try:
+            msg = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if msg.get("type") != "assistant":
+            continue
+        content = msg.get("message", {}).get("content", [])
+        for block in content:
+            if (
+                isinstance(block, dict)
+                and block.get("type") == "tool_use"
+                and str(block.get("name", "")).endswith("events__subscribe")
+            ):
+                last_subscribe = block.get("input", {})
+                break
+        if last_subscribe is not None:
+            break
+
+    if last_subscribe is None:
+        return None
+    return Subscription(
+        event_type=last_subscribe.get("event_type", ""),
+        params=last_subscribe.get("params", {}),
+    )
+
+
+def _session_file_for(cwd: Path, session_id: str) -> Path | None:
+    """Return the session JSONL file path for a given session ID and CWD."""
+    sessions_base = Path.home() / ".claude" / "projects"
+    if not sessions_base.exists():
+        return None
+
+    cwd_str = str(cwd.resolve())
+    encoded = cwd_str.replace(":\\", "--").replace("\\", "-").replace("/", "-")
+    for name in (encoded, encoded + "-"):
+        candidate = sessions_base / name / f"{session_id}.jsonl"
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _find_session_id(cwd: Path) -> str | None:
+    """Find the most recent Claude session ID for the given working directory.
+
+    Claude stores sessions as ``~/.claude/projects/<encoded-cwd>/<uuid>.jsonl``.
+    The CWD is encoded by replacing path separators with ``-`` and ``:`` with ``-``.
+    """
+    sessions_base = Path.home() / ".claude" / "projects"
+    if not sessions_base.exists():
+        return None
+
+    cwd_str = str(cwd.resolve())
+    encoded = cwd_str.replace(":\\", "--").replace("\\", "-").replace("/", "-")
+
+    for name in (encoded, encoded + "-"):
+        proj_dir = sessions_base / name
+        if proj_dir.is_dir():
+            sessions = sorted(
+                proj_dir.glob("*.jsonl"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+            if sessions:
+                return sessions[0].stem
+    return None
+
+
 def _ctx_from_click(ctx: click.Context) -> ToolContext:
     """Build ToolContext from click context obj (inherited from parent group)."""
     return _build_tool_context(ctx.obj, "agent")
@@ -305,6 +394,64 @@ def _agent_run(tool_ctx: ToolContext, args: dict[str, Any]) -> str | None:
         tool_ctx.workspace_root,
         configured=args.get("allowlist"),
     )
+
+    # Interactive mode — the PostToolUse hook on subscribe() emits
+    # ``continue: false`` which causes Claude to exit cleanly.
+    # The parent then reads the session transcript to find what was
+    # subscribed, polls for the event, and resumes.
+    if prompt is None:
+        from .events import load_events, poll_for_event, Subscription
+
+        events_config = load_events(tool_ctx.config)
+
+        resume_prompt: str | None = None
+        session_id: str | None = None
+        logger.info("Starting interactive agent session")
+
+        while True:
+            if resume_prompt is None:
+                cmd = _backend.build_command(
+                    prompt=prompt, role=role, role_prompt=role_prompt,
+                    rules_path=rules_path, project_root=tool_ctx.workspace_root,
+                    tool_config=args,
+                )
+                proc = subprocess.run(cmd, cwd=str(agent_cwd))
+            else:
+                assert session_id is not None
+                cmd = _backend.build_resume_command(
+                    session_id, resume_prompt,
+                    rules_path=rules_path,
+                    project_root=tool_ctx.workspace_root,
+                    role=role, tool_config=args,
+                )
+                proc = subprocess.run(cmd, cwd=str(agent_cwd))
+
+            # Discover session ID from the newest session file.
+            if session_id is None:
+                session_id = _find_session_id(agent_cwd)
+                if session_id is not None:
+                    logger.info(f"Discovered session: {session_id}")
+
+            sub = _read_subscription(agent_cwd, session_id)
+            if sub is None:
+                sys.exit(proc.returncode)
+
+            event_def = events_config.get(sub.event_type)
+            if event_def is None:
+                logger.error(f"Subscribed to unknown event type: {sub.event_type}")
+                sys.exit(1)
+
+            logger.info(f"Waiting for event: {sub.event_type}")
+            try:
+                payload = poll_for_event(event_def, sub, cwd=agent_cwd)
+            except KeyboardInterrupt:
+                logger.info("Event polling interrupted")
+                sys.exit(130)
+
+            resume_prompt = f"Event: {sub.event_type} \u2014 {payload}"
+            logger.info(f"Event fired, resuming session: {sub.event_type}")
+
+    # Headless mode
     cmd = _backend.build_command(
         prompt=prompt,
         role=role,
@@ -313,14 +460,6 @@ def _agent_run(tool_ctx: ToolContext, args: dict[str, Any]) -> str | None:
         project_root=tool_ctx.workspace_root,
         tool_config=args,
     )
-
-    # Interactive mode
-    if prompt is None:
-        logger.info("Starting interactive agent session")
-        proc = subprocess.run(cmd, cwd=str(agent_cwd))
-        sys.exit(proc.returncode)
-
-    # Headless mode
     logger.info(f"Running headless agent: role={role}, ticket={ticket}")
     env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
     proc = subprocess.run(
