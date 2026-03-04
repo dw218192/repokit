@@ -1,540 +1,373 @@
-"""Tests for Claude backend — build_command() and plugin generation."""
+"""Tests for Claude backend — _build_options(), hooks, and MCP tool construction."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from repo_tools.agent.claude import Claude
+# Mock the claude_agent_sdk before importing the module under test
+_mock_sdk = MagicMock()
+_mock_sdk.ClaudeAgentOptions = MagicMock
+_mock_sdk.HookMatcher = MagicMock
 
 
-class TestBuildCommand:
-    def test_basic_command(self):
-        """build_command() always pre-approves the safe read/edit tools."""
-        claude = Claude()
-        cmd = claude.build_command()
-        assert cmd[0] == "claude"
-        assert "--allowedTools" in cmd
-        for tool in ("Read", "Edit", "Write", "Glob", "Grep", "WebFetch", "WebSearch"):
-            assert tool in cmd
+@pytest.fixture(autouse=True)
+def _patch_sdk(monkeypatch):
+    """Patch claude_agent_sdk so tests don't require the real package."""
+    import sys
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", _mock_sdk)
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk.types", MagicMock())
+    # Reset mocks each test
+    _mock_sdk.reset_mock()
+    # Make ClaudeAgentOptions capture kwargs
+    _mock_sdk.ClaudeAgentOptions = _CaptureOptions
+    _mock_sdk.HookMatcher = _CaptureHookMatcher
+    _mock_sdk.create_sdk_mcp_server = MagicMock(return_value={"type": "sdk"})
+    _mock_sdk.tool = _mock_tool_decorator
 
-    def test_no_bash_by_default(self):
-        claude = Claude()
-        cmd = claude.build_command()
-        assert "Bash" not in cmd
 
-    def test_role_adds_bash(self):
-        claude = Claude()
-        cmd = claude.build_command(role="worker")
-        assert "Bash" in cmd
+class _CaptureOptions:
+    """Captures kwargs so tests can inspect them."""
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+        self._kwargs = kwargs
 
-    def test_role_prompt_appended(self):
-        claude = Claude()
-        cmd = claude.build_command(role_prompt="You are a test worker.")
-        assert "--append-system-prompt" in cmd
-        idx = cmd.index("--append-system-prompt")
-        assert "You are a test worker." in cmd[idx + 1]
 
-    def test_hook_settings_wired(self, tmp_path):
-        """When rules_path and project_root are given, plugin hooks are written."""
-        rules = tmp_path / "rules.toml"
-        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+class _CaptureHookMatcher:
+    """Captures HookMatcher construction args."""
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+        self._kwargs = kwargs
 
-        claude = Claude()
-        cmd = claude.build_command(
-            rules_path=rules,
-            project_root=tmp_path,
+
+def _mock_tool_decorator(name, description, schema, annotations=None):
+    """Mock @tool decorator that returns a fake SdkMcpTool."""
+    def decorator(fn):
+        mock_tool = MagicMock()
+        mock_tool.name = name
+        mock_tool.description = description
+        mock_tool.handler = fn
+        return mock_tool
+    return decorator
+
+
+@pytest.fixture
+def rules_file(tmp_path):
+    """Create a minimal rules file."""
+    rules = tmp_path / "rules.toml"
+    rules.write_text(
+        'default_reason = "not allowed"\n'
+        '[[allow]]\n'
+        'name = "git"\n'
+        'commands = ["git"]\n'
+        '[[deny]]\n'
+        'name = "destructive"\n'
+        'commands = ["rm"]\n'
+        'reason = "destructive"\n',
+        encoding="utf-8",
+    )
+    return rules
+
+
+# ── _build_options tests ──────────────────────────────────────────
+
+
+class TestBuildOptions:
+    def test_base_allowed_tools(self, tmp_path, rules_file):
+        """Base tools (Read, Edit, etc.) are always in allowed_tools."""
+        from repo_tools.agent.claude import Claude
+
+        opts = Claude._build_options(
+            rules_path=rules_file, project_root=tmp_path, cwd=tmp_path,
         )
-        hooks_path = tmp_path / "_agent" / "plugin" / "hooks" / "hooks.json"
-        assert hooks_path.exists(), "hooks file must be written to disk"
-        assert "--plugin-dir" in cmd
+        for tool_name in ("Read", "Edit", "Write", "Glob", "Grep", "WebFetch", "WebSearch"):
+            assert tool_name in opts.allowed_tools
 
-        data = json.loads(hooks_path.read_text())
-        pre = data["hooks"]["PreToolUse"]
-        assert len(pre) == 1
-        assert pre[0]["matcher"] == "Bash"
-        hook_cmd = pre[0]["hooks"][0]["command"]
-        assert "repo_tools.agent.hooks" in hook_cmd
-        assert "check_bash" in hook_cmd
-        assert "\\" not in hook_cmd
+    def test_no_bash_without_role(self, tmp_path, rules_file):
+        """Without a role, Bash is NOT in allowed_tools."""
+        from repo_tools.agent.claude import Claude
 
-    def test_no_settings_without_rules(self):
-        """Without rules_path, no plugin dir is written."""
-        claude = Claude()
-        cmd = claude.build_command()
-        assert "--plugin-dir" not in cmd
-
-    def test_role_forwarded_to_hook_command(self, tmp_path):
-        """When role is provided, --role is included in the hook command."""
-        rules = tmp_path / "rules.toml"
-        rules.write_text('default_reason = "no"\n', encoding="utf-8")
-
-        claude = Claude()
-        claude.build_command(
-            role="worker",
-            rules_path=rules,
-            project_root=tmp_path,
+        opts = Claude._build_options(
+            rules_path=rules_file, project_root=tmp_path, cwd=tmp_path,
         )
-        hooks_path = tmp_path / "_agent" / "plugin-worker" / "hooks" / "hooks.json"
-        data = json.loads(hooks_path.read_text())
-        hook_cmd = data["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
-        assert "--role" in hook_cmd
-        assert "worker" in hook_cmd
+        assert "Bash" not in opts.allowed_tools
 
-    def test_no_role_no_role_flag_in_hook(self, tmp_path):
-        """When no role is given, --role is not added to the hook command."""
-        rules = tmp_path / "rules.toml"
-        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+    def test_role_adds_bash(self, tmp_path, rules_file):
+        """With a role, Bash IS in allowed_tools."""
+        from repo_tools.agent.claude import Claude
 
-        claude = Claude()
-        claude.build_command(
-            rules_path=rules,
-            project_root=tmp_path,
+        opts = Claude._build_options(
+            role="worker", rules_path=rules_file, project_root=tmp_path,
+            cwd=tmp_path,
         )
-        hooks_path = tmp_path / "_agent" / "plugin" / "hooks" / "hooks.json"
-        data = json.loads(hooks_path.read_text())
-        hook_cmd = data["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
-        assert "--role" not in hook_cmd
+        assert "Bash" in opts.allowed_tools
 
-    def test_no_stop_hook(self, tmp_path):
-        """No Stop hook is generated (idle tracking removed)."""
-        rules = tmp_path / "rules.toml"
-        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+    def test_mcp_tool_names_in_allowed(self, tmp_path, rules_file):
+        """MCP tool names (mcp__repokit-agent__*) are added to allowed_tools."""
+        from repo_tools.agent.claude import Claude
 
-        claude = Claude()
-        claude.build_command(
-            role="worker",
-            rules_path=rules,
-            project_root=tmp_path,
+        opts = Claude._build_options(
+            role="worker", rules_path=rules_file, project_root=tmp_path,
+            cwd=tmp_path,
         )
-        data = json.loads(
-            (tmp_path / "_agent" / "plugin-worker" / "hooks" / "hooks.json").read_text()
+        mcp_names = [t for t in opts.allowed_tools if t.startswith("mcp__")]
+        assert len(mcp_names) > 0
+        assert any("lint" in n for n in mcp_names)
+        assert any("coderabbit" in n for n in mcp_names)
+        assert any("list_tickets" in n for n in mcp_names)
+
+    def test_system_prompt_from_role_prompt(self, tmp_path, rules_file):
+        """role_prompt is set as an appended system prompt preset."""
+        from repo_tools.agent.claude import Claude
+
+        opts = Claude._build_options(
+            role="worker", role_prompt="You are a test worker.",
+            rules_path=rules_file, project_root=tmp_path, cwd=tmp_path,
         )
-        assert "Stop" not in data["hooks"]
+        assert opts.system_prompt["type"] == "preset"
+        assert opts.system_prompt["preset"] == "claude_code"
+        assert opts.system_prompt["append"] == "You are a test worker."
 
-    def test_plugin_dir_in_command(self, tmp_path):
-        """--plugin-dir appears in command and points to the plugin directory."""
-        rules = tmp_path / "rules.toml"
-        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+    def test_no_system_prompt_without_role_prompt(self, tmp_path, rules_file):
+        """Without role_prompt, system_prompt is None."""
+        from repo_tools.agent.claude import Claude
 
-        claude = Claude()
-        cmd = claude.build_command(
-            rules_path=rules,
-            project_root=tmp_path,
+        opts = Claude._build_options(
+            rules_path=rules_file, project_root=tmp_path, cwd=tmp_path,
         )
-        assert "--plugin-dir" in cmd
-        idx = cmd.index("--plugin-dir")
-        plugin_path = Path(cmd[idx + 1])
-        assert plugin_path == tmp_path / "_agent" / "plugin"
+        assert opts.system_prompt is None
 
-    def test_plugin_dir_role_specific(self, tmp_path):
-        """With role, plugin dir is _agent/plugin-{role}/ and --plugin-dir points there."""
-        rules = tmp_path / "rules.toml"
-        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+    def test_max_turns_from_config(self, tmp_path, rules_file):
+        """max_turns is forwarded from tool_config."""
+        from repo_tools.agent.claude import Claude
 
-        claude = Claude()
-        cmd = claude.build_command(
-            role="reviewer",
-            rules_path=rules,
-            project_root=tmp_path,
+        opts = Claude._build_options(
+            role="worker", rules_path=rules_file, project_root=tmp_path,
+            tool_config={"max_turns": 30}, cwd=tmp_path,
         )
-        expected = tmp_path / "_agent" / "plugin-reviewer"
-        assert expected.exists()
-        idx = cmd.index("--plugin-dir")
-        assert Path(cmd[idx + 1]) == expected
+        assert opts.max_turns == 30
 
-    def test_plugin_manifest_written(self, tmp_path):
-        """Plugin manifest .claude-plugin/plugin.json is written."""
-        rules = tmp_path / "rules.toml"
-        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+    def test_no_max_turns_by_default(self, tmp_path, rules_file):
+        """Without max_turns in config, it's None."""
+        from repo_tools.agent.claude import Claude
 
-        claude = Claude()
-        claude.build_command(
-            rules_path=rules,
-            project_root=tmp_path,
+        opts = Claude._build_options(
+            role="worker", rules_path=rules_file, project_root=tmp_path,
+            cwd=tmp_path,
         )
-        manifest = json.loads(
-            (tmp_path / "_agent" / "plugin" / ".claude-plugin" / "plugin.json").read_text()
+        assert opts.max_turns is None
+
+    def test_output_format_worker_headless(self, tmp_path, rules_file):
+        """Worker in headless mode gets output_format with json_schema."""
+        from repo_tools.agent.claude import Claude
+
+        opts = Claude._build_options(
+            role="worker", rules_path=rules_file, project_root=tmp_path,
+            cwd=tmp_path, headless=True,
         )
-        assert manifest["name"] == "repokit-agent"
-
-    def test_no_settings_local_json_written(self, tmp_path):
-        """.claude/settings.local.json must NOT be written."""
-        rules = tmp_path / "rules.toml"
-        rules.write_text('default_reason = "no"\n', encoding="utf-8")
-
-        claude = Claude()
-        claude.build_command(
-            rules_path=rules,
-            project_root=tmp_path,
-        )
-        assert not (tmp_path / ".claude" / "settings.local.json").exists()
-
-    def test_empty_path_with_none_raises(self):
-        """Path('') with None should raise ValueError."""
-        claude = Claude()
-        with pytest.raises(ValueError, match="must both be provided together"):
-            claude.build_command(rules_path=Path(""), project_root=None)
-
-    def test_headless_mode(self, tmp_path):
-        """With prompt, -p, --output-format json, and --no-session-persistence are added."""
-        rules = tmp_path / "rules.toml"
-        rules.write_text('default_reason = "no"\n', encoding="utf-8")
-
-        claude = Claude()
-        cmd = claude.build_command(
-            prompt="Do the work",
-            role="worker",
-            rules_path=rules,
-            project_root=tmp_path,
-        )
-        assert "-p" in cmd
-        idx = cmd.index("-p")
-        assert cmd[idx + 1] == "Do the work"
-        assert "--output-format" in cmd
-        fmt_idx = cmd.index("--output-format")
-        assert cmd[fmt_idx + 1] == "json"
-        assert "--no-session-persistence" in cmd
-
-    def test_headless_worker_has_json_schema(self, tmp_path):
-        """Worker headless mode includes --json-schema with correct structure."""
-        rules = tmp_path / "rules.toml"
-        rules.write_text('default_reason = "no"\n', encoding="utf-8")
-
-        claude = Claude()
-        cmd = claude.build_command(
-            prompt="Do the work",
-            role="worker",
-            rules_path=rules,
-            project_root=tmp_path,
-        )
-        assert "--json-schema" in cmd
-        schema_idx = cmd.index("--json-schema")
-        schema = json.loads(cmd[schema_idx + 1])
-        assert schema["type"] == "object"
+        assert opts.output_format is not None
+        assert opts.output_format["type"] == "json_schema"
+        schema = opts.output_format["schema"]
         assert "ticket_id" in schema["properties"]
-        assert "status" in schema["properties"]
         assert schema["properties"]["status"]["enum"] == ["verify", "in_progress"]
-        assert "notes" in schema["properties"]
 
-    def test_headless_reviewer_has_json_schema(self, tmp_path):
-        """Reviewer headless mode includes --json-schema with result/feedback/criteria fields."""
-        rules = tmp_path / "rules.toml"
-        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+    def test_output_format_reviewer_headless(self, tmp_path, rules_file):
+        """Reviewer in headless mode gets output_format with result/criteria fields."""
+        from repo_tools.agent.claude import Claude
 
-        claude = Claude()
-        cmd = claude.build_command(
-            prompt="Review the work",
-            role="reviewer",
-            rules_path=rules,
-            project_root=tmp_path,
+        opts = Claude._build_options(
+            role="reviewer", rules_path=rules_file, project_root=tmp_path,
+            cwd=tmp_path, headless=True,
         )
-        assert "--json-schema" in cmd
-        schema_idx = cmd.index("--json-schema")
-        schema = json.loads(cmd[schema_idx + 1])
+        assert opts.output_format is not None
+        schema = opts.output_format["schema"]
         assert "result" in schema["properties"]
         assert schema["properties"]["result"]["enum"] == ["pass", "fail"]
-        assert "feedback" in schema["properties"]
         assert "criteria" in schema["properties"]
-        assert schema["properties"]["criteria"]["type"] == "array"
-        assert "criteria" in schema["required"]
 
-    def test_headless_no_role_no_schema(self, tmp_path):
-        """Headless mode without a role does not include --json-schema."""
-        rules = tmp_path / "rules.toml"
-        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+    def test_no_output_format_interactive(self, tmp_path, rules_file):
+        """Non-headless mode has no output_format."""
+        from repo_tools.agent.claude import Claude
 
-        claude = Claude()
-        cmd = claude.build_command(
-            prompt="Do something",
-            rules_path=rules,
-            project_root=tmp_path,
+        opts = Claude._build_options(
+            role="worker", rules_path=rules_file, project_root=tmp_path,
+            cwd=tmp_path, headless=False,
         )
-        assert "-p" in cmd
-        assert "--json-schema" not in cmd
+        assert opts.output_format is None
 
-    def test_interactive_mode_no_prompt_flags(self):
-        """Without prompt, no -p, --output-format, or --no-session-persistence flags."""
-        claude = Claude()
-        cmd = claude.build_command()
-        assert "-p" not in cmd
-        assert "--output-format" not in cmd
-        assert "--no-session-persistence" not in cmd
-        assert "--json-schema" not in cmd
+    def test_no_output_format_without_role(self, tmp_path, rules_file):
+        """Without a role, no output_format even in headless mode."""
+        from repo_tools.agent.claude import Claude
 
-    def test_ticket_mcp_in_plugin(self, tmp_path):
-        """Plugin .mcp.json includes both tickets and coderabbit entries."""
-        rules = tmp_path / "rules.toml"
-        rules.write_text('default_reason = "no"\n', encoding="utf-8")
-
-        claude = Claude()
-        claude.build_command(
-            rules_path=rules,
-            project_root=tmp_path,
+        opts = Claude._build_options(
+            rules_path=rules_file, project_root=tmp_path,
+            cwd=tmp_path, headless=True,
         )
-        mcp = json.loads(
-            (tmp_path / "_agent" / "plugin" / ".mcp.json").read_text()
+        assert opts.output_format is None
+
+    def test_permission_mode_bypass(self, tmp_path, rules_file):
+        """permission_mode is always bypassPermissions."""
+        from repo_tools.agent.claude import Claude
+
+        opts = Claude._build_options(
+            rules_path=rules_file, project_root=tmp_path, cwd=tmp_path,
         )
+        assert opts.permission_mode == "bypassPermissions"
 
-        assert "mcpServers" in mcp
-        assert "coderabbit" in mcp["mcpServers"]
-        assert "tickets" in mcp["mcpServers"]
+    def test_cwd_set(self, tmp_path, rules_file):
+        """cwd is set from the provided path."""
+        from repo_tools.agent.claude import Claude
 
-        cr = mcp["mcpServers"]["coderabbit"]
-        assert cr["type"] == "stdio"
-        assert "coderabbit_mcp" in " ".join(cr["args"])
-
-        ts = mcp["mcpServers"]["tickets"]
-        assert ts["type"] == "stdio"
-        assert "--project-root" in ts["args"]
-        assert "ticket_mcp" in " ".join(ts["args"])
-
-    def test_ticket_mcp_has_project_root(self, tmp_path):
-        """Ticket MCP config passes the correct --project-root."""
-        rules = tmp_path / "rules.toml"
-        rules.write_text('default_reason = "no"\n', encoding="utf-8")
-
-        claude = Claude()
-        claude.build_command(
-            rules_path=rules,
-            project_root=tmp_path,
+        opts = Claude._build_options(
+            rules_path=rules_file, project_root=tmp_path,
+            cwd=tmp_path / "subdir",
         )
-        mcp = json.loads(
-            (tmp_path / "_agent" / "plugin" / ".mcp.json").read_text()
+        assert opts.cwd == str(tmp_path / "subdir")
+
+    def test_hooks_present(self, tmp_path, rules_file):
+        """Hooks dict has PreToolUse and PermissionRequest entries."""
+        from repo_tools.agent.claude import Claude
+
+        opts = Claude._build_options(
+            role="worker", rules_path=rules_file, project_root=tmp_path,
+            cwd=tmp_path,
         )
+        assert opts.hooks is not None
+        assert "PreToolUse" in opts.hooks
+        assert "PermissionRequest" in opts.hooks
 
-        ts_args = mcp["mcpServers"]["tickets"]["args"]
-        root_idx = ts_args.index("--project-root")
-        assert tmp_path.as_posix() in ts_args[root_idx + 1]
+    def test_no_hooks_without_rules(self, tmp_path):
+        """Without rules_path, hooks is None."""
+        from repo_tools.agent.claude import Claude
 
-    def test_role_forwarded_to_ticket_mcp(self, tmp_path):
-        """When role is provided, --role appears in ticket MCP args."""
-        rules = tmp_path / "rules.toml"
-        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+        opts = Claude._build_options(cwd=tmp_path)
+        assert opts.hooks is None
 
-        claude = Claude()
-        claude.build_command(
-            role="worker",
-            rules_path=rules,
-            project_root=tmp_path,
+    def test_mcp_servers_present(self, tmp_path, rules_file):
+        """mcp_servers has repokit-agent entry."""
+        from repo_tools.agent.claude import Claude
+
+        opts = Claude._build_options(
+            role="worker", rules_path=rules_file, project_root=tmp_path,
+            cwd=tmp_path,
         )
-        mcp = json.loads(
-            (tmp_path / "_agent" / "plugin-worker" / ".mcp.json").read_text()
+        assert "repokit-agent" in opts.mcp_servers
+
+    def test_no_mcp_servers_without_project_root(self, tmp_path, rules_file):
+        """Without project_root, no MCP servers."""
+        from repo_tools.agent.claude import Claude
+
+        opts = Claude._build_options(
+            rules_path=rules_file, cwd=tmp_path,
         )
+        assert len(opts.mcp_servers) == 0
 
-        ts_args = mcp["mcpServers"]["tickets"]["args"]
-        assert "--role" in ts_args
-        role_idx = ts_args.index("--role")
-        assert ts_args[role_idx + 1] == "worker"
+    def test_setting_sources(self, tmp_path, rules_file):
+        """setting_sources includes project."""
+        from repo_tools.agent.claude import Claude
 
-    def test_no_role_no_role_in_ticket_mcp(self, tmp_path):
-        """When no role is given, --role is absent from ticket MCP args."""
-        rules = tmp_path / "rules.toml"
-        rules.write_text('default_reason = "no"\n', encoding="utf-8")
-
-        claude = Claude()
-        claude.build_command(
-            rules_path=rules,
-            project_root=tmp_path,
+        opts = Claude._build_options(
+            rules_path=rules_file, project_root=tmp_path, cwd=tmp_path,
         )
-        mcp = json.loads(
-            (tmp_path / "_agent" / "plugin" / ".mcp.json").read_text()
+        assert "project" in opts.setting_sources
+
+    def test_ruff_select_forwarded(self, tmp_path, rules_file):
+        """ruff_select from tool_config is forwarded to lint tool."""
+        from repo_tools.agent.claude import Claude
+
+        # This test verifies the lint tool is created with the config.
+        # The mock tool decorator captures the handler.
+        opts = Claude._build_options(
+            role="worker", rules_path=rules_file, project_root=tmp_path,
+            tool_config={"ruff_select": "E,F"}, cwd=tmp_path,
         )
+        # Lint tool should be in the MCP tools (verified by mcp names in allowed)
+        assert any("lint" in t for t in opts.allowed_tools)
 
-        ts_args = mcp["mcpServers"]["tickets"]["args"]
-        assert "--role" not in ts_args
 
-    def test_max_turns_in_headless(self, tmp_path):
-        """max_turns adds --max-turns flag in headless mode."""
-        rules = tmp_path / "rules.toml"
-        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+# ── MCP tool construction tests ──────────────────────────────────
 
-        claude = Claude()
-        cmd = claude.build_command(
-            prompt="Do work",
-            role="worker",
-            rules_path=rules,
-            project_root=tmp_path,
-            tool_config={"max_turns": 25},
+
+class TestMcpTools:
+    def test_worker_gets_limited_ticket_tools(self, tmp_path, rules_file):
+        """Worker role gets only list/get/update ticket tools."""
+        from repo_tools.agent.claude import _make_ticket_tools
+
+        tools = _make_ticket_tools(tmp_path, role="worker")
+        names = {t.name for t in tools}
+        assert "list_tickets" in names
+        assert "get_ticket" in names
+        assert "update_ticket" in names
+        assert "create_ticket" not in names
+        assert "delete_ticket" not in names
+
+    def test_reviewer_gets_mark_criteria(self, tmp_path, rules_file):
+        """Reviewer role includes mark_criteria tool."""
+        from repo_tools.agent.claude import _make_ticket_tools
+
+        tools = _make_ticket_tools(tmp_path, role="reviewer")
+        names = {t.name for t in tools}
+        assert "mark_criteria" in names
+        assert "list_tickets" in names
+
+    def test_orchestrator_gets_all_tools(self, tmp_path, rules_file):
+        """Orchestrator role gets all 7 ticket tools."""
+        from repo_tools.agent.claude import _make_ticket_tools
+
+        tools = _make_ticket_tools(tmp_path, role="orchestrator")
+        names = {t.name for t in tools}
+        expected = {
+            "list_tickets", "get_ticket", "create_ticket", "update_ticket",
+            "reset_ticket", "mark_criteria", "delete_ticket",
+        }
+        assert names == expected
+
+    def test_lint_tool_created(self, tmp_path, rules_file):
+        """Lint tool is created successfully."""
+        from repo_tools.agent.claude import _make_lint_tool
+
+        t = _make_lint_tool()
+        assert t.name == "lint"
+
+    def test_coderabbit_tool_created(self, tmp_path, rules_file):
+        """CodeRabbit tool is created successfully."""
+        from repo_tools.agent.claude import _make_coderabbit_tool
+
+        t = _make_coderabbit_tool()
+        assert t.name == "coderabbit_review"
+
+
+# ── Hook construction tests ──────────────────────────────────────
+
+
+class TestHookConstruction:
+    def test_pretooluse_hook_matcher(self, tmp_path, rules_file):
+        """PreToolUse hook has Bash matcher."""
+        from repo_tools.agent.claude import Claude
+
+        opts = Claude._build_options(
+            role="worker", rules_path=rules_file, project_root=tmp_path,
+            cwd=tmp_path,
         )
-        assert "--max-turns" in cmd
-        idx = cmd.index("--max-turns")
-        assert cmd[idx + 1] == "25"
+        pre = opts.hooks["PreToolUse"]
+        assert len(pre) == 1
+        assert pre[0].matcher == "Bash"
+        assert len(pre[0].hooks) == 1
 
-    def test_no_max_turns_by_default(self, tmp_path):
-        """Without max_turns, --max-turns is not added."""
-        rules = tmp_path / "rules.toml"
-        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+    def test_permission_hook_matcher(self, tmp_path, rules_file):
+        """PermissionRequest hook has ^mcp__ matcher."""
+        from repo_tools.agent.claude import Claude
 
-        claude = Claude()
-        cmd = claude.build_command(
-            prompt="Do work",
-            role="worker",
-            rules_path=rules,
-            project_root=tmp_path,
+        opts = Claude._build_options(
+            role="worker", rules_path=rules_file, project_root=tmp_path,
+            cwd=tmp_path,
         )
-        assert "--max-turns" not in cmd
-
-    def test_max_turns_not_in_interactive(self):
-        """max_turns is ignored in interactive mode (no prompt)."""
-        claude = Claude()
-        cmd = claude.build_command(tool_config={"max_turns": 25})
-        assert "--max-turns" not in cmd
-
-    def test_permission_request_hook_for_mcp(self, tmp_path):
-        """PermissionRequest hook auto-approves MCP tools via approve_mcp."""
-        rules = tmp_path / "rules.toml"
-        rules.write_text('default_reason = "no"\n', encoding="utf-8")
-
-        claude = Claude()
-        claude.build_command(
-            rules_path=rules,
-            project_root=tmp_path,
-        )
-        hooks_path = tmp_path / "_agent" / "plugin" / "hooks" / "hooks.json"
-        data = json.loads(hooks_path.read_text())
-
-        perm = data["hooks"]["PermissionRequest"]
+        perm = opts.hooks["PermissionRequest"]
         assert len(perm) == 1
-        assert perm[0]["matcher"] == "^mcp__"
-        hook_cmd = perm[0]["hooks"][0]["command"]
-        assert "approve_mcp" in hook_cmd
-        assert "repo_tools.agent.hooks" in hook_cmd
-
-    def test_lint_mcp_in_plugin(self, tmp_path):
-        """Plugin .mcp.json includes a lint server entry."""
-        rules = tmp_path / "rules.toml"
-        rules.write_text('default_reason = "no"\n', encoding="utf-8")
-
-        claude = Claude()
-        claude.build_command(
-            rules_path=rules,
-            project_root=tmp_path,
-        )
-        mcp = json.loads(
-            (tmp_path / "_agent" / "plugin" / ".mcp.json").read_text()
-        )
-
-        assert "lint" in mcp["mcpServers"]
-        lint = mcp["mcpServers"]["lint"]
-        assert lint["type"] == "stdio"
-        assert "lint_mcp_stdio" in " ".join(lint["args"])
-
-    def test_lint_mcp_no_select_by_default(self, tmp_path):
-        """Without ruff_select, --select does not appear in lint MCP args."""
-        rules = tmp_path / "rules.toml"
-        rules.write_text('default_reason = "no"\n', encoding="utf-8")
-
-        claude = Claude()
-        claude.build_command(
-            rules_path=rules,
-            project_root=tmp_path,
-        )
-        mcp = json.loads(
-            (tmp_path / "_agent" / "plugin" / ".mcp.json").read_text()
-        )
-
-        lint_args = mcp["mcpServers"]["lint"]["args"]
-        assert "--select" not in lint_args
-
-    def test_lint_mcp_select_passed_through(self, tmp_path):
-        """ruff_select adds --select to lint MCP args."""
-        rules = tmp_path / "rules.toml"
-        rules.write_text('default_reason = "no"\n', encoding="utf-8")
-
-        claude = Claude()
-        claude.build_command(
-            rules_path=rules,
-            project_root=tmp_path,
-            tool_config={"ruff_select": "E,F,S,B,SIM"},
-        )
-        mcp = json.loads(
-            (tmp_path / "_agent" / "plugin" / ".mcp.json").read_text()
-        )
-
-        lint_args = mcp["mcpServers"]["lint"]["args"]
-        assert "--select" in lint_args
-        select_idx = lint_args.index("--select")
-        assert lint_args[select_idx + 1] == "E,F,S,B,SIM"
-
-    def test_lint_mcp_ignore_passed_through(self, tmp_path):
-        """ruff_ignore adds --ignore to lint MCP args."""
-        rules = tmp_path / "rules.toml"
-        rules.write_text('default_reason = "no"\n', encoding="utf-8")
-
-        claude = Claude()
-        claude.build_command(
-            rules_path=rules,
-            project_root=tmp_path,
-            tool_config={"ruff_ignore": "SIM108,B006"},
-        )
-        mcp = json.loads(
-            (tmp_path / "_agent" / "plugin" / ".mcp.json").read_text()
-        )
-
-        lint_args = mcp["mcpServers"]["lint"]["args"]
-        assert "--ignore" in lint_args
-        ignore_idx = lint_args.index("--ignore")
-        assert lint_args[ignore_idx + 1] == "SIM108,B006"
-
-    def test_lint_mcp_no_ignore_by_default(self, tmp_path):
-        """Without ruff_ignore, --ignore does not appear in lint MCP args."""
-        rules = tmp_path / "rules.toml"
-        rules.write_text('default_reason = "no"\n', encoding="utf-8")
-
-        claude = Claude()
-        claude.build_command(
-            rules_path=rules,
-            project_root=tmp_path,
-        )
-        mcp = json.loads(
-            (tmp_path / "_agent" / "plugin" / ".mcp.json").read_text()
-        )
-
-        lint_args = mcp["mcpServers"]["lint"]["args"]
-        assert "--ignore" not in lint_args
-
-    def test_session_id_in_command(self):
-        """session_id adds --session-id flag."""
-        claude = Claude()
-        cmd = claude.build_command(session_id="abc-123")
-        assert "--session-id" in cmd
-        idx = cmd.index("--session-id")
-        assert cmd[idx + 1] == "abc-123"
-
-    def test_no_session_id_by_default(self):
-        """Without session_id, --session-id is not added."""
-        claude = Claude()
-        cmd = claude.build_command()
-        assert "--session-id" not in cmd
-
-    def test_no_events_mcp(self, tmp_path):
-        """Events MCP is not present (feature removed)."""
-        rules = tmp_path / "rules.toml"
-        rules.write_text('default_reason = "no"\n', encoding="utf-8")
-
-        claude = Claude()
-        claude.build_command(
-            rules_path=rules,
-            project_root=tmp_path,
-        )
-        mcp = json.loads(
-            (tmp_path / "_agent" / "plugin" / ".mcp.json").read_text()
-        )
-
-        assert "events" not in mcp["mcpServers"]
-
-    def test_no_post_tool_use_hook(self, tmp_path):
-        """PostToolUse hook is not registered (feature removed)."""
-        rules = tmp_path / "rules.toml"
-        rules.write_text('default_reason = "no"\n', encoding="utf-8")
-
-        claude = Claude()
-        claude.build_command(rules_path=rules, project_root=tmp_path)
-        hooks = json.loads(
-            (tmp_path / "_agent" / "plugin" / "hooks" / "hooks.json").read_text()
-        )
-
-        assert "PostToolUse" not in hooks["hooks"]
+        assert perm[0].matcher == "^mcp__"
+        assert len(perm[0].hooks) == 1

@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
 import sys
@@ -175,29 +174,30 @@ def _process_agent_output(
     workspace_root: Path,
     ticket: str,
     role: str,
-    proc: subprocess.CompletedProcess[str],
+    stdout: str,
+    returncode: int,
 ) -> str | None:
     """Parse structured JSON output from a headless agent and apply ticket updates.
 
-    Claude Code ``--output-format json`` wraps output in an envelope::
+    The SDK reconstructs the same envelope format::
 
         {"type": "result", "subtype": "success"|"error_max_turns",
          "is_error": bool, "structured_output": {...}, ...}
     """
-    if proc.returncode != 0:
-        logger.error(f"Agent exited with code {proc.returncode}")
+    if returncode != 0:
+        logger.error(f"Agent exited with code {returncode}")
 
     try:
-        envelope = json.loads(proc.stdout)
+        envelope = json.loads(stdout)
     except (json.JSONDecodeError, TypeError):
         logger.error("Agent produced invalid JSON output — ticket not updated")
-        print(proc.stdout)
-        return proc.stdout
+        print(stdout)
+        return stdout
 
     if not isinstance(envelope, dict):
         logger.error("Agent output is not a JSON object — ticket not updated")
-        print(proc.stdout)
-        return proc.stdout
+        print(stdout)
+        return stdout
 
     if envelope.get("is_error"):
         subtype = envelope.get("subtype", "")
@@ -215,23 +215,23 @@ def _process_agent_output(
                 logger.info(f"Ticket {ticket} updated: {update_result['text']}")
         else:
             logger.error(f"Agent reported error (subtype={subtype!r}) — ticket not updated")
-        print(proc.stdout)
-        return proc.stdout
+        print(stdout)
+        return stdout
 
     output = envelope.get("structured_output")
 
     if not isinstance(output, dict) or "ticket_id" not in output:
         logger.error("Agent output missing ticket_id — ticket not updated")
-        print(proc.stdout)
-        return proc.stdout
+        print(stdout)
+        return stdout
 
     if output["ticket_id"] != ticket:
         logger.error(
             f"Agent returned ticket_id={output['ticket_id']!r} "
             f"but was assigned {ticket!r} — ticket not updated"
         )
-        print(proc.stdout)
-        return proc.stdout
+        print(stdout)
+        return stdout
 
     # Apply criteria from reviewer structured output
     if role == "reviewer" and "criteria" in output:
@@ -300,42 +300,37 @@ def _agent_run(tool_ctx: ToolContext, args: dict[str, Any]) -> str | None:
             framework_root=tool_ctx.tokens.get("framework_root", ""),
         )
 
-    # Build command — tool_config flows as a dict
+    # Resolve rules file
     rules_path = _find_rules_file(
         tool_ctx.workspace_root,
         configured=args.get("allowlist"),
     )
 
     if prompt is None:
-        cmd = _backend.build_command(
-            prompt=prompt, role=role, role_prompt=role_prompt,
-            rules_path=rules_path, project_root=tool_ctx.workspace_root,
-            tool_config=args,
-        )
+        # Interactive mode
         logger.info("Starting interactive agent session")
-        proc = subprocess.run(cmd, cwd=str(agent_cwd))
-        sys.exit(proc.returncode)
+        rc = _backend.run_interactive(
+            role_prompt=role_prompt,
+            rules_path=rules_path,
+            project_root=tool_ctx.workspace_root,
+            tool_config=args,
+            cwd=agent_cwd,
+        )
+        sys.exit(rc)
 
     # Headless mode
-    cmd = _backend.build_command(
+    logger.info(f"Running headless agent: role={role}, ticket={ticket}")
+    stdout, returncode = _backend.run_headless(
         prompt=prompt,
         role=role,
         role_prompt=role_prompt,
         rules_path=rules_path,
         project_root=tool_ctx.workspace_root,
         tool_config=args,
-    )
-    logger.info(f"Running headless agent: role={role}, ticket={ticket}")
-    env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
-    proc = subprocess.run(
-        cmd,
-        stdout=subprocess.PIPE,
-        text=True,
-        cwd=str(agent_cwd),
-        env=env,
+        cwd=agent_cwd,
     )
 
-    return _process_agent_output(tool_ctx.workspace_root, ticket, role, proc)
+    return _process_agent_output(tool_ctx.workspace_root, ticket, role, stdout, returncode)
 
 
 # ── Click Command ────────────────────────────────────────────────────

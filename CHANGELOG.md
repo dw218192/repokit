@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.0
+
+- **Agent SDK backend**: Replace CLI subprocess (`subprocess.run("claude", ...)`) with `claude-agent-sdk` Python API. Headless mode uses `query()`, interactive mode uses `ClaudeSDKClient` REPL with Rich rendering.
+- **In-process hooks**: PreToolUse (bash allowlist) and PermissionRequest (MCP auto-approve) hooks run as Python async callbacks instead of shell subprocess commands.
+- **In-process MCP tools**: Lint, CodeRabbit, and ticket CRUD tools are registered via SDK `@tool` decorator, eliminating three stdio subprocess spawns per agent session.
+- **New `sdk` dependency group**: `claude-agent-sdk>=0.1.0` and `rich>=13.0` (install with `uv sync --group sdk`).
+
 ## 0.6.1
 
 - **3-layer config merge**: `load_config()` now loads framework defaults (`config.defaults.yaml`) as a base layer, then project `config.yaml`, then `config.local.yaml`.
