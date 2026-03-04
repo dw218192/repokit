@@ -1,6 +1,7 @@
 _tools/
 repo
 repo.cmd
+repo.ps1
 _agent/
 
 tools/framework
