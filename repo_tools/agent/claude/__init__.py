@@ -405,7 +405,7 @@ async def _run_interactive(options: Any) -> int:
     """Run an interactive REPL session."""
     from claude_agent_sdk import ClaudeSDKClient
 
-    from .render import render_message
+    from ..render import render_message
 
     async with ClaudeSDKClient(options=options) as client:
         while True:
