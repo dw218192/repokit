@@ -249,8 +249,8 @@ class TestConfigDefaults:
     def test_defaults_loaded_without_project_config(self, tmp_path: Path):
         """Framework defaults are returned even with no config.yaml."""
         cfg = load_config(str(tmp_path))
-        assert "events" in cfg
-        assert "github" in cfg["events"]
+        assert "clean" in cfg
+        assert isinstance(cfg["clean"]["paths"], list)
 
     def test_defaults_file_exists(self):
         """config.defaults.yaml ships with the framework."""
@@ -266,42 +266,22 @@ class TestConfigDefaults:
         (tmp_path / "config.yaml").write_text("custom_key: 42\n", encoding="utf-8")
         cfg = load_config(str(tmp_path))
         assert cfg["custom_key"] == 42
-        assert "events" in cfg  # defaults still present
+        assert "clean" in cfg  # defaults still present
 
-    def test_project_overrides_default_event(self, tmp_path: Path):
-        """Project config can override a specific built-in event."""
-        override = (
-            "events:\n"
-            "  github:\n"
-            "    ci_complete:\n"
-            "      doc: Custom CI\n"
-            "      params:\n"
-            "        run_id: { required: true }\n"
-            "      poll: custom-poll\n"
-            "      payload: custom-payload\n"
-        )
+    def test_project_overrides_default_value(self, tmp_path: Path):
+        """Project config can override a specific framework default."""
+        override = 'clean:\n  paths:\n    - custom_dir\n'
         (tmp_path / "config.yaml").write_text(override, encoding="utf-8")
         cfg = load_config(str(tmp_path))
-        assert cfg["events"]["github"]["ci_complete"]["doc"] == "Custom CI"
-        # Other built-in events still present via deep merge
-        assert "pr_checks_pass" in cfg["events"]["github"]
+        assert cfg["clean"]["paths"] == ["custom_dir"]
 
     def test_local_overrides_default(self, tmp_path: Path):
         """config.local.yaml can override framework defaults."""
         (tmp_path / "config.yaml").write_text("{}\n", encoding="utf-8")
-        override = (
-            "events:\n"
-            "  github:\n"
-            "    ci_complete:\n"
-            "      doc: Local override\n"
-            "      params:\n"
-            "        run_id: { required: true }\n"
-            "      poll: local-poll\n"
-            "      payload: local-payload\n"
-        )
+        override = 'clean:\n  paths:\n    - local_override\n'
         (tmp_path / "config.local.yaml").write_text(override, encoding="utf-8")
         cfg = load_config(str(tmp_path))
-        assert cfg["events"]["github"]["ci_complete"]["doc"] == "Local override"
+        assert cfg["clean"]["paths"] == ["local_override"]
 
     def test_clean_defaults_loaded(self, tmp_path: Path):
         """Framework defaults include clean paths."""
@@ -324,18 +304,16 @@ class TestConfigDefaults:
         assert "{workspace_root}/dist" in paths
 
     def test_list_extension_across_layers(self, tmp_path: Path):
-        """key+ in project config extends framework default event list."""
+        """key+ in project config extends framework default list."""
         (tmp_path / "config.yaml").write_text(
-            "events:\n  github:\n    custom:\n"
-            "      doc: Custom event\n      poll: cmd\n      payload: cmd\n"
-            "      params: {}\n",
+            'clean:\n  paths+:\n    - extra_dir\n',
             encoding="utf-8",
         )
         cfg = load_config(str(tmp_path))
-        # Built-in events from defaults still present
-        assert "ci_complete" in cfg["events"]["github"]
-        # Project event merged in
-        assert "custom" in cfg["events"]["github"]
+        # Framework defaults still present
+        assert any("__pycache__" in p for p in cfg["clean"]["paths"])
+        # Project extension merged in
+        assert "extra_dir" in cfg["clean"]["paths"]
 
     @_NO_DEFAULTS
     def test_no_defaults_file_returns_empty(self, tmp_path: Path):
