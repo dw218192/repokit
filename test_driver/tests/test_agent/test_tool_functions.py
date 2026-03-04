@@ -543,42 +543,51 @@ class TestAgentRunHeadless:
 # ── _agent_run (interactive mode) ────────────────────────────────
 
 
+def _mock_popen(returncode=0):
+    """Create a MagicMock that behaves like subprocess.Popen."""
+    mock = MagicMock()
+    mock.wait.return_value = returncode
+    mock.returncode = returncode
+    mock.poll.return_value = returncode  # already exited
+    return mock
+
+
 class TestAgentRunInteractive:
     @patch("repo_tools.agent.tool._read_subscription", return_value=None)
     @patch("repo_tools.agent.tool.sys.exit", side_effect=SystemExit(0))
-    @patch("repo_tools.agent.tool.subprocess.run", return_value=MagicMock(returncode=0))
+    @patch("repo_tools.agent.tool.subprocess.Popen", return_value=_mock_popen())
     @patch("repo_tools.agent.tool._backend")
-    def test_interactive_launches_command(self, mock_backend, mock_run, mock_exit, _mock_sub, tool_ctx):
-        """Interactive mode (no ticket) launches the agent command."""
+    def test_interactive_launches_command(self, mock_backend, mock_popen, mock_exit, _mock_sub, tool_ctx):
+        """Interactive mode (no ticket) launches the agent command via Popen."""
         mock_backend.build_command.return_value = ["claude", "--allowedTools", "Read"]
 
         with pytest.raises(SystemExit):
             _agent_run(tool_ctx, {})
 
-        mock_run.assert_called_once()
-        cmd = mock_run.call_args[0][0]
+        mock_popen.assert_called_once()
+        cmd = mock_popen.call_args[0][0]
         assert cmd[0] == "claude"
         assert "-p" not in cmd
 
     @patch("repo_tools.agent.tool._read_subscription", return_value=None)
     @patch("repo_tools.agent.tool.sys.exit", side_effect=SystemExit(0))
-    @patch("repo_tools.agent.tool.subprocess.run", return_value=MagicMock(returncode=0))
+    @patch("repo_tools.agent.tool.subprocess.Popen", return_value=_mock_popen())
     @patch("repo_tools.agent.tool._backend")
-    def test_interactive_no_prompt_flag(self, mock_backend, mock_run, mock_exit, _mock_sub, tool_ctx):
+    def test_interactive_no_prompt_flag(self, mock_backend, mock_popen, mock_exit, _mock_sub, tool_ctx):
         """Interactive mode does not include -p or --output-format."""
         mock_backend.build_command.return_value = ["claude", "--allowedTools", "Read"]
 
         with pytest.raises(SystemExit):
             _agent_run(tool_ctx, {})
 
-        cmd = mock_run.call_args[0][0]
+        cmd = mock_popen.call_args[0][0]
         assert "--output-format" not in cmd
 
     @patch("repo_tools.agent.tool._read_subscription", return_value=None)
     @patch("repo_tools.agent.tool.sys.exit", side_effect=SystemExit(0))
-    @patch("repo_tools.agent.tool.subprocess.run", return_value=MagicMock(returncode=0))
+    @patch("repo_tools.agent.tool.subprocess.Popen", return_value=_mock_popen())
     @patch("repo_tools.agent.tool._backend")
-    def test_interactive_no_session_id(self, mock_backend, mock_run, mock_exit, _mock_sub, tool_ctx):
+    def test_interactive_no_session_id(self, mock_backend, mock_popen, mock_exit, _mock_sub, tool_ctx):
         """Interactive mode does not pre-assign a session ID."""
         mock_backend.build_command.return_value = ["claude"]
 
@@ -590,9 +599,9 @@ class TestAgentRunInteractive:
 
     @patch("repo_tools.agent.tool._read_subscription", return_value=None)
     @patch("repo_tools.agent.tool.sys.exit", side_effect=SystemExit(0))
-    @patch("repo_tools.agent.tool.subprocess.run", return_value=MagicMock(returncode=0))
+    @patch("repo_tools.agent.tool.subprocess.Popen", return_value=_mock_popen())
     @patch("repo_tools.agent.tool._backend")
-    def test_interactive_exits_when_no_subscription(self, mock_backend, mock_run, mock_exit, _mock_sub, tool_ctx):
+    def test_interactive_exits_when_no_subscription(self, mock_backend, mock_popen, mock_exit, _mock_sub, tool_ctx):
         """Interactive exits normally when no subscription found in session transcript."""
         mock_backend.build_command.return_value = ["claude"]
 
@@ -609,14 +618,17 @@ class TestAgentRunEventLoop:
     """Tests for the interactive event loop: subscribe → poll → resume cycle."""
 
     @patch("repo_tools.agent.tool.sys.exit", side_effect=SystemExit(0))
-    @patch("repo_tools.agent.tool.subprocess.run", return_value=MagicMock(returncode=0))
+    @patch("repo_tools.agent.tool.subprocess.Popen")
     @patch("repo_tools.agent.tool._backend")
-    def test_event_loop_resumes_on_subscription(self, mock_backend, mock_run, mock_exit, tool_ctx):
+    def test_event_loop_resumes_on_subscription(self, mock_backend, mock_popen_cls, mock_exit, tool_ctx):
         """When a subscription is found in the session transcript, the loop polls and resumes."""
         from repo_tools.agent.events import Subscription
 
         mock_backend.build_command.return_value = ["claude"]
         mock_backend.build_resume_command.return_value = ["claude", "-p", "msg", "--resume", "sid"]
+
+        # Each Popen call gets a fresh mock process
+        mock_popen_cls.side_effect = [_mock_popen(), _mock_popen()]
 
         call_count = [0]
 
@@ -647,16 +659,16 @@ class TestAgentRunEventLoop:
             with pytest.raises(SystemExit):
                 _agent_run(tool_ctx_with_config, {})
 
-        assert mock_run.call_count == 2
+        assert mock_popen_cls.call_count == 2
         mock_backend.build_resume_command.assert_called_once()
         resume_prompt = mock_backend.build_resume_command.call_args[0][1]
         assert "ci.done" in resume_prompt
         assert "payload-data" in resume_prompt
 
     @patch("repo_tools.agent.tool.sys.exit", side_effect=SystemExit(1))
-    @patch("repo_tools.agent.tool.subprocess.run", return_value=MagicMock(returncode=0))
+    @patch("repo_tools.agent.tool.subprocess.Popen", return_value=_mock_popen())
     @patch("repo_tools.agent.tool._backend")
-    def test_event_loop_unknown_event_exits(self, mock_backend, mock_run, mock_exit, tool_ctx):
+    def test_event_loop_unknown_event_exits(self, mock_backend, mock_popen_cls, mock_exit, tool_ctx):
         """Unknown event type in subscription causes exit(1)."""
         from repo_tools.agent.events import Subscription
 
@@ -671,9 +683,9 @@ class TestAgentRunEventLoop:
         mock_exit.assert_called_with(1)
 
     @patch("repo_tools.agent.tool.sys.exit", side_effect=SystemExit(130))
-    @patch("repo_tools.agent.tool.subprocess.run", return_value=MagicMock(returncode=0))
+    @patch("repo_tools.agent.tool.subprocess.Popen", return_value=_mock_popen())
     @patch("repo_tools.agent.tool._backend")
-    def test_event_loop_keyboard_interrupt_exits_130(self, mock_backend, mock_run, mock_exit, tool_ctx):
+    def test_event_loop_keyboard_interrupt_exits_130(self, mock_backend, mock_popen_cls, mock_exit, tool_ctx):
         """KeyboardInterrupt during poll_for_event causes exit(130)."""
         from repo_tools.agent.events import Subscription
 

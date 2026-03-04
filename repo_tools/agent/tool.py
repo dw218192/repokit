@@ -8,9 +8,13 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import re
+import signal
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -115,6 +119,48 @@ def _find_session_id(cwd: Path) -> str | None:
             if sessions:
                 return sessions[0].stem
     return None
+
+
+def _graceful_stop(proc: subprocess.Popen) -> None:
+    """Send a gentle shutdown signal to *proc*.
+
+    On Windows we send CTRL_BREAK_EVENT (requires CREATE_NEW_PROCESS_GROUP).
+    On Unix we send SIGINT.  Either way Claude Code treats it as a clean exit.
+    """
+    if proc.poll() is not None:
+        return
+    try:
+        if platform.system() == "Windows":
+            proc.send_signal(signal.CTRL_BREAK_EVENT)
+        else:
+            proc.send_signal(signal.SIGINT)
+    except OSError:
+        pass  # process already gone
+
+
+def _watch_for_subscription(
+    proc: subprocess.Popen,
+    cwd: Path,
+    result: dict,
+    poll_interval: float = 2.0,
+) -> None:
+    """Background thread: poll session transcript for a subscribe tool_use.
+
+    When found, store the subscription in *result* and gracefully stop *proc*.
+    If *proc* exits on its own first, the thread silently returns.
+    """
+    while proc.poll() is None:
+        time.sleep(poll_interval)
+        session_id = _find_session_id(cwd)
+        if session_id is None:
+            continue
+        sub = _read_subscription(cwd, session_id)
+        if sub is not None:
+            result["subscription"] = sub
+            result["session_id"] = session_id
+            logger.info(f"Subscription detected: {sub.event_type} — stopping session")
+            _graceful_stop(proc)
+            return
 
 
 def _ctx_from_click(ctx: click.Context) -> ToolContext:
@@ -395,18 +441,25 @@ def _agent_run(tool_ctx: ToolContext, args: dict[str, Any]) -> str | None:
         configured=args.get("allowlist"),
     )
 
-    # Interactive mode — the PostToolUse hook on subscribe() emits
-    # ``continue: false`` which causes Claude to exit cleanly.
-    # The parent then reads the session transcript to find what was
-    # subscribed, polls for the event, and resumes.
+    # Interactive mode — launch Claude with Popen.  A background thread
+    # watches the session transcript for an ``events__subscribe`` tool_use.
+    # When detected it gracefully stops the Claude process (SIGINT /
+    # CTRL_BREAK) so the parent can poll for the event and resume.
+    # The PostToolUse hook (continue: false) stops Claude from doing more
+    # work after subscribe, keeping the session idle until the watcher
+    # terminates it.
     if prompt is None:
-        from .events import load_events, poll_for_event, Subscription
+        from .events import load_events, poll_for_event
 
         events_config = load_events(tool_ctx.config)
 
         resume_prompt: str | None = None
         session_id: str | None = None
         logger.info("Starting interactive agent session")
+
+        popen_kwargs: dict[str, Any] = {}
+        if platform.system() == "Windows":
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
 
         while True:
             if resume_prompt is None:
@@ -415,7 +468,6 @@ def _agent_run(tool_ctx: ToolContext, args: dict[str, Any]) -> str | None:
                     rules_path=rules_path, project_root=tool_ctx.workspace_root,
                     tool_config=args,
                 )
-                proc = subprocess.run(cmd, cwd=str(agent_cwd))
             else:
                 assert session_id is not None
                 cmd = _backend.build_resume_command(
@@ -424,15 +476,28 @@ def _agent_run(tool_ctx: ToolContext, args: dict[str, Any]) -> str | None:
                     project_root=tool_ctx.workspace_root,
                     role=role, tool_config=args,
                 )
-                proc = subprocess.run(cmd, cwd=str(agent_cwd))
 
-            # Discover session ID from the newest session file.
-            if session_id is None:
-                session_id = _find_session_id(agent_cwd)
-                if session_id is not None:
-                    logger.info(f"Discovered session: {session_id}")
+            watcher_result: dict[str, Any] = {}
+            proc = subprocess.Popen(cmd, cwd=str(agent_cwd), **popen_kwargs)
+            watcher = threading.Thread(
+                target=_watch_for_subscription,
+                args=(proc, agent_cwd, watcher_result),
+                daemon=True,
+            )
+            watcher.start()
+            proc.wait()
 
-            sub = _read_subscription(agent_cwd, session_id)
+            # Use watcher result if it found a subscription, otherwise
+            # fall back to a direct check (covers the case where the
+            # user exited before the watcher fired).
+            sub = watcher_result.get("subscription")
+            if sub is None:
+                if session_id is None:
+                    session_id = _find_session_id(agent_cwd)
+                sub = _read_subscription(agent_cwd, session_id)
+            else:
+                session_id = watcher_result.get("session_id", session_id)
+
             if sub is None:
                 sys.exit(proc.returncode)
 
