@@ -40,8 +40,6 @@ def main() -> None:
         from .check_bash import main as sub_main
     elif subcommand == "approve_mcp":
         from .approve_mcp import main as sub_main
-    elif subcommand == "post_subscribe":
-        from .post_subscribe import main as sub_main
     else:
         print(f"Unknown subcommand: {subcommand!r}", file=sys.stderr)
         sys.exit(2)

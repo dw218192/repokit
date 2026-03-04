@@ -87,10 +87,3 @@ After a ticket is **closed** by the reviewer:
 
 If merging introduces conflicts or test failures, fix them before proceeding —
 do not leave broken state for a later ticket.
-
-## Event Subscriptions
-
-When you need to wait for an external event (CI completion, PR review, etc.),
-use the **events MCP** to subscribe. Your session suspends, the agent tool
-polls, and your session resumes with the payload when the event fires.
-Do NOT poll in terminal loops — use event subscriptions instead.

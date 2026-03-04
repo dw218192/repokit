@@ -63,7 +63,7 @@ reason = "environment variables may contain secrets — use specific tools to in
 [[deny]]
 name = "polling"
 commands = ["sleep", "watch"]
-reason = "use subscribe() from the events MCP to wait for external events instead of polling"
+reason = "polling and sleep loops are not permitted — find another approach"
 
 # ── Allow rules ──────────────────────────────────────────────────────
 
