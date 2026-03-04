@@ -1,11 +1,11 @@
 """Stdio MCP server for event subscription.
 
 Provides tools for listing available events and subscribing to them.
-Subscriptions are written as signal files that the event loop runner picks up.
+The PostToolUse hook on subscribe stops the session so the parent can poll.
 
 Invoked by Claude Code as::
 
-    python -m repo_tools.agent.events_mcp --project-root <path> --signal-file <path>
+    python -m repo_tools.agent.events_mcp --project-root <path>
 
 Protocol: newline-delimited JSON-RPC 2.0 over stdin/stdout (same as
 ``lint_mcp_stdio`` and ``ticket_mcp``).
@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .events import EventDef, Subscription, load_events, write_signal
+from .events import EventDef, load_events
 from ..core import load_config
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -48,8 +48,7 @@ _TOOLS = [
     {
         "name": "subscribe",
         "description": (
-            "Subscribe to an event. Validates event_type and required params, "
-            "then writes a signal file."
+            "Subscribe to an event. Validates event_type and required params."
         ),
         "inputSchema": {
             "type": "object",
@@ -71,7 +70,6 @@ _TOOLS = [
 # ── Module-level state (set by CLI args / main()) ────────────────────────────
 
 _events: dict[str, EventDef] = {}
-_signal_file: Path = Path("signal.json")
 
 
 # ── Tool implementations ─────────────────────────────────────────────────────
@@ -144,12 +142,10 @@ def _tool_subscribe(args: dict[str, Any]) -> dict[str, Any]:
                     "text": f"Missing required param {pname!r} for event {event_type!r}",
                 }
 
-    sub = Subscription(event_type=event_type, params=params)
-    write_signal(_signal_file, sub)
     return {
         "text": (
             f"Subscribed to {event_type}. "
-            "Session will suspend and resume when the event fires."
+            "The PostToolUse hook will stop the session so the parent can poll."
         ),
     }
 
@@ -222,17 +218,13 @@ def _dispatch(req: dict[str, Any]) -> str | None:
 
 def main() -> None:
     """Read newline-delimited JSON from stdin, write responses to stdout."""
-    global _events, _signal_file
+    global _events
 
     parser = argparse.ArgumentParser(description="Events MCP stdio server")
     parser.add_argument("--project-root", required=True, help="Project root directory")
-    parser.add_argument("--signal-file", required=True, help="Path to signal file")
     parsed = parser.parse_args()
 
-    project_root = Path(parsed.project_root)
-    _signal_file = Path(parsed.signal_file)
-
-    _events = load_events(load_config(str(project_root)))
+    _events = load_events(load_config(str(Path(parsed.project_root))))
 
     for raw_line in sys.stdin:
         line = raw_line.strip()

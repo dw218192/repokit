@@ -1,4 +1,4 @@
-"""Tests for repo_tools.agent.events — data model, config parsing, signal I/O, polling."""
+"""Tests for repo_tools.agent.events — data model, config parsing, polling."""
 
 from __future__ import annotations
 
@@ -17,8 +17,6 @@ from repo_tools.agent.events import (
     poll_delta,
     poll_exit,
     poll_for_event,
-    read_signal,
-    write_signal,
 )
 
 
@@ -155,45 +153,6 @@ class TestExpandCommand:
     def test_non_string_param_value(self):
         result = expand_command("poll --interval {n}", {"n": 42})
         assert result == "poll --interval 42"
-
-
-# ── write_signal / read_signal ────────────────────────────────────
-
-
-class TestSignalIO:
-    def test_roundtrip(self, tmp_path):
-        sig = tmp_path / "signal.json"
-        sub = Subscription(event_type="repo.push", params={"branch": "main"})
-        write_signal(sig, sub)
-
-        result = read_signal(sig)
-        assert result is not None
-        assert result.event_type == "repo.push"
-        assert result.params == {"branch": "main"}
-
-    def test_read_signal_deletes_file(self, tmp_path):
-        sig = tmp_path / "signal.json"
-        write_signal(sig, Subscription(event_type="ci.complete", params={}))
-        assert sig.exists()
-
-        read_signal(sig)
-        assert not sig.exists()
-
-    def test_read_signal_missing_file(self, tmp_path):
-        sig = tmp_path / "does_not_exist.json"
-        assert read_signal(sig) is None
-
-    def test_write_creates_parent_dirs(self, tmp_path):
-        sig = tmp_path / "nested" / "deep" / "signal.json"
-        write_signal(sig, Subscription(event_type="test", params={}))
-        assert sig.exists()
-
-    def test_roundtrip_empty_params(self, tmp_path):
-        sig = tmp_path / "signal.json"
-        write_signal(sig, Subscription(event_type="x.y", params={}))
-        result = read_signal(sig)
-        assert result is not None
-        assert result.params == {}
 
 
 # ── poll_exit ─────────────────────────────────────────────────────

@@ -1,12 +1,11 @@
-"""Event channel data model, config parser, and signal file I/O.
+"""Event channel data model, config parser, and polling engine.
 
 Provides the core event abstractions used by the MCP server
-(``events_mcp.py``) and the event loop runner.
+(``events_mcp.py``) and the event loop in ``tool.py``.
 """
 
 from __future__ import annotations
 
-import json
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -78,28 +77,6 @@ def expand_command(template: str, params: dict[str, Any]) -> str:
     for key, value in params.items():
         result = result.replace(f"{{{key}}}", str(value))
     return result
-
-
-def write_signal(path: Path, subscription: Subscription) -> None:
-    """Write a subscription as JSON to *path*."""
-    data = {"event_type": subscription.event_type, "params": subscription.params}
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-
-
-def read_signal(path: Path) -> Subscription | None:
-    """Read a signal file, delete it, and return a Subscription.
-
-    Returns None if the file doesn't exist.
-    """
-    if not path.exists():
-        return None
-    data = json.loads(path.read_text(encoding="utf-8"))
-    path.unlink()
-    return Subscription(
-        event_type=data["event_type"],
-        params=data.get("params", {}),
-    )
 
 
 # ── Polling engine ────────────────────────────────────────────────

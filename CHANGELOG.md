@@ -3,6 +3,8 @@
 ## 0.6.1
 
 - **Event subscriptions in orchestrator prompt**: Orchestrator sessions can now subscribe to external events (e.g. CI completion) via `list_events()` and `subscribe()` tools. Sessions suspend and auto-resume when the event fires.
+- **PostToolUse hook for session exit**: `subscribe()` stops the Claude session via a `PostToolUse` hook returning `continue: false`. The parent reads the session transcript to discover the subscription, polls for the event, and resumes with `--resume`.
+- **Session transcript parsing**: `_read_subscription()` scans the Claude session JSONL to find the last `events__subscribe` tool call — no signal files or persistent state.
 - **Example event config**: `test_driver/config.yaml` includes a `github.ci_complete` event definition demonstrating the poll/payload pattern.
 - **3-layer config merge**: `load_config()` now loads framework defaults (`config.defaults.yaml`) as a base layer, then project `config.yaml`, then `config.local.yaml`. Built-in event definitions are now part of the framework defaults rather than custom merge logic in `events.py`.
 - `config.local.yaml` is now loaded even when `config.yaml` is absent (previously silently skipped).

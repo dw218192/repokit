@@ -511,10 +511,14 @@ class TestBuildCommand:
         assert "--session-id" not in cmd
 
     def test_build_resume_command(self):
-        """build_resume_command returns correct --resume command."""
+        """build_resume_command returns correct --resume command with -p."""
         claude = Claude()
         cmd = claude.build_resume_command("sess-id-42", "Event: ci.done — payload")
-        assert cmd == ["claude", "--resume", "sess-id-42", "Event: ci.done — payload"]
+        assert cmd[0] == "claude"
+        assert "-p" in cmd
+        assert "Event: ci.done — payload" in cmd
+        assert "--resume" in cmd
+        assert "sess-id-42" in cmd
 
     def test_events_mcp_for_orchestrator(self, tmp_path):
         """Events MCP is present when role is None (orchestrator)."""
@@ -535,7 +539,6 @@ class TestBuildCommand:
         assert ev["type"] == "stdio"
         assert "events_mcp" in " ".join(ev["args"])
         assert "--project-root" in ev["args"]
-        assert "--signal-file" in ev["args"]
 
     def test_events_mcp_for_explicit_orchestrator(self, tmp_path):
         """Events MCP is present when role is 'orchestrator'."""
@@ -588,21 +591,32 @@ class TestBuildCommand:
 
         assert "events" not in mcp["mcpServers"]
 
-    def test_events_mcp_signal_file_path(self, tmp_path):
-        """Events MCP --signal-file points to _agent/.event_signal."""
+    def test_post_subscribe_hook_for_orchestrator(self, tmp_path):
+        """PostToolUse hook for subscribe is registered for orchestrator."""
         rules = tmp_path / "rules.toml"
         rules.write_text('default_reason = "no"\n', encoding="utf-8")
 
         claude = Claude()
-        claude.build_command(
-            rules_path=rules,
-            project_root=tmp_path,
-        )
-        mcp = json.loads(
-            (tmp_path / "_agent" / "plugin" / ".mcp.json").read_text()
+        claude.build_command(rules_path=rules, project_root=tmp_path)
+        hooks = json.loads(
+            (tmp_path / "_agent" / "plugin" / "hooks" / "hooks.json").read_text()
         )
 
-        ev_args = mcp["mcpServers"]["events"]["args"]
-        sf_idx = ev_args.index("--signal-file")
-        signal_path = ev_args[sf_idx + 1]
-        assert signal_path.endswith("_agent/.event_signal")
+        assert "PostToolUse" in hooks["hooks"]
+        post = hooks["hooks"]["PostToolUse"]
+        assert len(post) == 1
+        assert post[0]["matcher"] == "events__subscribe$"
+        assert "post_subscribe" in post[0]["hooks"][0]["command"]
+
+    def test_post_subscribe_hook_absent_for_worker(self, tmp_path):
+        """PostToolUse hook for subscribe is NOT registered for workers."""
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        claude = Claude()
+        claude.build_command(role="worker", rules_path=rules, project_root=tmp_path)
+        hooks = json.loads(
+            (tmp_path / "_agent" / "plugin-worker" / "hooks" / "hooks.json").read_text()
+        )
+
+        assert "PostToolUse" not in hooks["hooks"]

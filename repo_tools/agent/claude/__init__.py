@@ -106,6 +106,19 @@ def _write_plugin(
         ],
     }
 
+    # After subscribe() returns, stop the session so the parent event loop
+    # can poll for the event and resume later.
+    if role is None or role == "orchestrator":
+        hook_events["PostToolUse"] = [
+            {
+                "matcher": "events__subscribe$",
+                "hooks": [{
+                    "type": "command",
+                    "command": shlex.join([*base_cmd, "post_subscribe"]),
+                }],
+            }
+        ]
+
     hooks_dir = plugin_dir / "hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
     (hooks_dir / "hooks.json").write_text(
@@ -150,8 +163,6 @@ def _write_plugin(
     if role is None or role == "orchestrator":
         events_args = ["-m", "repo_tools.agent.events_mcp",
                        "--project-root", project_root.as_posix()]
-        signal_file = project_root / "_agent" / ".event_signal"
-        events_args.extend(["--signal-file", signal_file.as_posix()])
         mcp_config["mcpServers"]["events"] = {
             "type": "stdio",
             "command": posix_path(sys.executable),
@@ -223,6 +234,30 @@ class Claude:
 
         return cmd
 
-    def build_resume_command(self, session_id: str, message: str) -> list[str]:
-        """Build a ``claude --resume`` command to continue an existing session."""
-        return ["claude", "--resume", session_id, message]
+    def build_resume_command(
+        self,
+        session_id: str,
+        resume_prompt: str,
+        *,
+        rules_path: Path | None = None,
+        project_root: Path | None = None,
+        role: str | None = None,
+        tool_config: dict | None = None,
+    ) -> list[str]:
+        """Build a ``claude --resume`` command to continue an existing session.
+
+        Uses ``-p`` (headless) mode so the event payload is injected as a
+        user message.  The ``--plugin-dir`` flag is re-applied so hooks and
+        MCP servers are available in the resumed session.
+        """
+        config = tool_config or {}
+        cmd = ["claude", "-p", resume_prompt, "--resume", session_id]
+
+        if config.get("debug_hooks"):
+            cmd.extend(["-d", "hooks"])
+
+        if rules_path is not None and project_root is not None:
+            plugin_dir = project_root / "_agent" / (f"plugin-{role}" if role else "plugin")
+            cmd.extend(["--plugin-dir", str(plugin_dir)])
+
+        return cmd

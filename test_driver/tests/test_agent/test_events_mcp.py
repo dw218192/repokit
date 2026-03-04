@@ -72,7 +72,6 @@ def project(tmp_path):
 def _call(
     *requests: dict,
     project_root: str,
-    signal_file: str,
     no_defaults: bool = True,
 ) -> list[dict]:
     """Run main() with the given requests, return parsed JSON responses."""
@@ -81,11 +80,7 @@ def _call(
     ctx = (
         patch("sys.stdin", io.StringIO(lines)),
         patch("sys.stdout", captured),
-        patch("sys.argv", [
-            "events_mcp",
-            "--project-root", project_root,
-            "--signal-file", signal_file,
-        ]),
+        patch("sys.argv", ["events_mcp", "--project-root", project_root]),
     )
     if no_defaults:
         ctx = (*ctx, _NO_DEFAULTS)
@@ -102,7 +97,6 @@ def _call(
 
 def _tool_call(
     project_root: str,
-    signal_file: str,
     name: str,
     arguments: dict,
     no_defaults: bool = True,
@@ -114,7 +108,6 @@ def _tool_call(
             "params": {"name": name, "arguments": arguments},
         },
         project_root=project_root,
-        signal_file=signal_file,
         no_defaults=no_defaults,
     )
     assert len(responses) == 1
@@ -128,45 +121,41 @@ def _tool_call(
 
 
 class TestProtocol:
-    def test_initialize(self, project, tmp_path):
+    def test_initialize(self, project):
         responses = _call(
             {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
             project_root=str(project),
-            signal_file=str(tmp_path / "sig.json"),
         )
         assert len(responses) == 1
         result = responses[0]["result"]
         assert result["protocolVersion"] == "2024-11-05"
         assert result["serverInfo"]["name"] == "events"
 
-    def test_tools_list(self, project, tmp_path):
+    def test_tools_list(self, project):
         responses = _call(
             {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
             project_root=str(project),
-            signal_file=str(tmp_path / "sig.json"),
         )
         tools = responses[0]["result"]["tools"]
         names = {t["name"] for t in tools}
         assert names == {"list_events", "subscribe"}
 
-    def test_notification_no_response(self, project, tmp_path):
+    def test_notification_no_response(self, project):
         responses = _call(
             {"jsonrpc": "2.0", "method": "notifications/initialized"},
             project_root=str(project),
-            signal_file=str(tmp_path / "sig.json"),
         )
         assert responses == []
 
-    def test_unknown_method(self, project, tmp_path):
+    def test_unknown_method(self, project):
         responses = _call(
             {"jsonrpc": "2.0", "id": 1, "method": "bogus"},
             project_root=str(project),
-            signal_file=str(tmp_path / "sig.json"),
         )
         assert responses[0]["error"]["code"] == -32601
 
-    def test_unknown_tool(self, project, tmp_path):
-        result = _tool_call(str(project), str(tmp_path / "sig.json"), "nonexistent", {})
+    def test_unknown_tool(self, project):
+        result = _tool_call(str(project), "nonexistent", {})
         assert result["isError"]
         assert "Unknown tool" in result["text"]
 
@@ -175,38 +164,32 @@ class TestProtocol:
 
 
 class TestListEvents:
-    def test_returns_all_events(self, project, tmp_path):
-        result = _tool_call(str(project), str(tmp_path / "sig.json"), "list_events", {})
+    def test_returns_all_events(self, project):
+        result = _tool_call(str(project), "list_events", {})
         assert not result["isError"]
         text = result["text"]
         assert "repo.push" in text
         assert "repo.tag" in text
         assert "ci.complete" in text
 
-    def test_returns_docs(self, project, tmp_path):
-        result = _tool_call(str(project), str(tmp_path / "sig.json"), "list_events", {})
+    def test_returns_docs(self, project):
+        result = _tool_call(str(project), "list_events", {})
         assert "New commits pushed to a branch" in result["text"]
         assert "CI pipeline finished" in result["text"]
 
-    def test_returns_param_info(self, project, tmp_path):
-        result = _tool_call(str(project), str(tmp_path / "sig.json"), "list_events", {})
+    def test_returns_param_info(self, project):
+        result = _tool_call(str(project), "list_events", {})
         assert "branch (required)" in result["text"]
         assert "remote (optional, default: 'origin')" in result["text"]
 
-    def test_group_filter(self, project, tmp_path):
-        result = _tool_call(
-            str(project), str(tmp_path / "sig.json"),
-            "list_events", {"group": "ci"},
-        )
+    def test_group_filter(self, project):
+        result = _tool_call(str(project), "list_events", {"group": "ci"})
         assert not result["isError"]
         assert "ci.complete" in result["text"]
         assert "repo.push" not in result["text"]
 
-    def test_group_filter_no_match(self, project, tmp_path):
-        result = _tool_call(
-            str(project), str(tmp_path / "sig.json"),
-            "list_events", {"group": "nonexistent"},
-        )
+    def test_group_filter_no_match(self, project):
+        result = _tool_call(str(project), "list_events", {"group": "nonexistent"})
         assert "No events found" in result["text"]
 
     def test_empty_config_shows_builtins(self, tmp_path):
@@ -214,10 +197,7 @@ class TestListEvents:
         project = tmp_path / "empty_proj"
         project.mkdir()
         (project / "config.yaml").write_text("{}", encoding="utf-8")
-        result = _tool_call(
-            str(project), str(tmp_path / "sig.json"), "list_events", {},
-            no_defaults=False,
-        )
+        result = _tool_call(str(project), "list_events", {}, no_defaults=False)
         assert "github.ci_complete" in result["text"]
 
     def test_no_events_when_defaults_missing(self, tmp_path):
@@ -225,11 +205,11 @@ class TestListEvents:
         project = tmp_path / "empty_proj"
         project.mkdir()
         (project / "config.yaml").write_text("{}", encoding="utf-8")
-        result = _tool_call(str(project), str(tmp_path / "sig.json"), "list_events", {})
+        result = _tool_call(str(project), "list_events", {})
         assert "No events defined" in result["text"]
 
-    def test_grouped_output(self, project, tmp_path):
-        result = _tool_call(str(project), str(tmp_path / "sig.json"), "list_events", {})
+    def test_grouped_output(self, project):
+        result = _tool_call(str(project), "list_events", {})
         text = result["text"]
         assert "[repo]" in text
         assert "[ci]" in text
@@ -239,55 +219,41 @@ class TestListEvents:
 
 
 class TestSubscribe:
-    def test_valid_subscription(self, project, tmp_path):
-        sig = tmp_path / "sig.json"
+    def test_valid_subscription(self, project):
         result = _tool_call(
-            str(project), str(sig),
+            str(project),
             "subscribe", {"event_type": "repo.push", "params": {"branch": "main"}},
         )
         assert not result["isError"]
         assert "Subscribed to repo.push" in result["text"]
-        assert "suspend and resume" in result["text"]
 
-    def test_writes_signal_file(self, project, tmp_path):
-        sig = tmp_path / "sig.json"
-        _tool_call(
-            str(project), str(sig),
-            "subscribe", {"event_type": "repo.push", "params": {"branch": "main"}},
-        )
-        assert sig.exists()
-        data = json.loads(sig.read_text(encoding="utf-8"))
-        assert data["event_type"] == "repo.push"
-        assert data["params"]["branch"] == "main"
-
-    def test_unknown_event_type(self, project, tmp_path):
+    def test_unknown_event_type(self, project):
         result = _tool_call(
-            str(project), str(tmp_path / "sig.json"),
+            str(project),
             "subscribe", {"event_type": "no.such.event", "params": {}},
         )
         assert result["isError"]
         assert "Unknown event type" in result["text"]
 
-    def test_missing_required_param(self, project, tmp_path):
+    def test_missing_required_param(self, project):
         result = _tool_call(
-            str(project), str(tmp_path / "sig.json"),
+            str(project),
             "subscribe", {"event_type": "repo.push", "params": {}},
         )
         assert result["isError"]
         assert "Missing required param" in result["text"]
         assert "branch" in result["text"]
 
-    def test_optional_param_not_required(self, project, tmp_path):
-        sig = tmp_path / "sig.json"
+    def test_optional_param_not_required(self, project):
         result = _tool_call(
-            str(project), str(sig),
+            str(project),
             "subscribe", {"event_type": "repo.push", "params": {"branch": "main"}},
         )
         assert not result["isError"]
 
-    def test_empty_event_type(self, project, tmp_path):
+    def test_empty_event_type(self, project):
         result = _tool_call(
-            str(project), str(tmp_path / "sig.json"),
+            str(project),
             "subscribe", {"event_type": "", "params": {}},
         )
         assert result["isError"]

@@ -544,11 +544,11 @@ class TestAgentRunHeadless:
 
 
 class TestAgentRunInteractive:
-    @patch("repo_tools.agent.events.read_signal", return_value=None)
+    @patch("repo_tools.agent.tool._read_subscription", return_value=None)
     @patch("repo_tools.agent.tool.sys.exit", side_effect=SystemExit(0))
     @patch("repo_tools.agent.tool.subprocess.run", return_value=MagicMock(returncode=0))
     @patch("repo_tools.agent.tool._backend")
-    def test_interactive_launches_command(self, mock_backend, mock_run, mock_exit, _mock_signal, tool_ctx):
+    def test_interactive_launches_command(self, mock_backend, mock_run, mock_exit, _mock_sub, tool_ctx):
         """Interactive mode (no ticket) launches the agent command."""
         mock_backend.build_command.return_value = ["claude", "--allowedTools", "Read"]
 
@@ -560,11 +560,11 @@ class TestAgentRunInteractive:
         assert cmd[0] == "claude"
         assert "-p" not in cmd
 
-    @patch("repo_tools.agent.events.read_signal", return_value=None)
+    @patch("repo_tools.agent.tool._read_subscription", return_value=None)
     @patch("repo_tools.agent.tool.sys.exit", side_effect=SystemExit(0))
     @patch("repo_tools.agent.tool.subprocess.run", return_value=MagicMock(returncode=0))
     @patch("repo_tools.agent.tool._backend")
-    def test_interactive_no_prompt_flag(self, mock_backend, mock_run, mock_exit, _mock_signal, tool_ctx):
+    def test_interactive_no_prompt_flag(self, mock_backend, mock_run, mock_exit, _mock_sub, tool_ctx):
         """Interactive mode does not include -p or --output-format."""
         mock_backend.build_command.return_value = ["claude", "--allowedTools", "Read"]
 
@@ -574,52 +574,31 @@ class TestAgentRunInteractive:
         cmd = mock_run.call_args[0][0]
         assert "--output-format" not in cmd
 
-    @patch("repo_tools.agent.events.read_signal", return_value=None)
+    @patch("repo_tools.agent.tool._read_subscription", return_value=None)
     @patch("repo_tools.agent.tool.sys.exit", side_effect=SystemExit(0))
     @patch("repo_tools.agent.tool.subprocess.run", return_value=MagicMock(returncode=0))
     @patch("repo_tools.agent.tool._backend")
-    def test_interactive_passes_session_id(self, mock_backend, mock_run, mock_exit, _mock_signal, tool_ctx):
-        """Interactive mode passes a session_id to build_command."""
+    def test_interactive_no_session_id(self, mock_backend, mock_run, mock_exit, _mock_sub, tool_ctx):
+        """Interactive mode does not pre-assign a session ID."""
         mock_backend.build_command.return_value = ["claude"]
 
         with pytest.raises(SystemExit):
             _agent_run(tool_ctx, {})
 
         call_kwargs = mock_backend.build_command.call_args[1]
-        assert call_kwargs["session_id"] is not None
-        # Must be a valid UUID string
-        import uuid
-        uuid.UUID(call_kwargs["session_id"])
+        assert "session_id" not in call_kwargs
 
-    @patch("repo_tools.agent.events.read_signal", return_value=None)
+    @patch("repo_tools.agent.tool._read_subscription", return_value=None)
     @patch("repo_tools.agent.tool.sys.exit", side_effect=SystemExit(0))
     @patch("repo_tools.agent.tool.subprocess.run", return_value=MagicMock(returncode=0))
     @patch("repo_tools.agent.tool._backend")
-    def test_interactive_exits_when_no_signal(self, mock_backend, mock_run, mock_exit, _mock_signal, tool_ctx):
-        """Interactive exits normally when no signal file after Claude exits."""
+    def test_interactive_exits_when_no_subscription(self, mock_backend, mock_run, mock_exit, _mock_sub, tool_ctx):
+        """Interactive exits normally when no subscription found in session transcript."""
         mock_backend.build_command.return_value = ["claude"]
 
         with pytest.raises(SystemExit):
             _agent_run(tool_ctx, {})
 
-        mock_exit.assert_called_once_with(0)
-
-    @patch("repo_tools.agent.tool.sys.exit", side_effect=SystemExit(0))
-    @patch("repo_tools.agent.tool.subprocess.run", return_value=MagicMock(returncode=0))
-    @patch("repo_tools.agent.tool._backend")
-    def test_interactive_cleans_stale_signal(self, mock_backend, mock_run, mock_exit, tool_ctx):
-        """Stale signal file is removed before the loop starts."""
-        signal_file = tool_ctx.workspace_root / "_agent" / ".event_signal"
-        signal_file.parent.mkdir(parents=True, exist_ok=True)
-        signal_file.write_text('{"event_type":"ci.done","params":{}}', encoding="utf-8")
-
-        mock_backend.build_command.return_value = ["claude"]
-
-        with pytest.raises(SystemExit):
-            _agent_run(tool_ctx, {})
-
-        # Signal file should have been cleaned up before loop started
-        # (it was deleted in cleanup, then read_signal returned None)
         mock_exit.assert_called_once_with(0)
 
 
@@ -627,37 +606,26 @@ class TestAgentRunInteractive:
 
 
 class TestAgentRunEventLoop:
-    """Tests for the interactive event loop: signal → poll → resume cycle."""
+    """Tests for the interactive event loop: subscribe → poll → resume cycle."""
 
     @patch("repo_tools.agent.tool.sys.exit", side_effect=SystemExit(0))
     @patch("repo_tools.agent.tool.subprocess.run", return_value=MagicMock(returncode=0))
     @patch("repo_tools.agent.tool._backend")
-    def test_event_loop_resumes_on_signal(self, mock_backend, mock_run, mock_exit, tool_ctx):
-        """When a signal file exists after Claude exits, the loop polls and resumes."""
-        from repo_tools.agent.events import EventDef, Subscription
+    def test_event_loop_resumes_on_subscription(self, mock_backend, mock_run, mock_exit, tool_ctx):
+        """When a subscription is found in the session transcript, the loop polls and resumes."""
+        from repo_tools.agent.events import Subscription
 
         mock_backend.build_command.return_value = ["claude"]
-        mock_backend.build_resume_command.return_value = ["claude", "--resume", "sid", "msg"]
+        mock_backend.build_resume_command.return_value = ["claude", "-p", "msg", "--resume", "sid"]
 
-        # First call: Claude exits with signal file written
-        # Second call: Claude exits without signal file (loop ends)
         call_count = [0]
-        signal_file = tool_ctx.workspace_root / "_agent" / ".event_signal"
 
-        def fake_subprocess_run(cmd, **kwargs):
+        def fake_read_subscription(cwd, session_id):
             call_count[0] += 1
             if call_count[0] == 1:
-                # Simulate signal file written by MCP during Claude session
-                signal_file.parent.mkdir(parents=True, exist_ok=True)
-                signal_file.write_text(
-                    json.dumps({"event_type": "ci.done", "params": {"branch": "main"}}),
-                    encoding="utf-8",
-                )
-            return MagicMock(returncode=0)
+                return Subscription(event_type="ci.done", params={"branch": "main"})
+            return None
 
-        mock_run.side_effect = fake_subprocess_run
-
-        # Provide events config so the event type is known
         tool_ctx_with_config = ToolContext(
             workspace_root=tool_ctx.workspace_root,
             tokens=tool_ctx.tokens,
@@ -673,37 +641,32 @@ class TestAgentRunEventLoop:
             passthrough_args=[],
         )
 
-        with patch("repo_tools.agent.events.poll_for_event", return_value="payload-data"):
+        with patch("repo_tools.agent.events.poll_for_event", return_value="payload-data"), \
+             patch("repo_tools.agent.tool._find_session_id", return_value="fake-session-id"), \
+             patch("repo_tools.agent.tool._read_subscription", side_effect=fake_read_subscription):
             with pytest.raises(SystemExit):
                 _agent_run(tool_ctx_with_config, {})
 
-        # Should have been called twice: initial + resume
         assert mock_run.call_count == 2
         mock_backend.build_resume_command.assert_called_once()
-        resume_args = mock_backend.build_resume_command.call_args[0]
-        assert "ci.done" in resume_args[1]
-        assert "payload-data" in resume_args[1]
+        resume_prompt = mock_backend.build_resume_command.call_args[0][1]
+        assert "ci.done" in resume_prompt
+        assert "payload-data" in resume_prompt
 
     @patch("repo_tools.agent.tool.sys.exit", side_effect=SystemExit(1))
     @patch("repo_tools.agent.tool.subprocess.run", return_value=MagicMock(returncode=0))
     @patch("repo_tools.agent.tool._backend")
     def test_event_loop_unknown_event_exits(self, mock_backend, mock_run, mock_exit, tool_ctx):
-        """Unknown event type in signal file causes exit(1)."""
-        signal_file = tool_ctx.workspace_root / "_agent" / ".event_signal"
+        """Unknown event type in subscription causes exit(1)."""
+        from repo_tools.agent.events import Subscription
 
-        def fake_run(cmd, **kwargs):
-            signal_file.parent.mkdir(parents=True, exist_ok=True)
-            signal_file.write_text(
-                json.dumps({"event_type": "unknown.event", "params": {}}),
-                encoding="utf-8",
-            )
-            return MagicMock(returncode=0)
-
-        mock_run.side_effect = fake_run
         mock_backend.build_command.return_value = ["claude"]
 
-        with pytest.raises(SystemExit):
-            _agent_run(tool_ctx, {})
+        with patch("repo_tools.agent.tool._find_session_id", return_value="fake-sid"), \
+             patch("repo_tools.agent.tool._read_subscription",
+                   return_value=Subscription(event_type="unknown.event", params={})):
+            with pytest.raises(SystemExit):
+                _agent_run(tool_ctx, {})
 
         mock_exit.assert_called_with(1)
 
@@ -712,17 +675,8 @@ class TestAgentRunEventLoop:
     @patch("repo_tools.agent.tool._backend")
     def test_event_loop_keyboard_interrupt_exits_130(self, mock_backend, mock_run, mock_exit, tool_ctx):
         """KeyboardInterrupt during poll_for_event causes exit(130)."""
-        signal_file = tool_ctx.workspace_root / "_agent" / ".event_signal"
+        from repo_tools.agent.events import Subscription
 
-        def fake_run(cmd, **kwargs):
-            signal_file.parent.mkdir(parents=True, exist_ok=True)
-            signal_file.write_text(
-                json.dumps({"event_type": "ci.done", "params": {}}),
-                encoding="utf-8",
-            )
-            return MagicMock(returncode=0)
-
-        mock_run.side_effect = fake_run
         mock_backend.build_command.return_value = ["claude"]
 
         tool_ctx_with_config = ToolContext(
@@ -738,7 +692,10 @@ class TestAgentRunEventLoop:
             passthrough_args=[],
         )
 
-        with patch("repo_tools.agent.events.poll_for_event", side_effect=KeyboardInterrupt):
+        with patch("repo_tools.agent.events.poll_for_event", side_effect=KeyboardInterrupt), \
+             patch("repo_tools.agent.tool._find_session_id", return_value="fake-sid"), \
+             patch("repo_tools.agent.tool._read_subscription",
+                   return_value=Subscription(event_type="ci.done", params={})):
             with pytest.raises(SystemExit):
                 _agent_run(tool_ctx_with_config, {})
 
