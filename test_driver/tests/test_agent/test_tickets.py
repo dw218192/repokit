@@ -1,4 +1,4 @@
-"""Tests for the ticket MCP stdio server."""
+"""Tests for ticket CRUD logic and MCP dispatch integration."""
 
 from __future__ import annotations
 
@@ -7,11 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from repo_tools.agent.ticket_mcp import (
+from repo_tools.agent.mcp._jsonrpc import make_dispatch
+from repo_tools.agent.tickets import (
     _ROLE_ALLOWED_TOOLS,
     _ROLE_ALLOWED_TRANSITIONS,
     _ROLE_UPDATE_FIELDS,
-    _dispatch,
+    TOOL_HANDLERS,
+    TOOL_SCHEMAS,
     _tool_create_ticket,
     _tool_delete_ticket,
     _tool_get_ticket,
@@ -28,15 +30,30 @@ def project(tmp_path):
     return tmp_path
 
 
+def _build_dispatch(root: Path, role: str | None = None):
+    """Build a ticket dispatch function for testing (mirrors mcp/tickets.py)."""
+    handlers = {
+        name: (lambda h: lambda args: h(root, args, role=role))(handler)
+        for name, handler in TOOL_HANDLERS.items()
+    }
+    allowed = _ROLE_ALLOWED_TOOLS.get(role) if role else None
+    return make_dispatch(
+        server_name="tickets", version="0.1",
+        tools=TOOL_SCHEMAS, handlers=handlers,
+        allowed_tools=allowed,
+    )
+
+
 def _call_tool(root: Path, name: str, arguments: dict, *, role: str | None = None) -> dict:
     """Simulate a tools/call JSON-RPC request and return the parsed result."""
+    dispatch = _build_dispatch(root, role)
     req = {
         "jsonrpc": "2.0",
         "id": 1,
         "method": "tools/call",
         "params": {"name": name, "arguments": arguments},
     }
-    raw = _dispatch(root, req, role=role)
+    raw = dispatch(req)
     assert raw is not None
     resp = json.loads(raw)
     result = resp["result"]
@@ -465,14 +482,16 @@ class TestUpdateTicket:
 
 class TestDispatch:
     def test_initialize(self, project):
+        dispatch = _build_dispatch(project)
         req = {"jsonrpc": "2.0", "id": 1, "method": "initialize"}
-        raw = _dispatch(project, req)
+        raw = dispatch(req)
         resp = json.loads(raw)
         assert resp["result"]["serverInfo"]["name"] == "tickets"
 
     def test_tools_list(self, project):
+        dispatch = _build_dispatch(project)
         req = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
-        raw = _dispatch(project, req)
+        raw = dispatch(req)
         resp = json.loads(raw)
         tool_names = {t["name"] for t in resp["result"]["tools"]}
         assert "list_tickets" in tool_names
@@ -485,12 +504,14 @@ class TestDispatch:
         assert "init_workstream" not in tool_names
 
     def test_notification_no_response(self, project):
+        dispatch = _build_dispatch(project)
         req = {"jsonrpc": "2.0", "method": "notifications/initialized"}
-        assert _dispatch(project, req) is None
+        assert dispatch(req) is None
 
     def test_unknown_method(self, project):
+        dispatch = _build_dispatch(project)
         req = {"jsonrpc": "2.0", "id": 1, "method": "bogus"}
-        raw = _dispatch(project, req)
+        raw = dispatch(req)
         resp = json.loads(raw)
         assert "error" in resp
         assert resp["error"]["code"] == -32601

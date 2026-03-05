@@ -17,11 +17,20 @@ import click
 
 from ..cli import _build_tool_context
 from ..core import RepoTool, ToolContext, logger
-from .claude import Claude
-from .ticket_mcp import _ROLE_ALLOWED_TRANSITIONS, _tool_mark_criteria, _tool_reset_ticket, _tool_update_ticket
+from .claude import ClaudeBackend
+from .tickets import _ROLE_ALLOWED_TRANSITIONS, _tool_mark_criteria, _tool_reset_ticket, _tool_update_ticket
 from .worktree import ensure_worktree, remove_worktree
 
-_backend = Claude()
+_backend: ClaudeBackend | None = None
+
+
+def _ensure_backend(args: dict[str, Any]) -> ClaudeBackend:
+    """Lazy-init the backend, respecting ``args["backend"]``."""
+    global _backend
+    if _backend is None:
+        from .claude import get_backend
+        _backend = get_backend(args.get("backend"))
+    return _backend
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -306,10 +315,12 @@ def _agent_run(tool_ctx: ToolContext, args: dict[str, Any]) -> str | None:
         configured=args.get("allowlist"),
     )
 
+    backend = _ensure_backend(args)
+
     if prompt is None:
         # Interactive mode
         logger.info("Starting interactive agent session")
-        rc = _backend.run_interactive(
+        rc = backend.run_interactive(
             role_prompt=role_prompt,
             rules_path=rules_path,
             project_root=tool_ctx.workspace_root,
@@ -320,7 +331,7 @@ def _agent_run(tool_ctx: ToolContext, args: dict[str, Any]) -> str | None:
 
     # Headless mode
     logger.info(f"Running headless agent: role={role}, ticket={ticket}")
-    stdout, returncode = _backend.run_headless(
+    stdout, returncode = backend.run_headless(
         prompt=prompt,
         role=role,
         role_prompt=role_prompt,
@@ -337,7 +348,7 @@ def _agent_run(tool_ctx: ToolContext, args: dict[str, Any]) -> str | None:
 
 
 def _reset_ticket(workspace_root: Path, ticket_id: str) -> None:
-    """Reset a ticket to 'todo' — delegates to ticket_mcp._tool_reset_ticket."""
+    """Reset a ticket to 'todo' — delegates to tickets._tool_reset_ticket."""
     result = _tool_reset_ticket(workspace_root, {"ticket_id": ticket_id})
     if result.get("isError"):
         raise click.ClickException(result["text"])

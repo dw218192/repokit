@@ -65,6 +65,37 @@ def coderabbit_cmd(*args: str) -> list[str]:
 # ── Core review logic ─────────────────────────────────────────────────────────
 
 
+TOOL_SCHEMA: dict = {
+    "name": "coderabbit_review",
+    "description": (
+        "Run the CodeRabbit CLI to review code changes in a git worktree. "
+        "Returns plain-text reviewer feedback. "
+        "If the CLI is not installed or not authenticated, returns an error message "
+        "instructing you to fall back to manual review."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "worktree_path": {
+                "type": "string",
+                "description": (
+                    "Path to the git worktree whose changes should be reviewed. "
+                    "Defaults to '.' (the current working directory)."
+                ),
+                "default": ".",
+            },
+            "type": {
+                "type": "string",
+                "enum": ["committed", "uncommitted", "all"],
+                "default": "committed",
+                "description": "Which changes to review: 'committed' (default), 'uncommitted', or 'all'.",
+            },
+        },
+        "required": [],
+    },
+}
+
+
 def call_review(args: dict[str, Any], *, logger: Any = None) -> dict[str, Any]:
     """Run ``coderabbit review --plain`` and return a result dict.
 

@@ -1,6 +1,9 @@
 # Framework defaults — merged under project config.yaml and config.local.yaml.
 # Project config.yaml overrides these; use key+ to extend lists instead of replacing.
 
+agent:
+  backend: cli
+
 clean:
   paths:
     - "{workspace_root}/_agent"

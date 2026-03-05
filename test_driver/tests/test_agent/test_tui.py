@@ -1,8 +1,11 @@
-"""Tests for the Textual TUI — QueueBar visibility, PromptInput, ToolGroup."""
+"""Tests for the Textual TUI — QueueBar, PromptInput, ToolCallGroup, ToolLog, side pane."""
 
 from __future__ import annotations
 
 import asyncio
+import json
+import tempfile
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -13,8 +16,13 @@ from repo_tools.agent.tui import (
     PromptInput,
     QueueBar,
     StatusBar,
-    ToolGroup,
+    TicketPanel,
+    ToolCallGroup,
+    ToolLog,
+    TUILogHandler,
     UserMessage,
+    _summarize_tool,
+    _ticket_to_markdown,
 )
 
 
@@ -158,60 +166,97 @@ class TestQueueBar:
         _run(_test)
 
 
-# ── ToolGroup tests ──────────────────────────────────────────────────────────
+# ── ToolCallGroup tests ──────────────────────────────────────────────────────
 
 
-class TestToolGroup:
-    def test_title_updates_with_tool_count(self):
-        """Title reflects number of tools and pending count."""
+class TestToolCallGroup:
+    def test_add_tool_shows_running_icon(self):
+        """add_tool renders with \u25b8 prefix."""
 
         async def _test():
             from textual.app import App, ComposeResult
 
             class _App(App):
                 def compose(self) -> ComposeResult:
-                    yield ToolGroup(id="tg")
+                    yield ToolCallGroup(id="tg")
 
             app = _App()
             async with app.run_test() as pilot:
-                tg = app.query_one("#tg", ToolGroup)
+                tg = app.query_one("#tg", ToolCallGroup)
                 tg.add_tool("t1", "Read")
                 await pilot.pause()
-                assert "1" in str(tg.title)
-                assert "running" in str(tg.title).lower()
-
-                tg.add_tool("t2", "Edit")
-                await pilot.pause()
-                assert "2" in str(tg.title)
-
-                tg.set_result("t1", "ok")
-                await pilot.pause()
-                assert "1 running" in str(tg.title).lower()
-
-                tg.set_result("t2", "ok")
-                await pilot.pause()
-                assert "running" not in str(tg.title).lower()
-                assert "2 tools" in str(tg.title)
+                rendered = str(tg.render())
+                assert "\u25b8" in rendered
+                assert "Read" in rendered
 
         _run(_test)
 
-    def test_error_result_tracked(self):
-        """Error results are stored with is_error flag."""
+    def test_set_result_success(self):
+        """\u2713 icon on success."""
 
         async def _test():
             from textual.app import App, ComposeResult
 
             class _App(App):
                 def compose(self) -> ComposeResult:
-                    yield ToolGroup(id="tg")
+                    yield ToolCallGroup(id="tg")
 
             app = _App()
             async with app.run_test() as pilot:
-                tg = app.query_one("#tg", ToolGroup)
-                tg.add_tool("t1", "Bash")
-                tg.set_result("t1", "command failed", is_error=True)
+                tg = app.query_one("#tg", ToolCallGroup)
+                tg.add_tool("t1", "Read")
+                tg.set_result("t1")
                 await pilot.pause()
-                assert tg._tools["t1"][2] is True  # is_error
+                rendered = str(tg.render())
+                assert "\u2713" in rendered
+                assert "Read" in rendered
+
+        _run(_test)
+
+    def test_set_result_error(self):
+        """\u2717 icon on error."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield ToolCallGroup(id="tg")
+
+            app = _App()
+            async with app.run_test() as pilot:
+                tg = app.query_one("#tg", ToolCallGroup)
+                tg.add_tool("t1", "Bash")
+                tg.set_result("t1", is_error=True)
+                await pilot.pause()
+                rendered = str(tg.render())
+                assert "\u2717" in rendered
+                assert "Bash" in rendered
+
+        _run(_test)
+
+    def test_groups_consecutive_tools(self):
+        """Multiple tools render on one line."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield ToolCallGroup(id="tg")
+
+            app = _App()
+            async with app.run_test() as pilot:
+                tg = app.query_one("#tg", ToolCallGroup)
+                tg.add_tool("t1", "Read")
+                tg.add_tool("t2", "Edit")
+                tg.set_result("t1")
+                await pilot.pause()
+                rendered = str(tg.render())
+                assert "Read" in rendered
+                assert "Edit" in rendered
+                assert "\u2713" in rendered
+                assert "\u25b8" in rendered
 
         _run(_test)
 
@@ -497,5 +542,616 @@ class TestAgentAppQueue:
                 app.finish_active()
                 await pilot.pause()
                 assert app.busy is False
+
+        _run(_test)
+
+
+# ── TicketPanel tests ────────────────────────────────────────────────────────
+
+
+class TestTicketPanel:
+    def test_empty_dir(self):
+        """TicketPanel shows placeholder when no tickets dir exists."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+            from textual.widgets import Collapsible, Static
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+
+                class _App(App):
+                    def compose(self) -> ComposeResult:
+                        yield TicketPanel(workspace=tmpdir, id="tp")
+
+                app = _App()
+                async with app.run_test() as pilot:
+                    tp = app.query_one("#tp", TicketPanel)
+                    await pilot.pause()
+                    # No collapsibles — just a placeholder Static
+                    assert len(tp.query(Collapsible)) == 0
+                    assert len(list(tp.children)) == 1
+
+        _run(_test)
+
+    def test_loads_ticket_json(self):
+        """TicketPanel creates a Collapsible for each ticket."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+            from textual.widgets import Collapsible
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                ticket_dir = Path(tmpdir) / "_agent" / "tickets"
+                ticket_dir.mkdir(parents=True)
+                ticket = {
+                    "id": "fix-bug",
+                    "title": "Fix the bug",
+                    "status": "todo",
+                }
+                (ticket_dir / "fix-bug.json").write_text(
+                    json.dumps(ticket), encoding="utf-8",
+                )
+
+                class _App(App):
+                    def compose(self) -> ComposeResult:
+                        yield TicketPanel(workspace=tmpdir, id="tp")
+
+                app = _App()
+                async with app.run_test() as pilot:
+                    tp = app.query_one("#tp", TicketPanel)
+                    await pilot.pause()
+                    entries = tp.query(Collapsible)
+                    assert len(entries) == 1
+                    assert "fix-bug" in str(entries.first().title)
+
+        _run(_test)
+
+    def test_status_color_coding(self):
+        """Ticket Collapsibles get CSS classes for status coloring."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+            from textual.widgets import Collapsible
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                ticket_dir = Path(tmpdir) / "_agent" / "tickets"
+                ticket_dir.mkdir(parents=True)
+                cases = [
+                    ("a-todo", "todo", "ticket-todo"),
+                    ("b-wip", "in_progress", "ticket-in-progress"),
+                    ("c-verify", "verify", "ticket-verify"),
+                    ("d-done", "closed", "ticket-closed"),
+                ]
+                for tid, status, _ in cases:
+                    (ticket_dir / f"{tid}.json").write_text(
+                        json.dumps({"id": tid, "status": status}),
+                        encoding="utf-8",
+                    )
+
+                class _App(App):
+                    def compose(self) -> ComposeResult:
+                        yield TicketPanel(workspace=tmpdir, id="tp")
+
+                app = _App()
+                async with app.run_test() as pilot:
+                    tp = app.query_one("#tp", TicketPanel)
+                    await pilot.pause()
+                    entries = list(tp.query(Collapsible))
+                    assert len(entries) == 4
+                    for _, _, css_class in cases:
+                        assert any(
+                            e.has_class(css_class) for e in entries
+                        )
+
+        _run(_test)
+
+    def test_refresh_picks_up_new_tickets(self):
+        """refresh_tickets() picks up newly created ticket files."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+            from textual.widgets import Collapsible
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                ticket_dir = Path(tmpdir) / "_agent" / "tickets"
+                ticket_dir.mkdir(parents=True)
+
+                class _App(App):
+                    def compose(self) -> ComposeResult:
+                        yield TicketPanel(workspace=tmpdir, id="tp")
+
+                app = _App()
+                async with app.run_test() as pilot:
+                    tp = app.query_one("#tp", TicketPanel)
+                    await pilot.pause()
+                    assert len(tp.query(Collapsible)) == 0
+
+                    (ticket_dir / "new.json").write_text(
+                        json.dumps({"id": "new", "status": "todo"}),
+                        encoding="utf-8",
+                    )
+                    tp.refresh_tickets()
+                    await pilot.pause()
+                    assert len(tp.query(Collapsible)) == 1
+
+        _run(_test)
+
+    def test_body_contains_ticket_fields(self):
+        """Ticket body renders as Markdown via Static wrapping a Markdown renderable."""
+
+        async def _test():
+            from rich.markdown import Markdown as RichMarkdown
+            from textual.app import App, ComposeResult
+            from textual.widgets import Collapsible, Static
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                ticket_dir = Path(tmpdir) / "_agent" / "tickets"
+                ticket_dir.mkdir(parents=True)
+                ticket = {
+                    "id": "test",
+                    "title": "A title",
+                    "description": "A " + "very " * 20 + "long description",
+                    "status": "todo",
+                }
+                (ticket_dir / "test.json").write_text(
+                    json.dumps(ticket), encoding="utf-8",
+                )
+
+                class _App(App):
+                    def compose(self) -> ComposeResult:
+                        yield TicketPanel(workspace=tmpdir, id="tp")
+
+                app = _App()
+                async with app.run_test() as pilot:
+                    tp = app.query_one("#tp", TicketPanel)
+                    await pilot.pause()
+                    entries = tp.query(Collapsible)
+                    assert len(entries) == 1
+                    assert "test" in str(entries.first().title)
+                    # Body Static wraps a Markdown renderable
+                    from textual.widgets._collapsible import CollapsibleTitle
+                    body_statics = [
+                        s for s in entries.first().query(Static)
+                        if not isinstance(s, CollapsibleTitle)
+                    ]
+                    assert len(body_statics) == 1
+                    rendered = str(body_statics[0].render())
+                    assert "Markdown" in rendered
+
+        _run(_test)
+
+
+# ── ToolLog tests ────────────────────────────────────────────────────────────
+
+
+class TestToolLog:
+    def test_add_tool_creates_collapsed_entry(self):
+        """add_tool mounts a collapsed collapsible with pending icon and class."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield ToolLog(id="tl")
+
+            app = _App()
+            async with app.run_test() as pilot:
+                tl = app.query_one("#tl", ToolLog)
+                tl.add_tool("t1", "Bash", {"command": "ls -la"})
+                await pilot.pause()
+                assert "t1" in tl._entries
+                entry, summary = tl._entries["t1"]
+                assert summary == "Bash(ls -la)"
+                assert entry.collapsed
+                assert "\u23f3" in str(entry.title)
+                assert entry.has_class("tool-pending")
+
+        _run(_test)
+
+    def test_set_result_updates_title_icon(self):
+        """set_result changes icon to \u2713 and class to tool-success."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield ToolLog(id="tl")
+
+            app = _App()
+            async with app.run_test() as pilot:
+                tl = app.query_one("#tl", ToolLog)
+                tl.add_tool("t1", "Read", {"file_path": "/foo"})
+                await pilot.pause()
+                entry, _ = tl._entries["t1"]
+                assert entry.collapsed
+                assert entry.has_class("tool-pending")
+
+                tl.set_result("t1", "file contents here")
+                await pilot.pause()
+                title = str(entry.title)
+                assert "\u2713" in title
+                assert "Read(/foo)" in title
+                assert not entry.has_class("tool-pending")
+                assert entry.has_class("tool-success")
+
+        _run(_test)
+
+    def test_error_result_shows_cross(self):
+        """Error results show \u2717 icon and tool-error class."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield ToolLog(id="tl")
+
+            app = _App()
+            async with app.run_test() as pilot:
+                tl = app.query_one("#tl", ToolLog)
+                tl.add_tool("t1", "Bash", {"command": "fail"})
+                tl.set_result("t1", "command failed", is_error=True)
+                await pilot.pause()
+                entry, _ = tl._entries["t1"]
+                title = str(entry.title)
+                assert "\u2717" in title
+                assert "Bash(fail)" in title
+                assert not entry.has_class("tool-pending")
+                assert entry.has_class("tool-error")
+
+        _run(_test)
+
+    def test_multiple_tools_tracked(self):
+        """Multiple tool calls are tracked independently."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield ToolLog(id="tl")
+
+            app = _App()
+            async with app.run_test() as pilot:
+                tl = app.query_one("#tl", ToolLog)
+                tl.add_tool("t1", "Read", None)
+                tl.add_tool("t2", "Edit", None)
+                await pilot.pause()
+                assert len(tl._entries) == 2
+
+                tl.set_result("t1", "ok")
+                await pilot.pause()
+                # Both stay collapsed (collapsed by default)
+                assert tl._entries["t1"][0].collapsed
+                assert tl._entries["t2"][0].collapsed
+
+        _run(_test)
+
+
+# ── _summarize_tool tests ──────────────────────────────────────────────────
+
+
+class TestSummarizeTool:
+    def test_bash_command(self):
+        assert _summarize_tool("Bash", {"command": "ls -la"}) == "Bash(ls -la)"
+
+    def test_read_file_path(self):
+        assert _summarize_tool("Read", {"file_path": "/foo/bar.py"}) == "Read(/foo/bar.py)"
+
+    def test_edit_file_path(self):
+        assert _summarize_tool("Edit", {"file_path": "/a.py"}) == "Edit(/a.py)"
+
+    def test_glob_pattern(self):
+        assert _summarize_tool("Glob", {"pattern": "**/*.py"}) == "Glob(**/*.py)"
+
+    def test_grep_pattern(self):
+        assert _summarize_tool("Grep", {"pattern": "TODO"}) == "Grep(TODO)"
+
+    def test_no_args(self):
+        assert _summarize_tool("Bash", None) == "Bash()"
+        assert _summarize_tool("Bash", {}) == "Bash()"
+
+    def test_truncation(self):
+        long_cmd = "x" * 100
+        result = _summarize_tool("Bash", {"command": long_cmd})
+        assert len(result) <= 70  # "Bash(" + 60 + ")"
+        assert result.endswith("...)")
+
+    def test_unknown_tool_first_string(self):
+        result = _summarize_tool("CustomTool", {"url": "http://example.com"})
+        assert result == "CustomTool(http://example.com)"
+
+    def test_unknown_tool_no_string(self):
+        result = _summarize_tool("CustomTool", {"count": 42})
+        assert result == "CustomTool(...)"
+
+
+# ── StatusBar busy indicator tests ───────────────────────────────────────────
+
+
+class TestStatusBarBusy:
+    def test_starts_ready_green(self):
+        """StatusBar starts with 'Ready' and green class."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield StatusBar(id="sb")
+
+            app = _App()
+            async with app.run_test() as pilot:
+                sb = app.query_one("#sb", StatusBar)
+                await pilot.pause()
+                assert "Ready" in str(sb.render())
+                assert sb.has_class("status-ready")
+
+        _run(_test)
+
+    def test_set_status_working(self):
+        """set_status('working') switches to working class."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield StatusBar(id="sb")
+
+            app = _App()
+            async with app.run_test() as pilot:
+                sb = app.query_one("#sb", StatusBar)
+                sb.set_status("Working...", "working")
+                await pilot.pause()
+                assert "Working" in str(sb.render())
+                assert sb.has_class("status-working")
+                assert not sb.has_class("status-ready")
+
+        _run(_test)
+
+    def test_set_status_error(self):
+        """set_status('error') switches to error class."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield StatusBar(id="sb")
+
+            app = _App()
+            async with app.run_test() as pilot:
+                sb = app.query_one("#sb", StatusBar)
+                sb.set_status("Error", "error")
+                await pilot.pause()
+                assert sb.has_class("status-error")
+
+        _run(_test)
+
+    def test_set_status_back_to_ready(self):
+        """Transitioning back to ready removes working class."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield StatusBar(id="sb")
+
+            app = _App()
+            async with app.run_test() as pilot:
+                sb = app.query_one("#sb", StatusBar)
+                sb.set_status("Working...", "working")
+                sb.set_status("Done", "ready")
+                await pilot.pause()
+                assert sb.has_class("status-ready")
+                assert not sb.has_class("status-working")
+
+        _run(_test)
+
+
+# ── F2 side pane toggle tests ───────────────────────────────────────────────
+
+
+class TestSidePaneToggle:
+    def test_f2_hides_side_pane(self):
+        """F2 toggles side pane visibility in a layout with TabbedContent."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+            from textual.binding import Binding as _Binding
+            from textual.containers import Horizontal, VerticalScroll
+            from textual.widgets import TabbedContent, TabPane, Static
+
+            class _App(App):
+                CSS = """
+                #main-area { height: 1fr; }
+                #chat-log { width: 7fr; }
+                #side-pane { width: 3fr; }
+                """
+                BINDINGS = [
+                    _Binding("f2", "toggle_side", show=False),
+                ]
+                _visible = True
+
+                def compose(self) -> ComposeResult:
+                    with Horizontal(id="main-area"):
+                        yield VerticalScroll(id="chat-log")
+                        with TabbedContent(id="side-pane"):
+                            yield TabPane("Info", Static("hi"), id="t1")
+
+                def action_toggle_side(self):
+                    pane = self.query_one("#side-pane")
+                    self._visible = not self._visible
+                    pane.styles.display = (
+                        "block" if self._visible else "none"
+                    )
+
+            app = _App()
+            async with app.run_test(size=(80, 24)) as pilot:
+                sp = app.query_one("#side-pane")
+                assert sp.styles.display != "none"
+
+                await pilot.press("f2")
+                await pilot.pause()
+                assert sp.styles.display == "none"
+
+                await pilot.press("f2")
+                await pilot.pause()
+                assert sp.styles.display == "block"
+
+        _run(_test)
+
+
+# ── Slash command tests ─────────────────────────────────────────────────────
+
+
+class TestSlashCommands:
+    def test_exit_command(self):
+        """/exit and /quit are intercepted; unknown /commands are rejected."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+            from textual.containers import VerticalScroll
+            from textual.widgets import Static
+
+            sent = []
+
+            class _App(App):
+                CSS = "#chat-log { height: 1fr; }"
+
+                def compose(self) -> ComposeResult:
+                    yield VerticalScroll(id="chat-log")
+                    yield StatusBar(id="status-bar")
+                    yield QueueBar(id="queue-bar")
+                    yield PromptInput(id="prompt-input")
+
+                async def on_prompt_input_submitted(self, event):
+                    cmd = event.text.strip()
+                    if cmd in ("/exit", "/quit"):
+                        return
+                    if cmd.startswith("/"):
+                        chat_log = self.query_one("#chat-log", VerticalScroll)
+                        await chat_log.mount(Static(f"Unknown command: {cmd}"))
+                        return
+                    sent.append(event.text)
+
+            app = _App()
+            async with app.run_test(size=(80, 24)) as pilot:
+                pi = app.query_one("#prompt-input", PromptInput)
+                pi.focus()
+
+                # /exit is intercepted
+                for ch in "/exit":
+                    await pilot.press(ch)
+                await pilot.press("enter")
+                await pilot.pause()
+                assert sent == []
+
+                # /exot is rejected as unknown command
+                for ch in "/exot":
+                    await pilot.press(ch)
+                await pilot.press("enter")
+                await pilot.pause()
+                assert sent == []
+                chat_log = app.query_one("#chat-log", VerticalScroll)
+                statics = chat_log.query(Static)
+                assert any("Unknown command" in str(s.render()) for s in statics)
+
+        _run(_test)
+
+
+# ── _ticket_to_markdown tests ──────────────────────────────────────────────
+
+
+class TestTicketToMarkdown:
+    def test_basic_fields(self):
+        data = {"id": "t1", "title": "Fix bug", "status": "todo"}
+        md = _ticket_to_markdown(data)
+        assert "**title:** Fix bug" in md
+        assert "**status:** todo" in md
+        assert "id" not in md.split("**")[0]  # id key skipped
+
+    def test_list_values(self):
+        data = {"criteria": ["passes tests", "no regressions"]}
+        md = _ticket_to_markdown(data)
+        assert "**criteria:**" in md
+        assert "- passes tests" in md
+        assert "- no regressions" in md
+
+    def test_dict_values(self):
+        data = {"meta": {"author": "alice", "priority": "high"}}
+        md = _ticket_to_markdown(data)
+        assert "**meta:**" in md
+        assert "- author: alice" in md
+
+    def test_empty_list(self):
+        md = _ticket_to_markdown({"tags": []})
+        assert "**tags:** (none)" in md
+
+    def test_empty_dict(self):
+        md = _ticket_to_markdown({"meta": {}})
+        assert "**meta:** (none)" in md
+
+    def test_empty_data(self):
+        assert _ticket_to_markdown({}) == "(empty)"
+
+
+# ── Log pane tests ────────────────────────────────────────────────────────
+
+
+class TestLogPane:
+    def test_richlog_mounted_in_logs_tab(self):
+        """Logs tab contains a RichLog widget."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+            from textual.widgets import RichLog, TabbedContent, TabPane
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    with TabbedContent(id="side-pane"):
+                        yield TabPane(
+                            "Logs",
+                            RichLog(id="log-pane", wrap=True, highlight=True),
+                            id="tab-logs",
+                        )
+
+            app = _App()
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                rl = app.query_one("#log-pane", RichLog)
+                assert rl is not None
+
+        _run(_test)
+
+    def test_tui_log_handler_writes(self):
+        """TUILogHandler.emit() writes formatted messages to RichLog."""
+
+        async def _test():
+            import logging as _logging
+
+            from textual.app import App, ComposeResult
+            from textual.widgets import RichLog
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield RichLog(id="log-pane", wrap=True)
+
+            app = _App()
+            async with app.run_test() as pilot:
+                rl = app.query_one("#log-pane", RichLog)
+                handler = TUILogHandler(rl)
+                handler.setFormatter(_logging.Formatter("%(message)s"))
+                record = _logging.LogRecord(
+                    name="test", level=_logging.INFO, pathname="",
+                    lineno=0, msg="hello from handler", args=(), exc_info=None,
+                )
+                handler.emit(record)
+                await pilot.pause()
+                assert len(rl.lines) > 0
 
         _run(_test)

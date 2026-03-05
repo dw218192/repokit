@@ -11,9 +11,9 @@ import pytest
 
 from pathlib import Path
 
-from repo_tools.agent.hooks.coderabbit_mcp_stdio import main
+from repo_tools.agent.mcp.coderabbit import main
 
-_MOD = "repo_tools.agent.hooks.coderabbit_mcp_stdio"
+_MOD = "repo_tools.agent.mcp.coderabbit"
 _CR_MOD = "repo_tools.agent.coderabbit"
 
 

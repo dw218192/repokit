@@ -7,9 +7,9 @@ import json
 import subprocess
 from unittest.mock import MagicMock, patch
 
-from repo_tools.agent.hooks.lint_mcp_stdio import main
+from repo_tools.agent.mcp.lint import main
 
-_MOD = "repo_tools.agent.hooks.lint_mcp_stdio"
+_MOD = "repo_tools.agent.mcp.lint"
 _LINT_MOD = "repo_tools.agent.lint"
 
 
@@ -417,7 +417,7 @@ def test_dispatch_exception_with_id_returns_error():
         patch("sys.stdout", captured),
         patch("sys.stderr", captured_stderr),
         patch("sys.argv", ["lint_mcp_stdio"]),
-        patch(f"{_MOD}._dispatch", side_effect=RuntimeError("boom")),
+        patch(f"{_MOD}.call_lint", side_effect=RuntimeError("boom")),
     ):
         main()
 
@@ -429,20 +429,30 @@ def test_dispatch_exception_with_id_returns_error():
 
 
 def test_dispatch_exception_on_notification_no_response():
+    """Notifications produce no response even when dispatch raises."""
     captured = io.StringIO()
     captured_stderr = io.StringIO()
-    req = {"jsonrpc": "2.0", "method": "notifications/initialized"}
-    lines = json.dumps(req) + "\n"
+    # Notifications have no id — serve_stdio skips them before dispatch even runs,
+    # so we send a tool call that will raise to verify error handling, followed by
+    # a notification to verify it still produces nothing.
+    req_tool = {
+        "jsonrpc": "2.0", "id": 99, "method": "tools/call",
+        "params": {"name": "lint", "arguments": {}},
+    }
+    req_notif = {"jsonrpc": "2.0", "method": "notifications/initialized"}
+    lines = json.dumps(req_notif) + "\n" + json.dumps(req_tool) + "\n"
 
     with (
         patch("sys.stdin", io.StringIO(lines)),
         patch("sys.stdout", captured),
         patch("sys.stderr", captured_stderr),
         patch("sys.argv", ["lint_mcp_stdio"]),
-        patch(f"{_MOD}._dispatch", side_effect=RuntimeError("silent")),
+        patch(f"{_MOD}.call_lint", side_effect=RuntimeError("silent")),
     ):
         main()
 
     output = captured.getvalue().strip()
-    assert output == ""
-    assert "silent" in captured_stderr.getvalue()
+    responses = [json.loads(line) for line in output.splitlines() if line.strip()]
+    # Only the tool call produces a response (error); the notification produces nothing
+    assert len(responses) == 1
+    assert responses[0]["error"]["code"] == -32603

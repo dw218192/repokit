@@ -1,7 +1,7 @@
 """Shared worktree helpers for agent subsystem.
 
 Used by both ``tool.py`` (worktree creation on agent dispatch) and
-``ticket_mcp.py`` (worktree cleanup on ticket close).
+``tickets.py`` (worktree cleanup on ticket close).
 """
 
 from __future__ import annotations
