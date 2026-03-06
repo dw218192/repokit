@@ -23,6 +23,7 @@ from repo_tools.agent.tui import (
     PromptInput,
     QueueBar,
     StatusBar,
+    TaskPanel,
     TicketPanel,
     ToolCallGroup,
     ToolLog,
@@ -31,6 +32,7 @@ from repo_tools.agent.tui import (
     _PLAN_ACCEPTED,
     _format_tool_body,
     _parse_choice_answers,
+    _summarize_todos,
     _summarize_tool,
     _ticket_to_markdown,
 )
@@ -1510,8 +1512,21 @@ class TestSummarizeToolAdditions:
     def test_agent_description(self):
         assert _summarize_tool("Agent", {"description": "explore codebase"}) == "Agent(explore codebase)"
 
-    def test_todowrite_ignores_args(self):
-        assert _summarize_tool("TodoWrite", {"todos": [{"task": "x"}]}) == "TodoWrite()"
+    def test_todowrite_shows_progress(self):
+        todos = [
+            {"content": "Run tests", "status": "completed", "activeForm": "Running tests"},
+            {"content": "Build", "status": "in_progress", "activeForm": "Building"},
+            {"content": "Deploy", "status": "pending", "activeForm": "Deploying"},
+        ]
+        result = _summarize_tool("TodoWrite", {"todos": todos})
+        assert "1/3" in result
+        assert "Building" in result
+
+    def test_todowrite_empty_todos(self):
+        assert _summarize_tool("TodoWrite", {"todos": []}) == "TodoWrite()"
+
+    def test_todowrite_no_args(self):
+        assert _summarize_tool("TodoWrite", None) == "TodoWrite()"
 
 
 # ── ChoicePanel tests ──────────────────────────────────────────────────────
@@ -1898,3 +1913,189 @@ class TestCtrlCInterrupt:
                 mock_client.interrupt.assert_called_once()
 
         _run(_test)
+
+
+# ── TaskPanel tests ──────────────────────────────────────────────────────────
+
+
+class TestTaskPanel:
+    def test_empty_shows_placeholder(self):
+        """TaskPanel with no todos shows '(no tasks)'."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield TaskPanel(id="tp")
+
+            app = _App()
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                tp = app.query_one("#tp", TaskPanel)
+                assert len(list(tp.children)) == 1
+
+        _run(_test)
+
+    def test_pending_items(self):
+        """Pending items render with checkbox icon and task-pending class."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+            from textual.widgets import Static
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield TaskPanel(id="tp")
+
+            app = _App()
+            async with app.run_test() as pilot:
+                tp = app.query_one("#tp", TaskPanel)
+                tp.refresh_todos([
+                    {"content": "Run tests", "status": "pending", "activeForm": "Running tests"},
+                ])
+                await pilot.pause()
+                items = [s for s in tp.query(Static) if s.has_class("task-pending")]
+                assert len(items) == 1
+                rendered = items[0].render().plain
+                assert "\u2610" in rendered
+                assert "Run tests" in rendered
+
+        _run(_test)
+
+    def test_in_progress_shows_active_form(self):
+        """In-progress items show activeForm text, not content."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+            from textual.widgets import Static
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield TaskPanel(id="tp")
+
+            app = _App()
+            async with app.run_test() as pilot:
+                tp = app.query_one("#tp", TaskPanel)
+                tp.refresh_todos([
+                    {"content": "Build project", "status": "in_progress", "activeForm": "Building project"},
+                ])
+                await pilot.pause()
+                items = [s for s in tp.query(Static) if s.has_class("task-in-progress")]
+                assert len(items) == 1
+                rendered = items[0].render().plain
+                assert "\u23f3" in rendered
+                assert "Building project" in rendered
+
+        _run(_test)
+
+    def test_completed_items(self):
+        """Completed items render with checkmark and task-completed class."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+            from textual.widgets import Static
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield TaskPanel(id="tp")
+
+            app = _App()
+            async with app.run_test() as pilot:
+                tp = app.query_one("#tp", TaskPanel)
+                tp.refresh_todos([
+                    {"content": "Done task", "status": "completed", "activeForm": "Doing task"},
+                ])
+                await pilot.pause()
+                items = [s for s in tp.query(Static) if s.has_class("task-completed")]
+                assert len(items) == 1
+                rendered = items[0].render().plain
+                assert "\u2713" in rendered
+
+        _run(_test)
+
+    def test_refresh_replaces_list(self):
+        """Calling refresh_todos replaces previous items."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+            from textual.widgets import Static
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield TaskPanel(id="tp")
+
+            app = _App()
+            async with app.run_test() as pilot:
+                tp = app.query_one("#tp", TaskPanel)
+                tp.refresh_todos([
+                    {"content": "A", "status": "pending", "activeForm": "A"},
+                    {"content": "B", "status": "pending", "activeForm": "B"},
+                ])
+                await pilot.pause()
+                assert len(tp.query(Static)) == 2
+
+                tp.refresh_todos([
+                    {"content": "X", "status": "completed", "activeForm": "X"},
+                ])
+                await pilot.pause()
+                statics = tp.query(Static)
+                assert len(statics) == 1
+                assert "X" in statics[0].render().plain
+
+        _run(_test)
+
+
+# ── _summarize_todos tests ───────────────────────────────────────────────────
+
+
+class TestSummarizeTodos:
+    def test_all_completed(self):
+        todos = [
+            {"content": "A", "status": "completed", "activeForm": "A"},
+            {"content": "B", "status": "completed", "activeForm": "B"},
+        ]
+        assert _summarize_todos(todos) == "2/2"
+
+    def test_partial_with_active(self):
+        todos = [
+            {"content": "A", "status": "completed", "activeForm": "Doing A"},
+            {"content": "B", "status": "in_progress", "activeForm": "Doing B"},
+            {"content": "C", "status": "pending", "activeForm": "Doing C"},
+        ]
+        result = _summarize_todos(todos)
+        assert "1/3" in result
+        assert "Doing B" in result
+
+    def test_empty_list(self):
+        assert _summarize_todos([]) == "0/0"
+
+    def test_long_active_form_truncated(self):
+        todos = [
+            {"content": "X", "status": "in_progress", "activeForm": "A" * 50},
+        ]
+        result = _summarize_todos(todos)
+        assert "..." in result
+        assert len(result) < 50
+
+
+# ── _format_tool_body TodoWrite tests ────────────────────────────────────────
+
+
+class TestFormatToolBodyTodoWrite:
+    def test_renders_checklist(self):
+        args = {"todos": [
+            {"content": "Run tests", "status": "completed"},
+            {"content": "Build", "status": "in_progress"},
+            {"content": "Deploy", "status": "pending"},
+        ]}
+        result = _format_tool_body("TodoWrite", args)
+        assert isinstance(result, str)
+        assert "\u2713 Run tests" in result
+        assert "\u23f3 Build" in result
+        assert "\u2610 Deploy" in result
+
+    def test_empty_todos_falls_through(self):
+        result = _format_tool_body("TodoWrite", {"todos": []})
+        # Empty list → falls through to generic JSON
+        assert isinstance(result, Syntax)

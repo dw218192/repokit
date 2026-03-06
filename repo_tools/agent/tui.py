@@ -253,20 +253,17 @@ class TaskPanel(VerticalScroll):
         super().__init__(**kwargs)
         self._todos: list[dict] = []
 
-    def on_mount(self) -> None:
-        self._render()
+    def compose(self) -> ComposeResult:
+        yield Static("(no tasks)")
 
     def refresh_todos(self, todos: list[dict]) -> None:
         """Replace the displayed list with the latest state."""
         self._todos = todos
-        self._render()
-
-    def _render(self) -> None:
         self.remove_children()
-        if not self._todos:
+        if not todos:
             self.mount(Static("(no tasks)"))
             return
-        for item in self._todos:
+        for item in todos:
             status = item.get("status", "pending")
             icon = self._STATUS_ICONS.get(status, "\u2610")
             if status == "in_progress":
@@ -804,7 +801,12 @@ class AgentApp(App):
                     id="tab-tickets",
                 )
                 yield TabPane(
-                    "Available",
+                    "Tasks",
+                    TaskPanel(id="task-panel"),
+                    id="tab-tasks",
+                )
+                yield TabPane(
+                    "Tools",
                     AvailableToolsPanel(
                         tools=self._tools_metadata,
                         id="available-tools",
@@ -812,7 +814,7 @@ class AgentApp(App):
                     id="tab-available",
                 )
                 yield TabPane(
-                    "Tools",
+                    "Tool Log",
                     ToolLog(id="tool-log"),
                     id="tab-tools",
                 )
@@ -958,8 +960,13 @@ class AgentApp(App):
             self._refresh_queue_bar()
             self._pending_tools.clear()
             self._current_tool_group = None
+            self._todos = []
             self.query_one("#chat-log", VerticalScroll).remove_children()
             self.query_one("#tool-log", ToolLog).clear()
+            try:
+                self.query_one("#task-panel", TaskPanel).refresh_todos([])
+            except Exception:
+                pass
             self.query_one("#status-bar", StatusBar).set_status(
                 "Ready", "ready",
             )
@@ -1073,6 +1080,22 @@ class AgentApp(App):
                         )
                     except Exception:
                         logger.warning("Failed to update tool log", exc_info=True)
+                    # TodoWrite — update task panel and status bar
+                    if block.name == "TodoWrite" and input_args:
+                        todos = input_args.get("todos", [])
+                        self._todos = todos
+                        try:
+                            self.query_one("#task-panel", TaskPanel).refresh_todos(todos)
+                        except Exception:
+                            logger.warning("Failed to update task panel", exc_info=True)
+                        in_progress = [t for t in todos if t.get("status") == "in_progress"]
+                        if in_progress:
+                            active = in_progress[0].get("activeForm", "")
+                            if active:
+                                self.query_one("#status-bar", StatusBar).set_status(
+                                    f"\u23f3 {active}", "working",
+                                )
+                                return
                     self.query_one("#status-bar", StatusBar).set_status(
                         f"Working... ({block.name})", "working",
                     )
