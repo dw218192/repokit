@@ -233,6 +233,52 @@ class TicketPanel(VerticalScroll):
         self.mount(entry)
 
 
+class TaskPanel(VerticalScroll):
+    """Displays the current TodoWrite task list with status icons."""
+
+    DEFAULT_CSS = """
+    TaskPanel { height: 1fr; }
+    TaskPanel .task-pending { color: $text-muted; }
+    TaskPanel .task-in-progress { color: yellow; }
+    TaskPanel .task-completed { color: green; }
+    """
+
+    _STATUS_ICONS: dict[str, str] = {
+        "pending": "\u2610",
+        "in_progress": "\u23f3",
+        "completed": "\u2713",
+    }
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._todos: list[dict] = []
+
+    def on_mount(self) -> None:
+        self._render()
+
+    def refresh_todos(self, todos: list[dict]) -> None:
+        """Replace the displayed list with the latest state."""
+        self._todos = todos
+        self._render()
+
+    def _render(self) -> None:
+        self.remove_children()
+        if not self._todos:
+            self.mount(Static("(no tasks)"))
+            return
+        for item in self._todos:
+            status = item.get("status", "pending")
+            icon = self._STATUS_ICONS.get(status, "\u2610")
+            if status == "in_progress":
+                text = item.get("activeForm", item.get("content", ""))
+            else:
+                text = item.get("content", "")
+            self.mount(Static(
+                f"{icon} {text}",
+                classes=f"task-{status.replace('_', '-')}",
+            ))
+
+
 class AvailableToolsPanel(VerticalScroll):
     """Displays registered tools grouped by category (Built-in, MCP)."""
 
@@ -281,6 +327,21 @@ class AvailableToolsPanel(VerticalScroll):
             self.mount(section)
 
 
+def _summarize_todos(todos: list[dict]) -> str:
+    """Compact progress string like ``3/5, Running tests``."""
+    total = len(todos)
+    completed = sum(1 for t in todos if t.get("status") == "completed")
+    in_progress = [t for t in todos if t.get("status") == "in_progress"]
+    parts = [f"{completed}/{total}"]
+    if in_progress:
+        text = in_progress[0].get("activeForm", "")
+        if len(text) > 30:
+            text = text[:27] + "..."
+        if text:
+            parts.append(text)
+    return ", ".join(parts)
+
+
 def _summarize_tool(name: str, input_args: dict | None) -> str:
     """One-line summary like ``Bash(cd /c/repo && ls)``."""
     if not input_args:
@@ -300,6 +361,9 @@ def _summarize_tool(name: str, input_args: dict | None) -> str:
     elif name in ("Task", "Agent"):
         arg = input_args.get("description", "")
     elif name == "TodoWrite":
+        todos = (input_args or {}).get("todos", [])
+        if todos:
+            return f"TodoWrite({_summarize_todos(todos)})"
         return "TodoWrite()"
     else:
         arg = next(
@@ -311,10 +375,26 @@ def _summarize_tool(name: str, input_args: dict | None) -> str:
     return f"{name}({arg})"
 
 
+_TODO_ICONS: dict[str, str] = {
+    "pending": "\u2610",
+    "in_progress": "\u23f3",
+    "completed": "\u2713",
+}
+
+
 def _format_tool_body(name: str, input_args: dict | None) -> Any:
     """Format tool input as a Rich renderable (JSON syntax-highlighted)."""
     if not input_args:
         return "(no args)"
+    if name == "TodoWrite":
+        todos = input_args.get("todos", [])
+        if todos:
+            lines: list[str] = []
+            for item in todos:
+                status = item.get("status", "pending")
+                icon = _TODO_ICONS.get(status, "\u2610")
+                lines.append(f"{icon} {item.get('content', '')}")
+            return "\n".join(lines)
     try:
         text = json.dumps(input_args, indent=2)[:500]
     except (TypeError, ValueError):
@@ -708,6 +788,7 @@ class AgentApp(App):
         self._current_tool_group: ToolCallGroup | None = None
         self._queued_input: list[str] = []
         self._input_queue: asyncio.Queue[Any] = asyncio.Queue()
+        self._todos: list[dict] = []
         self._side_pane_visible: bool = True
         self._choice_future: asyncio.Future | None = None
         self._choice_questions: list[dict] | None = None

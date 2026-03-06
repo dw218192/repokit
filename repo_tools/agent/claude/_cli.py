@@ -193,12 +193,6 @@ class CliBackend:
         else:
             logger.warning("No rules_path/project_root provided; launching Claude without hooks or MCP server")
 
-        # Plan storage — keep plans in the project
-        if project_root is not None:
-            plan_dir = project_root / "_agent" / "plans"
-            plan_dir.mkdir(parents=True, exist_ok=True)
-            cmd.extend(["--plan-storage-dir", str(plan_dir)])
-
         # Headless mode: add -p with prompt, JSON output, no session persistence
         if prompt is not None:
             cmd.extend(["-p", prompt, "--output-format", "json", "--no-session-persistence"])
