@@ -46,7 +46,10 @@ def check_installed() -> bool:
                 timeout=10,
             )
             return result.returncode == 0
-        except (OSError, subprocess.SubprocessError):
+        except OSError:
+            return False
+        except subprocess.SubprocessError as exc:
+            print(f"coderabbit: WSL check failed: {exc}", file=sys.stderr)
             return False
     return shutil.which("coderabbit") is not None
 

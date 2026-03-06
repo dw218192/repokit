@@ -30,4 +30,6 @@ class ClaudeBackend(Protocol):
         project_root: Path | None = None,
         tool_config: dict | None = None,
         cwd: Path | str | None = None,
-    ) -> int: ...
+        initial_prompt: str | None = None,
+        resume: str | None = None,
+    ) -> tuple[int, str | None]: ...

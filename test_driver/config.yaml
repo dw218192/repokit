@@ -16,3 +16,12 @@ test-cov:
 agent:
   debug_hooks: false
   backend: "sdk"
+  events:
+    timer:
+      tick:
+        poll:
+          - "{repo} python -c \"import sys; sys.exit(0)\""
+        payload:
+          - "{repo} python -c \"import datetime; print(datetime.datetime.utcnow().isoformat())\""
+        interval: 3600
+        description: "Periodic timer (test)"

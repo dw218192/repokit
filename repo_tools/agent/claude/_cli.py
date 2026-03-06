@@ -118,6 +118,28 @@ def _write_plugin(
         }
     }
 
+    # Repo command tools — discover from config and expose as MCP tools
+    from ..repo_cmd import _discover_repo_commands
+    config = tool_config or {}
+    if _discover_repo_commands(config):
+        # Pass only the sections needed for command discovery
+        filtered_config = {
+            section: value for section, value in config.items()
+            if isinstance(value, dict) and any(
+                k == "steps" or k.startswith("steps@") for k in value
+            )
+        }
+        repo_cmd_args = [
+            "-m", "repo_tools.agent.mcp.repo_cmd",
+            "--project-root", project_root.as_posix(),
+            "--config", json.dumps(filtered_config),
+        ]
+        mcp_config["mcpServers"]["repo_cmd"] = {
+            "type": "stdio",
+            "command": posix_path(sys.executable),
+            "args": repo_cmd_args,
+        }
+
     (plugin_dir / ".mcp.json").write_text(
         json.dumps(mcp_config, indent=2), encoding="utf-8",
     )
@@ -168,6 +190,12 @@ class CliBackend:
         else:
             logger.warning("No rules_path/project_root provided; launching Claude without hooks or MCP server")
 
+        # Plan storage — keep plans in the project
+        if project_root is not None:
+            plan_dir = project_root / "_agent" / "plans"
+            plan_dir.mkdir(parents=True, exist_ok=True)
+            cmd.extend(["--plan-storage-dir", str(plan_dir)])
+
         # Headless mode: add -p with prompt, JSON output, no session persistence
         if prompt is not None:
             cmd.extend(["-p", prompt, "--output-format", "json", "--no-session-persistence"])
@@ -212,16 +240,23 @@ class CliBackend:
         project_root: Path | None = None,
         tool_config: dict | None = None,
         cwd: Path | str | None = None,
-    ) -> int:
-        """Run an interactive agent session. Returns exit code."""
+        initial_prompt: str | None = None,
+        resume: str | None = None,
+    ) -> tuple[int, str | None]:
+        """Run an interactive agent session. Returns (exit_code, session_id)."""
         cmd = self._build_command(
             role="orchestrator", role_prompt=role_prompt,
             rules_path=rules_path, project_root=project_root,
             tool_config=tool_config,
         )
+        if resume:
+            cmd.extend(["--resume", resume])
+        if initial_prompt:
+            cmd.extend(["-p", initial_prompt])
         logger.info("CLI interactive session")
         proc = subprocess.run(
             cmd,
             cwd=str(cwd) if cwd else None,
         )
-        return proc.returncode
+        # CLI doesn't expose session_id in interactive mode
+        return (proc.returncode, None)

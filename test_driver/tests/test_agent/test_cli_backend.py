@@ -343,7 +343,7 @@ class TestRunInteractive:
         mock_run.return_value = MagicMock(returncode=0)
 
         backend = CliBackend()
-        rc = backend.run_interactive(
+        rc, session_id = backend.run_interactive(
             rules_path=rules, project_root=tmp_path, cwd=tmp_path,
         )
         assert rc == 0

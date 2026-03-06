@@ -82,7 +82,7 @@ class TestBuildOptions:
         """Base tools (Read, Edit, etc.) are always in allowed_tools."""
         from repo_tools.agent.claude import Claude
 
-        opts = Claude._build_options(
+        opts, _meta = Claude._build_options(
             rules_path=rules_file, project_root=tmp_path, cwd=tmp_path,
         )
         for tool_name in ("Read", "Edit", "Write", "Glob", "Grep", "WebFetch", "WebSearch"):
@@ -92,7 +92,7 @@ class TestBuildOptions:
         """Without a role, Bash is NOT in allowed_tools."""
         from repo_tools.agent.claude import Claude
 
-        opts = Claude._build_options(
+        opts, _meta = Claude._build_options(
             rules_path=rules_file, project_root=tmp_path, cwd=tmp_path,
         )
         assert "Bash" not in opts.allowed_tools
@@ -101,7 +101,7 @@ class TestBuildOptions:
         """With a role, Bash IS in allowed_tools."""
         from repo_tools.agent.claude import Claude
 
-        opts = Claude._build_options(
+        opts, _meta = Claude._build_options(
             role="worker", rules_path=rules_file, project_root=tmp_path,
             cwd=tmp_path,
         )
@@ -111,7 +111,7 @@ class TestBuildOptions:
         """MCP tool names (mcp__repokit-agent__*) are added to allowed_tools."""
         from repo_tools.agent.claude import Claude
 
-        opts = Claude._build_options(
+        opts, _meta = Claude._build_options(
             role="worker", rules_path=rules_file, project_root=tmp_path,
             cwd=tmp_path,
         )
@@ -125,7 +125,7 @@ class TestBuildOptions:
         """role_prompt is set as an appended system prompt preset."""
         from repo_tools.agent.claude import Claude
 
-        opts = Claude._build_options(
+        opts, _meta = Claude._build_options(
             role="worker", role_prompt="You are a test worker.",
             rules_path=rules_file, project_root=tmp_path, cwd=tmp_path,
         )
@@ -137,7 +137,7 @@ class TestBuildOptions:
         """Without role_prompt, system_prompt is None."""
         from repo_tools.agent.claude import Claude
 
-        opts = Claude._build_options(
+        opts, _meta = Claude._build_options(
             rules_path=rules_file, project_root=tmp_path, cwd=tmp_path,
         )
         assert opts.system_prompt is None
@@ -146,7 +146,7 @@ class TestBuildOptions:
         """max_turns is forwarded from tool_config."""
         from repo_tools.agent.claude import Claude
 
-        opts = Claude._build_options(
+        opts, _meta = Claude._build_options(
             role="worker", rules_path=rules_file, project_root=tmp_path,
             tool_config={"max_turns": 30}, cwd=tmp_path,
         )
@@ -156,7 +156,7 @@ class TestBuildOptions:
         """Without max_turns in config, it's None."""
         from repo_tools.agent.claude import Claude
 
-        opts = Claude._build_options(
+        opts, _meta = Claude._build_options(
             role="worker", rules_path=rules_file, project_root=tmp_path,
             cwd=tmp_path,
         )
@@ -166,7 +166,7 @@ class TestBuildOptions:
         """Worker in headless mode gets output_format with json_schema."""
         from repo_tools.agent.claude import Claude
 
-        opts = Claude._build_options(
+        opts, _meta = Claude._build_options(
             role="worker", rules_path=rules_file, project_root=tmp_path,
             cwd=tmp_path, headless=True,
         )
@@ -180,7 +180,7 @@ class TestBuildOptions:
         """Reviewer in headless mode gets output_format with result/criteria fields."""
         from repo_tools.agent.claude import Claude
 
-        opts = Claude._build_options(
+        opts, _meta = Claude._build_options(
             role="reviewer", rules_path=rules_file, project_root=tmp_path,
             cwd=tmp_path, headless=True,
         )
@@ -194,7 +194,7 @@ class TestBuildOptions:
         """Non-headless mode has no output_format."""
         from repo_tools.agent.claude import Claude
 
-        opts = Claude._build_options(
+        opts, _meta = Claude._build_options(
             role="worker", rules_path=rules_file, project_root=tmp_path,
             cwd=tmp_path, headless=False,
         )
@@ -204,7 +204,7 @@ class TestBuildOptions:
         """Without a role, no output_format even in headless mode."""
         from repo_tools.agent.claude import Claude
 
-        opts = Claude._build_options(
+        opts, _meta = Claude._build_options(
             rules_path=rules_file, project_root=tmp_path,
             cwd=tmp_path, headless=True,
         )
@@ -214,7 +214,7 @@ class TestBuildOptions:
         """permission_mode is always bypassPermissions."""
         from repo_tools.agent.claude import Claude
 
-        opts = Claude._build_options(
+        opts, _meta = Claude._build_options(
             rules_path=rules_file, project_root=tmp_path, cwd=tmp_path,
         )
         assert opts.permission_mode == "bypassPermissions"
@@ -223,7 +223,7 @@ class TestBuildOptions:
         """cwd is set from the provided path."""
         from repo_tools.agent.claude import Claude
 
-        opts = Claude._build_options(
+        opts, _meta = Claude._build_options(
             rules_path=rules_file, project_root=tmp_path,
             cwd=tmp_path / "subdir",
         )
@@ -233,7 +233,7 @@ class TestBuildOptions:
         """Hooks dict has PreToolUse and PermissionRequest entries."""
         from repo_tools.agent.claude import Claude
 
-        opts = Claude._build_options(
+        opts, _meta = Claude._build_options(
             role="worker", rules_path=rules_file, project_root=tmp_path,
             cwd=tmp_path,
         )
@@ -245,14 +245,14 @@ class TestBuildOptions:
         """Without rules_path, hooks is None."""
         from repo_tools.agent.claude import Claude
 
-        opts = Claude._build_options(cwd=tmp_path)
+        opts, _meta = Claude._build_options(cwd=tmp_path)
         assert opts.hooks is None
 
     def test_mcp_servers_present(self, tmp_path, rules_file):
         """mcp_servers has repokit-agent entry."""
         from repo_tools.agent.claude import Claude
 
-        opts = Claude._build_options(
+        opts, _meta = Claude._build_options(
             role="worker", rules_path=rules_file, project_root=tmp_path,
             cwd=tmp_path,
         )
@@ -262,7 +262,7 @@ class TestBuildOptions:
         """Without project_root, no MCP servers."""
         from repo_tools.agent.claude import Claude
 
-        opts = Claude._build_options(
+        opts, _meta = Claude._build_options(
             rules_path=rules_file, cwd=tmp_path,
         )
         assert len(opts.mcp_servers) == 0
@@ -271,7 +271,7 @@ class TestBuildOptions:
         """setting_sources includes project."""
         from repo_tools.agent.claude import Claude
 
-        opts = Claude._build_options(
+        opts, _meta = Claude._build_options(
             rules_path=rules_file, project_root=tmp_path, cwd=tmp_path,
         )
         assert "project" in opts.setting_sources
@@ -282,7 +282,7 @@ class TestBuildOptions:
 
         # This test verifies the lint tool is created with the config.
         # The mock tool decorator captures the handler.
-        opts = Claude._build_options(
+        opts, _meta = Claude._build_options(
             role="worker", rules_path=rules_file, project_root=tmp_path,
             tool_config={"ruff_select": "E,F"}, cwd=tmp_path,
         )
@@ -350,7 +350,7 @@ class TestHookConstruction:
         """PreToolUse hook has Bash matcher."""
         from repo_tools.agent.claude import Claude
 
-        opts = Claude._build_options(
+        opts, _meta = Claude._build_options(
             role="worker", rules_path=rules_file, project_root=tmp_path,
             cwd=tmp_path,
         )
@@ -363,7 +363,7 @@ class TestHookConstruction:
         """PermissionRequest hook has ^mcp__ matcher."""
         from repo_tools.agent.claude import Claude
 
-        opts = Claude._build_options(
+        opts, _meta = Claude._build_options(
             role="worker", rules_path=rules_file, project_root=tmp_path,
             cwd=tmp_path,
         )

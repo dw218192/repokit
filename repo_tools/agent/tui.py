@@ -233,6 +233,54 @@ class TicketPanel(VerticalScroll):
         self.mount(entry)
 
 
+class AvailableToolsPanel(VerticalScroll):
+    """Displays registered tools grouped by category (Built-in, MCP)."""
+
+    DEFAULT_CSS = """
+    AvailableToolsPanel { height: 1fr; }
+    AvailableToolsPanel .tool-name { margin-left: 2; padding: 0; }
+    AvailableToolsPanel .tool-item { margin-left: 1; padding-top: 0; padding-bottom: 0; }
+    AvailableToolsPanel .tool-desc { color: $text-muted; margin: 0 0 0 1; }
+    """
+
+    def __init__(self, tools: list[dict] | None = None, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._tools = tools or []
+
+    def on_mount(self) -> None:
+        self._populate()
+
+    def _populate(self) -> None:
+        self.remove_children()
+        if not self._tools:
+            self.mount(Static("(no tools registered)"))
+            return
+
+        groups: dict[str, list[dict]] = {}
+        for t in self._tools:
+            groups.setdefault(t.get("group", "Other"), []).append(t)
+
+        for group_name, entries in groups.items():
+            children: list[Static | Collapsible] = []
+            for entry in entries:
+                name = entry.get("name", "")
+                desc = entry.get("description", "")
+                if desc:
+                    children.append(
+                        Collapsible(
+                            Static(desc, classes="tool-desc"),
+                            title=name,
+                            classes="tool-item",
+                        )
+                    )
+                else:
+                    children.append(
+                        Static(f"[bold cyan]{name}[/bold cyan]", classes="tool-name")
+                    )
+            section = Collapsible(*children, title=f"{group_name} ({len(entries)})")
+            self.mount(section)
+
+
 def _summarize_tool(name: str, input_args: dict | None) -> str:
     """One-line summary like ``Bash(cd /c/repo && ls)``."""
     if not input_args:
@@ -537,6 +585,65 @@ class TUILogHandler(logging.Handler):
             pass
 
 
+# ── Chat history persistence ──────────────────────────────────────────────────
+
+
+class ChatHistory:
+    """Persist and replay chat messages across session resumes.
+
+    Messages are stored as JSONL in ``_agent/sessions/<session_id>.jsonl``.
+    """
+
+    def __init__(self, workspace: str | None = None) -> None:
+        self._workspace = Path(workspace or os.getcwd())
+        self._session_id: str | None = None
+        self._path: Path | None = None
+        self._buffer: list[dict[str, str]] = []
+
+    def bind(self, session_id: str) -> None:
+        """Bind to a session — opens the log file for appending."""
+        self._session_id = session_id
+        sessions_dir = self._workspace / "_agent" / "sessions"
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        self._path = sessions_dir / f"{session_id}.jsonl"
+        # Flush any messages that arrived before bind()
+        if self._buffer:
+            try:
+                with self._path.open("a", encoding="utf-8") as f:
+                    for entry in self._buffer:
+                        f.write(json.dumps(entry) + "\n")
+            except OSError:
+                logger.warning("Failed to flush chat history buffer", exc_info=True)
+            self._buffer.clear()
+
+    def append(self, role: str, text: str) -> None:
+        """Append a message to the log."""
+        entry = {"role": role, "text": text}
+        if self._path is None:
+            self._buffer.append(entry)
+            return
+        try:
+            with self._path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(entry) + "\n")
+        except OSError:
+            logger.warning("Failed to write chat history", exc_info=True)
+
+    @staticmethod
+    def load(workspace: str | Path, session_id: str) -> list[dict[str, str]]:
+        """Load previous chat messages for a session."""
+        path = Path(workspace) / "_agent" / "sessions" / f"{session_id}.jsonl"
+        if not path.exists():
+            return []
+        entries: list[dict[str, str]] = []
+        try:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if line.strip():
+                    entries.append(json.loads(line))
+        except (OSError, json.JSONDecodeError):
+            logger.warning("Failed to load chat history", exc_info=True)
+        return entries
+
+
 # ── App ───────────────────────────────────────────────────────────────────────
 
 
@@ -566,6 +673,9 @@ class AgentApp(App):
     #side-pane {
         width: 3fr;
     }
+    .history {
+        opacity: 60%;
+    }
     """
 
     BINDINGS = [
@@ -575,9 +685,23 @@ class AgentApp(App):
         Binding("f2", "toggle_side_pane", "Side Pane", show=False),
     ]
 
-    def __init__(self, options: Any, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        options: Any,
+        initial_prompt: str | None = None,
+        resume: str | None = None,
+        tools_metadata: list[dict[str, str]] | None = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
         self._options = options
+        self._initial_prompt = initial_prompt
+        self._resume = resume
+        self._tools_metadata = tools_metadata or []
+        self._session_id: str | None = None
+        self._chat_history = ChatHistory(
+            workspace=options.cwd,
+        )
         self._client: Any = None
         self._query_active = False
         self._pending_tools: dict[str, ToolCallGroup] = {}
@@ -589,7 +713,7 @@ class AgentApp(App):
         self._choice_questions: list[dict] | None = None
 
     def compose(self) -> ComposeResult:
-        workspace = getattr(self._options, "cwd", None) or os.getcwd()
+        workspace = self._options.cwd or os.getcwd()
         with Horizontal(id="main-area"):
             yield VerticalScroll(id="chat-log")
             with TabbedContent(id="side-pane"):
@@ -597,6 +721,14 @@ class AgentApp(App):
                     "Tickets",
                     TicketPanel(workspace=workspace, id="ticket-tree"),
                     id="tab-tickets",
+                )
+                yield TabPane(
+                    "Available",
+                    AvailableToolsPanel(
+                        tools=self._tools_metadata,
+                        id="available-tools",
+                    ),
+                    id="tab-available",
                 )
                 yield TabPane(
                     "Tools",
@@ -624,9 +756,41 @@ class AgentApp(App):
             datefmt="%H:%M:%S",
         ))
         logging.getLogger("repo_tools").addHandler(handler)
+
+        # Replay previous conversation when resuming
+        if self._resume:
+            workspace = self._options.cwd or os.getcwd()
+            await self._replay_history(workspace, self._resume)
+
         self._options.can_use_tool = self._can_use_tool
         self._client_loop()
         self.query_one("#prompt-input", PromptInput).focus()
+        if self._initial_prompt:
+            asyncio.ensure_future(self._send_input(self._initial_prompt))
+
+    async def _replay_history(self, workspace: str, session_id: str) -> None:
+        """Mount previous conversation messages from the chat log file."""
+        entries = ChatHistory.load(workspace, session_id)
+        if not entries:
+            return
+        chat_log = self.query_one("#chat-log", VerticalScroll)
+        await chat_log.mount(Static(
+            f"[dim]--- resumed session ({len(entries)} messages) ---[/dim]",
+            markup=True,
+        ))
+        for entry in entries:
+            role = entry.get("role", "")
+            text = entry.get("text", "")
+            if role == "user":
+                widget = UserMessage(f"> {text}")
+                widget.add_class("history")
+            else:
+                widget = MarkdownMessage(Markdown(text))
+                widget.add_class("history")
+            await chat_log.mount(widget)
+        await chat_log.mount(Static(
+            "[dim]--- end of history ---[/dim]", markup=True,
+        ))
 
     # ── Client lifecycle worker ───────────────────────────────────────────
 
@@ -642,33 +806,47 @@ class AgentApp(App):
         """
         from claude_agent_sdk import ClaudeSDKClient
 
-        async with ClaudeSDKClient(options=self._options) as client:
-            self._client = client
-            try:
-                while True:
-                    user_input = await self._input_queue.get()
-                    if user_input is _SENTINEL:
-                        break
-                    self._query_active = True
-                    self.query_one("#status-bar", StatusBar).set_status(
-                        "Working...", "working",
-                    )
-                    try:
-                        await client.query(user_input)
-                        async for msg in client.receive_response():
-                            await self._handle_message(msg)
-                    except asyncio.CancelledError:
-                        raise  # let it propagate to tear down the client
-                    except Exception:
-                        logger.warning("Client query failed", exc_info=True)
+        if self._resume:
+            self._options.resume = self._resume
+            self._resume = None  # only use once
+
+        try:
+            async with ClaudeSDKClient(options=self._options) as client:
+                self._client = client
+                try:
+                    while True:
+                        user_input = await self._input_queue.get()
+                        if user_input is _SENTINEL:
+                            break
+                        self._query_active = True
                         self.query_one("#status-bar", StatusBar).set_status(
-                            "Error", "error",
+                            "Working...", "working",
                         )
-                    finally:
-                        self._query_active = False
-                        self._drain_queue()
-            except asyncio.CancelledError:
-                pass
+                        try:
+                            await client.query(user_input)
+                            async for msg in client.receive_response():
+                                await self._handle_message(msg)
+                            # Auto-exit when an event subscription is pending
+                            from .events import has_subscriptions
+                            if has_subscriptions():
+                                logger.info("Event subscription pending — suspending session")
+                                self.exit()
+                                return
+                        except asyncio.CancelledError:
+                            raise  # let it propagate to tear down the client
+                        except Exception as exc:
+                            logger.error("Client query failed", exc_info=True)
+                            await self._show_error(str(exc))
+                        finally:
+                            self._query_active = False
+                            self._drain_queue()
+                except asyncio.CancelledError:
+                    pass
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            logger.error("SDK client crashed", exc_info=True)
+            await self._show_error(f"SDK client crashed: {exc}")
         self._client = None
 
     # ── Input handling ────────────────────────────────────────────────────
@@ -726,6 +904,7 @@ class AgentApp(App):
         msg_widget = UserMessage(f"> {text}")
         await chat_log.mount(msg_widget)
         msg_widget.scroll_visible()
+        self._chat_history.append("user", text)
         self._input_queue.put_nowait(text)
 
     def on_prompt_input_pop_queue(
@@ -737,6 +916,15 @@ class AgentApp(App):
             self._refresh_queue_bar()
             pi = self.query_one("#prompt-input", PromptInput)
             pi.load_text(restored)
+
+    async def _show_error(self, message: str) -> None:
+        """Display an error message in the chat log and update status bar."""
+        chat_log = self.query_one("#chat-log", VerticalScroll)
+        await chat_log.mount(
+            Static(f"[bold red]Error:[/] {message}", classes="error-msg"),
+        )
+        chat_log.scroll_end(animate=False)
+        self.query_one("#status-bar", StatusBar).set_status("Error", "error")
 
     def _drain_queue(self) -> None:
         """Send the next queued input, if any."""
@@ -780,6 +968,7 @@ class AgentApp(App):
                     await chat_log.mount(
                         MarkdownMessage(Markdown(block.text)),
                     )
+                    self._chat_history.append("assistant", block.text)
                 elif isinstance(block, ToolUseBlock):
                     # Compact group in chat
                     if self._current_tool_group is None:
@@ -851,6 +1040,10 @@ class AgentApp(App):
                             logger.warning("Failed to update tool result", exc_info=True)
 
         elif isinstance(msg, ResultMessage):
+            # Capture session_id for event-loop resume + chat history
+            self._session_id = msg.session_id
+            self._chat_history.bind(msg.session_id)
+
             # Flush any remaining pending tools (edge cases)
             for tool_id, group in self._pending_tools.items():
                 group.set_result(tool_id, is_error=False)
@@ -941,20 +1134,30 @@ class AgentApp(App):
 
         chat_log = self.query_one("#chat-log", VerticalScroll)
 
-        # Find and display the most recent plan file
-        plans_dir = Path.home() / ".claude" / "plans"
-        if plans_dir.is_dir():
-            plan_files = sorted(
-                plans_dir.glob("*.md"),
-                key=lambda p: p.stat().st_mtime,
-                reverse=True,
-            )
-            if plan_files:
-                try:
-                    content = plan_files[0].read_text(encoding="utf-8")
-                    await chat_log.mount(MarkdownMessage(Markdown(content)))
-                except Exception:
-                    logger.warning("Failed to read plan file", exc_info=True)
+        # Find and display the most recent plan file.
+        # Check _agent/plans/ first (project-local), then ~/.claude/plans/.
+        cwd = Path(self._options.cwd or os.getcwd())
+        search_dirs = [
+            cwd / "_agent" / "plans",
+            Path.home() / ".claude" / "plans",
+        ]
+        content = None
+        for plans_dir in search_dirs:
+            if plans_dir.is_dir():
+                plan_files = sorted(
+                    plans_dir.glob("*.md"),
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True,
+                )
+                if plan_files:
+                    try:
+                        content = plan_files[0].read_text(encoding="utf-8")
+                        break
+                    except OSError as exc:
+                        logger.warning("Failed to read plan file %s: %s", plan_files[0], exc)
+                        continue
+        if content:
+            await chat_log.mount(MarkdownMessage(Markdown(content)))
 
         # Activate the approval bar and focus it
         bar = self.query_one("#plan-approval", PlanApprovalBar)

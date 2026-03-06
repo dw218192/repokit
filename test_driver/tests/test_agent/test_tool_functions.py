@@ -507,7 +507,7 @@ class TestAgentRunInteractive:
     @patch("repo_tools.agent.tool._backend")
     def test_interactive_launches_session(self, mock_backend, mock_exit, tool_ctx):
         """Interactive mode (no ticket) launches via run_interactive."""
-        mock_backend.run_interactive.return_value = 0
+        mock_backend.run_interactive.return_value = (0, None)
 
         with pytest.raises(SystemExit):
             _agent_run(tool_ctx, {})
@@ -518,7 +518,7 @@ class TestAgentRunInteractive:
     @patch("repo_tools.agent.tool._backend")
     def test_interactive_passes_role_prompt(self, mock_backend, mock_exit, tool_ctx):
         """Interactive mode passes role_prompt to run_interactive."""
-        mock_backend.run_interactive.return_value = 0
+        mock_backend.run_interactive.return_value = (0, None)
 
         with pytest.raises(SystemExit):
             _agent_run(tool_ctx, {})
@@ -531,7 +531,7 @@ class TestAgentRunInteractive:
     @patch("repo_tools.agent.tool._backend")
     def test_interactive_exits_with_returncode(self, mock_backend, mock_exit, tool_ctx):
         """Interactive exits with the return code from run_interactive."""
-        mock_backend.run_interactive.return_value = 0
+        mock_backend.run_interactive.return_value = (0, None)
 
         with pytest.raises(SystemExit):
             _agent_run(tool_ctx, {})
@@ -542,7 +542,7 @@ class TestAgentRunInteractive:
     @patch("repo_tools.agent.tool._backend")
     def test_interactive_forwards_nonzero_exit(self, mock_backend, mock_exit, tool_ctx):
         """Interactive forwards non-zero exit code."""
-        mock_backend.run_interactive.return_value = 42
+        mock_backend.run_interactive.return_value = (42, None)
 
         with pytest.raises(SystemExit):
             _agent_run(tool_ctx, {})

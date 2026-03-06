@@ -7,9 +7,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +24,32 @@ from .tickets import _ROLE_ALLOWED_TRANSITIONS, _tool_mark_criteria, _tool_reset
 from .worktree import ensure_worktree, remove_worktree
 
 _backend: ClaudeBackend | None = None
+
+
+def _setup_file_logging(
+    workspace_root: Path,
+    role: str,
+    ticket: str | None,
+) -> logging.FileHandler | None:
+    """Attach a file handler to the repo_tools logger.
+
+    Logs go to ``_agent/logs/<role>-<ticket>-<timestamp>.log`` for headless
+    sessions or ``_agent/logs/interactive-<timestamp>.log`` for interactive.
+    """
+    log_dir = workspace_root / "_agent" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    if ticket:
+        filename = f"{role}-{ticket}-{ts}.log"
+    else:
+        filename = f"interactive-{ts}.log"
+    handler = logging.FileHandler(log_dir / filename, encoding="utf-8")
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(name)s %(levelname)s %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    logging.getLogger("repo_tools").addHandler(handler)
+    return handler
 
 
 def _ensure_backend(args: dict[str, Any]) -> ClaudeBackend:
@@ -60,6 +88,10 @@ def _render_role_prompt(role: str, **kwargs: str) -> str:
     prompts_dir = Path(__file__).parent / "prompts"
     template_file = prompts_dir / f"{role}.txt"
     if not template_file.exists():
+        if role in ("worker", "reviewer", "orchestrator"):
+            raise FileNotFoundError(
+                f"Missing prompt template for known role {role!r}: {template_file}"
+            )
         return ""
     parts: list[str] = []
     common_file = prompts_dir / "common.txt"
@@ -290,6 +322,8 @@ def _agent_run(tool_ctx: ToolContext, args: dict[str, Any]) -> str | None:
     ticket = args.get("ticket")
     agent_cwd = tool_ctx.workspace_root
 
+    _setup_file_logging(tool_ctx.workspace_root, role or "orchestrator", ticket)
+
     # Worktree setup — always for ticket-based runs
     if role and ticket:
         agent_cwd = ensure_worktree(tool_ctx.workspace_root, ticket)
@@ -318,15 +352,51 @@ def _agent_run(tool_ctx: ToolContext, args: dict[str, Any]) -> str | None:
     backend = _ensure_backend(args)
 
     if prompt is None:
-        # Interactive mode
-        logger.info("Starting interactive agent session")
-        rc = backend.run_interactive(
+        # Interactive mode — with event loop support
+        from .events import (
+            clear_subscriptions,
+            has_subscriptions,
+            poll_until_fired,
+            pop_subscription,
+            resolve_event_config,
+            run_payload,
+        )
+
+        interactive_kwargs = dict(
             role_prompt=role_prompt,
             rules_path=rules_path,
             project_root=tool_ctx.workspace_root,
             tool_config=args,
             cwd=agent_cwd,
         )
+
+        logger.info("Starting interactive agent session")
+        rc, session_id = backend.run_interactive(**interactive_kwargs)
+
+        # Event loop: run → poll → resume same session with payload
+        while has_subscriptions():
+            sub = pop_subscription()
+            if sub is None:
+                break
+            group, event = sub["group"], sub["event"]
+            logger.info(f"Event subscription: {group}.{event} — polling...")
+            try:
+                event_cfg = resolve_event_config(args, group, event)
+            except KeyError as exc:
+                logger.error(f"Bad event subscription: {exc}")
+                continue
+            merged_tokens = {**tool_ctx.tokens, **sub.get("tokens", {})}
+            poll_until_fired(event_cfg, merged_tokens, tool_ctx.config, agent_cwd)
+            event_payload = run_payload(event_cfg, merged_tokens, tool_ctx.config, agent_cwd)
+            resume_prompt = f"Event '{group}.{event}' fired.\n\n{event_payload}"
+            logger.info(f"Event {group}.{event} fired, resuming session {session_id}")
+            rc, session_id = backend.run_interactive(
+                **interactive_kwargs,
+                initial_prompt=resume_prompt,
+                resume=session_id,
+            )
+
+        clear_subscriptions()
         sys.exit(rc)
 
     # Headless mode

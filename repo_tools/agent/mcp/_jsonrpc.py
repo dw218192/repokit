@@ -105,6 +105,7 @@ def serve_stdio(
         try:
             req = json.loads(line)
         except json.JSONDecodeError:
+            print(f"{label}: malformed JSON-RPC, skipping: {line!r}", file=sys.stderr)
             continue
 
         try:
@@ -114,7 +115,7 @@ def serve_stdio(
             req_id = req.get("id") if isinstance(req, dict) else None
             if req_id is not None:
                 response = respond(
-                    req_id, error={"code": -32603, "message": "Internal error"},
+                    req_id, error={"code": -32603, "message": f"Internal error: {exc}"},
                 )
             else:
                 continue

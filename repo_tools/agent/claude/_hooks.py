@@ -1,14 +1,19 @@
 """Hook factories for agent sessions — no SDK dependency.
 
 These are plain async functions that use the rules engine.
+The type annotations reference SDK types only in TYPE_CHECKING
+to keep this module importable without the SDK installed.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..rules import check_command, load_rules
+
+if TYPE_CHECKING:
+    from claude_agent_sdk.types import HookContext, HookInput, SyncHookJSONOutput
 
 
 def _make_check_bash_hook(
@@ -17,8 +22,8 @@ def _make_check_bash_hook(
     """Create a PreToolUse hook that checks Bash commands against the rules file."""
 
     async def check_bash(
-        input_data: dict[str, Any], tool_use_id: str | None, context: dict,
-    ) -> dict[str, Any]:
+        input_data: HookInput, tool_use_id: str | None, context: HookContext,
+    ) -> SyncHookJSONOutput:
         command = input_data.get("tool_input", {}).get("command", "")
         cwd = Path(input_data.get("cwd", "."))
 
@@ -54,8 +59,8 @@ def _make_approve_mcp_hook():
     """Create a PermissionRequest hook that auto-approves MCP tool calls."""
 
     async def approve_mcp(
-        input_data: dict[str, Any], tool_use_id: str | None, context: dict,
-    ) -> dict[str, Any]:
+        input_data: HookInput, tool_use_id: str | None, context: HookContext,
+    ) -> SyncHookJSONOutput:
         return {
             "hookSpecificOutput": {
                 "hookEventName": "PermissionRequest",

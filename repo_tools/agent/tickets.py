@@ -299,15 +299,17 @@ def _tickets_dir(root: Path) -> Path:
 
 
 def _load_required_criteria(root: Path) -> list[str]:
-    """Read ``agent.required_criteria`` from config.yaml."""
+    """Read ``agent.required_criteria`` from config.yaml.
+
+    Raises on corrupt YAML or unexpected structure so broken configs
+    are caught early rather than silently producing tickets without
+    required criteria.
+    """
     config_path = root / "config.yaml"
     if not config_path.exists():
         return []
-    try:
-        import yaml
-        data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    except Exception:
-        return []
+    import yaml
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         return []
     agent = data.get("agent")
@@ -465,16 +467,10 @@ def _tool_update_ticket(root: Path, args: dict, *, role: str | None = None) -> d
 
     ticket_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
-    # Worktree lifecycle: remove worktree on close (best-effort)
+    # Worktree lifecycle: remove worktree on close
     if "status" in updates and data["ticket"]["status"] == "closed":
-        try:
-            from .worktree import remove_worktree
-            remove_worktree(root, tid)
-        except Exception as exc:
-            import logging
-            logging.getLogger(__name__).warning(
-                f"Failed to remove worktree for {tid}: {exc}"
-            )
+        from .worktree import remove_worktree
+        remove_worktree(root, tid)
 
     return {"text": f"Ticket '{tid}' updated: {', '.join(updates.keys())}"}
 

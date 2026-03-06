@@ -16,6 +16,7 @@ from rich.syntax import Syntax
 
 from repo_tools.agent.tui import (
     AgentApp,
+    AvailableToolsPanel,
     ChoicePanel,
     MarkdownMessage,
     PlanApprovalBar,
@@ -726,6 +727,77 @@ class TestTicketPanel:
                     assert len(body_statics) == 1
                     rendered = str(body_statics[0].render())
                     assert "Markdown" in rendered
+
+        _run(_test)
+
+
+# ── AvailableToolsPanel tests ────────────────────────────────────────────────
+
+
+class TestAvailableToolsPanel:
+    def test_groups_tools_by_category(self):
+        """Panel groups tools and shows collapsible sections per group."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+
+            tools = [
+                {"name": "Read", "description": "", "group": "Built-in"},
+                {"name": "Edit", "description": "", "group": "Built-in"},
+                {"name": "lint", "description": "Run linter", "group": "MCP"},
+            ]
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield AvailableToolsPanel(tools=tools, id="atp")
+
+            app = _App()
+            async with app.run_test():
+                panel = app.query_one("#atp", AvailableToolsPanel)
+                # Direct children are group-level collapsibles
+                group_sections = [
+                    c for c in panel.children if isinstance(c, Collapsible)
+                ]
+                assert len(group_sections) == 2
+                titles = {str(s.title) for s in group_sections}
+                assert "Built-in (2)" in titles
+                assert "MCP (1)" in titles
+
+        _run(_test)
+
+    def test_empty_tools_shows_placeholder(self):
+        """Panel with no tools shows a placeholder message."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+            from textual.widgets import Static
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield AvailableToolsPanel(tools=[], id="atp")
+
+            app = _App()
+            async with app.run_test():
+                panel = app.query_one("#atp", AvailableToolsPanel)
+                statics = panel.query(Static)
+                texts = [s.render().plain for s in statics]
+                assert any("(no tools registered)" in t for t in texts)
+
+        _run(_test)
+
+    def test_tab_exists_in_compose(self):
+        """AgentApp compose includes the Available tab."""
+
+        async def _test():
+            opts = _make_mock_options()
+            tools_meta = [
+                {"name": "Bash", "description": "", "group": "Built-in"},
+            ]
+            with patch("repo_tools.agent.tui.AgentApp._client_loop"):
+                app = AgentApp(options=opts, tools_metadata=tools_meta)
+                async with app.run_test():
+                    pane = app.query_one("#tab-available")
+                    assert pane is not None
 
         _run(_test)
 
