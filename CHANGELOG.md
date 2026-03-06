@@ -6,6 +6,8 @@
 - **In-process hooks**: PreToolUse (bash allowlist) and PermissionRequest (MCP auto-approve) hooks run as Python async callbacks instead of shell subprocess commands.
 - **In-process MCP tools**: Lint, CodeRabbit, and ticket CRUD tools are registered via SDK `@tool` decorator, eliminating three stdio subprocess spawns per agent session.
 - **New `sdk` dependency group**: `claude-agent-sdk>=0.1.0` and `rich>=13.0` (install with `uv sync --group sdk`).
+- **`register_subcommands()` hook**: `RepoTool` subclasses can override `register_subcommands(group)` to add subcommands while still using the standard `setup()` / `default_args()` / three-way merge pipeline. `_make_tool_command()` creates a `click.Group` when this hook is overridden.
+- **Agent tool uses standard pipeline**: `AgentTool` no longer overrides `create_click_command()`. Config fields `backend` and `max_turns` are now exposed as `--backend` and `--max-turns` CLI flags with proper defaults < config < CLI merge.
 
 ## 0.6.1
 

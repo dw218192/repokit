@@ -355,67 +355,6 @@ def _reset_ticket(workspace_root: Path, ticket_id: str) -> None:
     logger.info(result["text"])
 
 
-def _make_agent_command(tool: RepoTool) -> click.Group:
-    """Build the ``agent`` Click group."""
-
-    @click.group(
-        name="agent",
-        help="Run coding agents with workflows tailored for this repository.",
-        invoke_without_command=True,
-    )
-    @click.option("--role", default=None, type=click.Choice(["worker", "reviewer"]),
-                  help="Role for this agent")
-    @click.option("--ticket", default=None, help="Ticket ID (for worker/reviewer roles)")
-    @click.option("--debug-hooks", is_flag=True, default=False,
-                  help="Log hook decisions to _agent/hooks.log")
-    @click.pass_context
-    def agent(ctx: click.Context,
-              role: str | None, ticket: str | None,
-              debug_hooks: bool) -> None:
-        """Launch an agent session."""
-        if ctx.invoked_subcommand is not None:
-            return
-        if bool(role) != bool(ticket):
-            raise click.UsageError("--role and --ticket must be used together")
-        tool_ctx = _ctx_from_click(ctx)
-        # Merge: tool_config < CLI flags (matching framework convention)
-        args: dict[str, Any] = dict(tool_ctx.tool_config)
-        if role is not None:
-            args["role"] = role
-        if ticket is not None:
-            args["ticket"] = ticket
-        if debug_hooks:
-            args["debug_hooks"] = True
-        tool.execute(tool_ctx, args)
-
-    @agent.group(name="ticket", help="Manage agent tickets.")
-    def ticket_group() -> None:
-        pass
-
-    @ticket_group.command(name="reset")
-    @click.argument("ticket_id")
-    @click.pass_context
-    def ticket_reset(ctx: click.Context, ticket_id: str) -> None:
-        """Reset a ticket to 'todo' status."""
-        tool_ctx = _ctx_from_click(ctx)
-        _reset_ticket(tool_ctx.workspace_root, ticket_id)
-
-    @agent.group(name="worktree", help="Manage agent worktrees.")
-    def worktree_group() -> None:
-        pass
-
-    @worktree_group.command(name="remove")
-    @click.argument("ticket_id")
-    @click.pass_context
-    def worktree_remove(ctx: click.Context, ticket_id: str) -> None:
-        """Remove the worktree for a ticket."""
-        tool_ctx = _ctx_from_click(ctx)
-        _validate_ticket_id(ticket_id, "ticket_id")
-        remove_worktree(tool_ctx.workspace_root, ticket_id)
-
-    return agent
-
-
 # ── AgentTool ────────────────────────────────────────────────────────
 
 
@@ -423,14 +362,69 @@ class AgentTool(RepoTool):
     name = "agent"
     help = "Run coding agents with workflows tailored for this repository."
 
-    def create_click_command(self) -> click.BaseCommand | None:
-        return _make_agent_command(self)
-
     def setup(self, cmd: click.Command) -> click.Command:
+        cmd = click.option(
+            "--role", default=None,
+            type=click.Choice(["worker", "reviewer"]),
+            help="Role for this agent",
+        )(cmd)
+        cmd = click.option(
+            "--ticket", default=None,
+            help="Ticket ID (for worker/reviewer roles)",
+        )(cmd)
+        cmd = click.option(
+            "--debug-hooks", is_flag=True, default=None,
+            help="Log hook decisions to _agent/hooks.log",
+        )(cmd)
+        cmd = click.option(
+            "--backend", default=None,
+            type=click.Choice(["cli", "sdk"]),
+            help="Backend to use (cli or sdk)",
+        )(cmd)
+        cmd = click.option(
+            "--max-turns", default=None, type=int,
+            help="Maximum turns for headless mode",
+        )(cmd)
         return cmd
 
     def default_args(self, tokens: dict[str, str]) -> dict[str, Any]:
-        return {}
+        return {
+            "role": None,
+            "ticket": None,
+            "debug_hooks": False,
+            "backend": "cli",
+            "max_turns": None,
+        }
+
+    def register_subcommands(self, group: click.Group) -> None:
+        @group.group(name="ticket", help="Manage agent tickets.")
+        def ticket_group() -> None:
+            pass
+
+        @ticket_group.command(name="reset")
+        @click.argument("ticket_id")
+        @click.pass_context
+        def ticket_reset(ctx: click.Context, ticket_id: str) -> None:
+            """Reset a ticket to 'todo' status."""
+            tool_ctx = _ctx_from_click(ctx)
+            _reset_ticket(tool_ctx.workspace_root, ticket_id)
+
+        @group.group(name="worktree", help="Manage agent worktrees.")
+        def worktree_group() -> None:
+            pass
+
+        @worktree_group.command(name="remove")
+        @click.argument("ticket_id")
+        @click.pass_context
+        def worktree_remove(ctx: click.Context, ticket_id: str) -> None:
+            """Remove the worktree for a ticket."""
+            tool_ctx = _ctx_from_click(ctx)
+            _validate_ticket_id(ticket_id, "ticket_id")
+            remove_worktree(tool_ctx.workspace_root, ticket_id)
 
     def execute(self, ctx: ToolContext, args: dict[str, Any]) -> None:
+        role = args.get("role")
+        ticket = args.get("ticket")
+        if bool(role) != bool(ticket):
+            raise click.UsageError("--role and --ticket must be used together")
         _agent_run(ctx, args)

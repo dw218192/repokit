@@ -505,6 +505,14 @@ class RepoTool:
         """Return default args dict before config/CLI merge."""
         return {}
 
+    def register_subcommands(self, group: click.Group) -> None:
+        """Add subcommands to the tool's click group.
+
+        When overridden, ``_make_tool_command()`` creates a
+        ``click.Group`` with ``invoke_without_command=True`` instead
+        of a plain ``click.Command``.
+        """
+
     def create_click_command(self) -> click.BaseCommand | None:
         """Override to provide a custom Click group/command. Returns None by default."""
         return None

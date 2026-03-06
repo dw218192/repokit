@@ -30,8 +30,6 @@ if sys.platform == "win32":
 
     sys.unraisablehook = _quiet_unraisablehook
 
-import difflib
-
 from rich.markdown import Markdown
 from rich.syntax import Syntax
 from textual import events
@@ -266,23 +264,9 @@ def _summarize_tool(name: str, input_args: dict | None) -> str:
 
 
 def _format_tool_body(name: str, input_args: dict | None) -> Any:
-    """Format tool input as a Rich renderable (diff, JSON, or plain text)."""
+    """Format tool input as a Rich renderable (JSON syntax-highlighted)."""
     if not input_args:
         return "(no args)"
-    if name == "Edit":
-        old = input_args.get("old_string", "")
-        new = input_args.get("new_string", "")
-        fp = input_args.get("file_path", "")
-        diff_lines = list(difflib.unified_diff(
-            old.splitlines(keepends=True),
-            new.splitlines(keepends=True),
-            fromfile=fp, tofile=fp,
-        ))
-        if diff_lines:
-            return Syntax(
-                "".join(diff_lines[:30]), "diff",
-                theme="ansi_dark", line_numbers=False,
-            )
     try:
         text = json.dumps(input_args, indent=2)[:500]
     except (TypeError, ValueError):
@@ -791,33 +775,62 @@ class AgentApp(App):
 
     # ── Tool permission callback ────────────────────────────────────────
 
+    async def _wait_for_user_input(self) -> str:
+        """Block until the user submits text via PromptInput.
+
+        Raises asyncio.CancelledError if interrupted (e.g. Ctrl+C).
+        """
+        loop = asyncio.get_event_loop()
+        self._choice_future = loop.create_future()
+        try:
+            return await self._choice_future
+        finally:
+            self._choice_future = None
+
     async def _can_use_tool(
         self, tool_name: str, input_data: dict[str, Any], context: Any,
     ) -> Any:
-        from claude_agent_sdk import PermissionResultAllow
+        from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
 
-        if tool_name == "AskUserQuestion":
-            questions = input_data.get("questions", [])
-            if questions:
+        try:
+            if tool_name == "AskUserQuestion":
+                questions = input_data.get("questions", [])
+                if questions:
+                    chat_log = self.query_one("#chat-log", VerticalScroll)
+                    panel = ChoicePanel(questions)
+                    await chat_log.mount(panel)
+                    chat_log.scroll_end(animate=False)
+
+                    self._choice_questions = questions
+                    answer_text = await self._wait_for_user_input()
+                    answers = _parse_choice_answers(answer_text, questions)
+                    self._choice_questions = None
+
+                    return PermissionResultAllow(updated_input={
+                        "questions": questions,
+                        "answers": answers,
+                    })
+
+            if tool_name == "ExitPlanMode":
                 chat_log = self.query_one("#chat-log", VerticalScroll)
-                panel = ChoicePanel(questions)
-                await chat_log.mount(panel)
+                prompt = Static(
+                    "[bold]Plan ready.[/bold] Type [green]accept[/green]"
+                    " or provide feedback to reject:",
+                    markup=True,
+                )
+                prompt.styles.margin = (1, 1, 0, 1)
+                prompt.styles.padding = (0, 1)
+                prompt.styles.border = ("round", "cyan")
+                await chat_log.mount(prompt)
                 chat_log.scroll_end(animate=False)
 
-                self._choice_questions = questions
-                loop = asyncio.get_event_loop()
-                self._choice_future = loop.create_future()
+                answer = await self._wait_for_user_input()
+                if answer.strip().lower() in ("", "y", "yes", "accept"):
+                    return PermissionResultAllow(updated_input=input_data)
+                return PermissionResultDeny(message=answer)
 
-                answer_text = await self._choice_future
-                self._choice_future = None
-
-                answers = _parse_choice_answers(answer_text, questions)
-                self._choice_questions = None
-
-                return PermissionResultAllow(updated_input={
-                    "questions": questions,
-                    "answers": answers,
-                })
+        except asyncio.CancelledError:
+            return PermissionResultDeny(message="interrupted")
 
         return PermissionResultAllow(updated_input=input_data)
 
@@ -851,6 +864,14 @@ class AgentApp(App):
             self.query_one("#status-bar", StatusBar).set_status(
                 "Cancelled", "error",
             )
+            # Cancel any pending user-input Future (plan approval,
+            # AskUserQuestion) so _can_use_tool unblocks immediately.
+            if self._choice_future and not self._choice_future.done():
+                self._choice_future.cancel()
+            # Send interrupt through the SDK transport so the CLI
+            # subprocess actually stops its current turn.
+            if self._client is not None:
+                asyncio.ensure_future(self._client.interrupt())
             # Restart the client worker — Textual cancels the old one
             # (group="client"), which raises CancelledError inside
             # receive_response(), tearing down the SDK session cleanly.

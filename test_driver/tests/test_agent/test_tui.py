@@ -1034,21 +1034,11 @@ class TestFormatToolBody:
         assert isinstance(result, Syntax)
         assert result._lexer == "json"
 
-    def test_edit_diff(self):
+    def test_edit_rendered_as_json(self):
         args = {
             "file_path": "a.py",
             "old_string": "hello",
             "new_string": "world",
-        }
-        result = _format_tool_body("Edit", args)
-        assert isinstance(result, Syntax)
-        assert result._lexer == "diff"
-
-    def test_edit_identical_falls_back_to_json(self):
-        args = {
-            "file_path": "a.py",
-            "old_string": "same",
-            "new_string": "same",
         }
         result = _format_tool_body("Edit", args)
         assert isinstance(result, Syntax)
@@ -1642,5 +1632,163 @@ class TestHandleToolResultInUserMessage:
                 rendered = str(tg.render())
                 assert "\u25b8" not in rendered
                 assert rendered.count("\u2713") == 2
+
+        _run(_test)
+
+
+# ── ExitPlanMode approval tests ──────────────────────────────────────────────
+
+
+def _noop_client_app_class():
+    """Build an AgentApp subclass with _client_loop disabled for tests."""
+    from textual import work
+
+    class _NoClientApp(AgentApp):
+        @work(group="client")
+        async def _client_loop(self) -> None:
+            pass
+
+    return _NoClientApp
+
+
+class TestExitPlanModeApproval:
+    """ExitPlanMode tool should block for user acceptance/rejection."""
+
+    def test_accept_returns_allow(self):
+        """Typing 'accept' at the ExitPlanMode prompt returns Allow."""
+
+        async def _test():
+            App = _noop_client_app_class()
+            app = App(options=_make_mock_options())
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.pause()
+                loop = asyncio.get_event_loop()
+                result_holder: list = []
+
+                async def _call():
+                    r = await app._can_use_tool(
+                        "ExitPlanMode", {"allowedPrompts": []}, None,
+                    )
+                    result_holder.append(r)
+
+                task = loop.create_task(_call())
+                await pilot.pause()
+                await pilot.pause()
+
+                app._choice_future.set_result("accept")
+                await task
+
+                assert result_holder
+                assert result_holder[0].behavior == "allow"
+
+        _run(_test)
+
+    def test_feedback_returns_deny(self):
+        """Typing feedback text at the ExitPlanMode prompt returns Deny."""
+
+        async def _test():
+            App = _noop_client_app_class()
+            app = App(options=_make_mock_options())
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.pause()
+                loop = asyncio.get_event_loop()
+                result_holder: list = []
+
+                async def _call():
+                    r = await app._can_use_tool(
+                        "ExitPlanMode", {"allowedPrompts": []}, None,
+                    )
+                    result_holder.append(r)
+
+                task = loop.create_task(_call())
+                await pilot.pause()
+                await pilot.pause()
+
+                app._choice_future.set_result("needs more error handling")
+                await task
+
+                assert result_holder
+                assert result_holder[0].behavior == "deny"
+                assert "error handling" in result_holder[0].message
+
+        _run(_test)
+
+    def test_cancel_returns_deny(self):
+        """Cancelling the Future (Ctrl+C) returns Deny with 'interrupted'."""
+
+        async def _test():
+            App = _noop_client_app_class()
+            app = App(options=_make_mock_options())
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.pause()
+                loop = asyncio.get_event_loop()
+                result_holder: list = []
+
+                async def _call():
+                    r = await app._can_use_tool(
+                        "ExitPlanMode", {}, None,
+                    )
+                    result_holder.append(r)
+
+                task = loop.create_task(_call())
+                await pilot.pause()
+                await pilot.pause()
+
+                app._choice_future.cancel()
+                await task
+
+                assert result_holder
+                assert result_holder[0].behavior == "deny"
+                assert "interrupted" in result_holder[0].message
+
+        _run(_test)
+
+
+# ── Ctrl+C interrupt tests ──────────────────────────────────────────────────
+
+
+class TestCtrlCInterrupt:
+    """action_cancel_or_quit should interrupt the SDK client and cancel futures."""
+
+    def test_cancels_choice_future(self):
+        """Ctrl+C cancels a pending choice future."""
+
+        async def _test():
+            App = _noop_client_app_class()
+            app = App(options=_make_mock_options())
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.pause()
+                loop = asyncio.get_event_loop()
+                app._choice_future = loop.create_future()
+                app._query_active = True
+
+                mock_client = AsyncMock()
+                app._client = mock_client
+
+                app.action_cancel_or_quit()
+                await pilot.pause()
+
+                assert app._choice_future.cancelled()
+                mock_client.interrupt.assert_called_once()
+
+        _run(_test)
+
+    def test_interrupt_called_on_client(self):
+        """Ctrl+C calls client.interrupt() to stop the CLI subprocess."""
+
+        async def _test():
+            App = _noop_client_app_class()
+            app = App(options=_make_mock_options())
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.pause()
+                app._query_active = True
+
+                mock_client = AsyncMock()
+                app._client = mock_client
+
+                app.action_cancel_or_quit()
+                await pilot.pause()
+
+                mock_client.interrupt.assert_called_once()
 
         _run(_test)
