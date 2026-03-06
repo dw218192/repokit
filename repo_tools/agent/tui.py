@@ -30,7 +30,10 @@ if sys.platform == "win32":
 
     sys.unraisablehook = _quiet_unraisablehook
 
+import difflib
+
 from rich.markdown import Markdown
+from rich.syntax import Syntax
 from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -262,6 +265,31 @@ def _summarize_tool(name: str, input_args: dict | None) -> str:
     return f"{name}({arg})"
 
 
+def _format_tool_body(name: str, input_args: dict | None) -> Any:
+    """Format tool input as a Rich renderable (diff, JSON, or plain text)."""
+    if not input_args:
+        return "(no args)"
+    if name == "Edit":
+        old = input_args.get("old_string", "")
+        new = input_args.get("new_string", "")
+        fp = input_args.get("file_path", "")
+        diff_lines = list(difflib.unified_diff(
+            old.splitlines(keepends=True),
+            new.splitlines(keepends=True),
+            fromfile=fp, tofile=fp,
+        ))
+        if diff_lines:
+            return Syntax(
+                "".join(diff_lines[:30]), "diff",
+                theme="ansi_dark", line_numbers=False,
+            )
+    try:
+        text = json.dumps(input_args, indent=2)[:500]
+    except (TypeError, ValueError):
+        text = str(input_args)[:500]
+    return Syntax(text, "json", theme="ansi_dark", line_numbers=False)
+
+
 class ChoicePanel(Static):
     """Renders AskUserQuestion choices for the user."""
 
@@ -347,16 +375,10 @@ class ToolLog(VerticalScroll):
     ) -> None:
         """Register a new tool call as a collapsed collapsible entry."""
         summary = _summarize_tool(name, input_args)
-        body_text = ""
-        if input_args:
-            try:
-                body_text = json.dumps(input_args, indent=2)[:500]
-            except (TypeError, ValueError):
-                body_text = str(input_args)[:500]
         output_widget = Static("", classes="tool-log-output")
         output_widget.display = False
         entry = Collapsible(
-            Static(body_text or "(no args)", classes="tool-log-body"),
+            Static(_format_tool_body(name, input_args), classes="tool-log-body"),
             output_widget,
             title=f"\u23f3 {summary}",
             collapsed=True,
@@ -673,9 +695,9 @@ class AgentApp(App):
             for block in msg.content:
                 if isinstance(block, TextBlock):
                     self._current_tool_group = None
-                    widget = MarkdownMessage("")
-                    widget.update(Markdown(block.text))
-                    await chat_log.mount(widget)
+                    await chat_log.mount(
+                        MarkdownMessage(Markdown(block.text)),
+                    )
                 elif isinstance(block, ToolUseBlock):
                     # Compact group in chat
                     if self._current_tool_group is None:

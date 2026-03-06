@@ -12,6 +12,8 @@ import pytest
 
 from textual.widgets import Collapsible
 
+from rich.syntax import Syntax
+
 from repo_tools.agent.tui import (
     AgentApp,
     ChoicePanel,
@@ -24,6 +26,7 @@ from repo_tools.agent.tui import (
     ToolLog,
     TUILogHandler,
     UserMessage,
+    _format_tool_body,
     _parse_choice_answers,
     _summarize_tool,
     _ticket_to_markdown,
@@ -1016,6 +1019,40 @@ class TestSummarizeTool:
     def test_unknown_tool_no_string(self):
         result = _summarize_tool("CustomTool", {"count": 42})
         assert result == "CustomTool(...)"
+
+
+# ── _format_tool_body tests ─────────────────────────────────────────────────
+
+
+class TestFormatToolBody:
+    def test_no_args(self):
+        assert _format_tool_body("Bash", None) == "(no args)"
+        assert _format_tool_body("Bash", {}) == "(no args)"
+
+    def test_json_syntax_for_generic_tool(self):
+        result = _format_tool_body("Read", {"file_path": "/foo.py"})
+        assert isinstance(result, Syntax)
+        assert result._lexer == "json"
+
+    def test_edit_diff(self):
+        args = {
+            "file_path": "a.py",
+            "old_string": "hello",
+            "new_string": "world",
+        }
+        result = _format_tool_body("Edit", args)
+        assert isinstance(result, Syntax)
+        assert result._lexer == "diff"
+
+    def test_edit_identical_falls_back_to_json(self):
+        args = {
+            "file_path": "a.py",
+            "old_string": "same",
+            "new_string": "same",
+        }
+        result = _format_tool_body("Edit", args)
+        assert isinstance(result, Syntax)
+        assert result._lexer == "json"
 
 
 # ── StatusBar busy indicator tests ───────────────────────────────────────────
