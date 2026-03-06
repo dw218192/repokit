@@ -10,8 +10,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from textual.widgets import Collapsible
+
 from repo_tools.agent.tui import (
     AgentApp,
+    ChoicePanel,
     MarkdownMessage,
     PromptInput,
     QueueBar,
@@ -21,6 +24,7 @@ from repo_tools.agent.tui import (
     ToolLog,
     TUILogHandler,
     UserMessage,
+    _parse_choice_answers,
     _summarize_tool,
     _ticket_to_markdown,
 )
@@ -803,6 +807,124 @@ class TestToolLog:
 
         _run(_test)
 
+    def test_set_result_shows_output(self):
+        """set_result with output reveals the pre-created output widget."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield ToolLog(id="tl")
+
+            app = _App()
+            async with app.run_test() as pilot:
+                tl = app.query_one("#tl", ToolLog)
+                tl.add_tool("t1", "Bash", {"command": "echo hi"})
+                await pilot.pause()
+                out = tl._output_widgets["t1"]
+                assert not out.display
+
+                tl.set_result("t1", "hello world")
+                await pilot.pause()
+                assert out.display
+                assert "hello world" in str(out.render())
+
+        _run(_test)
+
+    def test_set_result_error_adds_error_class(self):
+        """Error output gets tool-log-error class on the output widget."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield ToolLog(id="tl")
+
+            app = _App()
+            async with app.run_test() as pilot:
+                tl = app.query_one("#tl", ToolLog)
+                tl.add_tool("t1", "Bash", {"command": "fail"})
+                await pilot.pause()
+                tl.set_result("t1", "command failed", is_error=True)
+                await pilot.pause()
+                out = tl._output_widgets["t1"]
+                assert out.display
+                assert out.has_class("tool-log-error")
+
+        _run(_test)
+
+    def test_set_result_empty_output_stays_hidden(self):
+        """set_result with empty output leaves the output widget hidden."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield ToolLog(id="tl")
+
+            app = _App()
+            async with app.run_test() as pilot:
+                tl = app.query_one("#tl", ToolLog)
+                tl.add_tool("t1", "Read", None)
+                await pilot.pause()
+                tl.set_result("t1", "")
+                await pilot.pause()
+                out = tl._output_widgets["t1"]
+                assert not out.display
+
+        _run(_test)
+
+    def test_nested_tool_under_parent(self):
+        """add_tool with parent_id mounts child inside parent Collapsible."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield ToolLog(id="tl")
+
+            app = _App()
+            async with app.run_test() as pilot:
+                tl = app.query_one("#tl", ToolLog)
+                tl.add_tool("parent-1", "Task", {"description": "explore"})
+                await pilot.pause()
+                tl.add_tool("child-1", "Read", {"file_path": "/a.py"}, parent_id="parent-1")
+                await pilot.pause()
+
+                parent_entry, _ = tl._entries["parent-1"]
+                child_entry, _ = tl._entries["child-1"]
+
+                # Child should be mounted inside the parent Collapsible
+                nested = parent_entry.query(Collapsible)
+                assert child_entry in nested
+
+        _run(_test)
+
+    def test_nested_tool_unknown_parent_mounts_top_level(self):
+        """add_tool with unknown parent_id mounts at top level."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield ToolLog(id="tl")
+
+            app = _App()
+            async with app.run_test() as pilot:
+                tl = app.query_one("#tl", ToolLog)
+                tl.add_tool("child-1", "Read", None, parent_id="nonexistent")
+                await pilot.pause()
+                child_entry, _ = tl._entries["child-1"]
+                # Should be a direct child of ToolLog
+                assert child_entry.parent is tl
+
+        _run(_test)
+
     def test_multiple_tools_tracked(self):
         """Multiple tool calls are tracked independently."""
 
@@ -826,6 +948,34 @@ class TestToolLog:
                 # Both stay collapsed (collapsed by default)
                 assert tl._entries["t1"][0].collapsed
                 assert tl._entries["t2"][0].collapsed
+
+        _run(_test)
+
+    def test_clear_removes_entries_and_children(self):
+        """clear() empties _entries, _output_widgets, and removes all child widgets."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield ToolLog(id="tl")
+
+            app = _App()
+            async with app.run_test() as pilot:
+                tl = app.query_one("#tl", ToolLog)
+                tl.add_tool("t1", "Read", None)
+                tl.add_tool("t2", "Edit", None)
+                await pilot.pause()
+                assert len(tl._entries) == 2
+                assert len(tl._output_widgets) == 2
+                assert len(tl.query(Collapsible)) == 2
+
+                tl.clear()
+                await pilot.pause()
+                assert len(tl._entries) == 0
+                assert len(tl._output_widgets) == 0
+                assert len(tl.query(Collapsible)) == 0
 
         _run(_test)
 
@@ -1063,6 +1213,92 @@ class TestSlashCommands:
 
         _run(_test)
 
+    def test_clear_command_resets_ui(self):
+        """/clear clears chat log, tool log, and resets status bar."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+            from textual.containers import VerticalScroll
+            from textual.widgets import Static
+
+            client_loop_calls = []
+
+            class _App(App):
+                CSS = "#chat-log { height: 1fr; }"
+
+                def compose(self) -> ComposeResult:
+                    yield VerticalScroll(id="chat-log")
+                    yield ToolLog(id="tool-log")
+                    yield StatusBar(id="status-bar")
+                    yield QueueBar(id="queue-bar")
+                    yield PromptInput(id="prompt-input")
+
+                _query_active = False
+                _pending_tools: dict = {}
+                _current_tool_group = None
+                _queued_input: list = []
+                _choice_future = None
+
+                def _client_loop(self):
+                    client_loop_calls.append(1)
+
+                def _refresh_queue_bar(self):
+                    self.query_one("#queue-bar", QueueBar).refresh_queue(
+                        self._queued_input,
+                    )
+
+                async def on_prompt_input_submitted(self, event):
+                    cmd = event.text.strip()
+                    if cmd == "/clear":
+                        self._queued_input.clear()
+                        self._refresh_queue_bar()
+                        self._pending_tools.clear()
+                        self._current_tool_group = None
+                        self.query_one(
+                            "#chat-log", VerticalScroll,
+                        ).remove_children()
+                        self.query_one("#tool-log", ToolLog).clear()
+                        self.query_one(
+                            "#status-bar", StatusBar,
+                        ).set_status("Ready", "ready")
+                        self._client_loop()
+                        return
+
+            app = _App()
+            async with app.run_test(size=(80, 24)) as pilot:
+                # Populate some state
+                chat_log = app.query_one("#chat-log", VerticalScroll)
+                await chat_log.mount(Static("hello"))
+                tl = app.query_one("#tool-log", ToolLog)
+                tl.add_tool("t1", "Bash", {"command": "ls"})
+                app.query_one("#status-bar", StatusBar).set_status(
+                    "Working...", "working",
+                )
+                await pilot.pause()
+
+                assert len(chat_log.query(Static)) > 0
+                assert len(tl._entries) > 0
+
+                # Type /clear and submit
+                pi = app.query_one("#prompt-input", PromptInput)
+                pi.focus()
+                for ch in "/clear":
+                    await pilot.press(ch)
+                await pilot.press("enter")
+                await pilot.pause()
+
+                # Chat log cleared
+                assert len(chat_log.query(Static)) == 0
+                # Tool log cleared
+                assert len(tl._entries) == 0
+                # Status bar back to ready
+                sb = app.query_one("#status-bar", StatusBar)
+                assert sb.has_class("status-ready")
+                # Client loop restarted
+                assert len(client_loop_calls) == 1
+
+        _run(_test)
+
 
 # ── _ticket_to_markdown tests ──────────────────────────────────────────────
 
@@ -1153,5 +1389,221 @@ class TestLogPane:
                 handler.emit(record)
                 await pilot.pause()
                 assert len(rl.lines) > 0
+
+        _run(_test)
+
+
+# ── _summarize_tool additions ──────────────────────────────────────────────
+
+
+class TestSummarizeToolAdditions:
+    def test_webfetch_url(self):
+        assert _summarize_tool("WebFetch", {"url": "https://example.com"}) == "WebFetch(https://example.com)"
+
+    def test_websearch_query(self):
+        assert _summarize_tool("WebSearch", {"query": "python docs"}) == "WebSearch(python docs)"
+
+    def test_task_description(self):
+        assert _summarize_tool("Task", {"description": "find files"}) == "Task(find files)"
+
+    def test_agent_description(self):
+        assert _summarize_tool("Agent", {"description": "explore codebase"}) == "Agent(explore codebase)"
+
+    def test_todowrite_ignores_args(self):
+        assert _summarize_tool("TodoWrite", {"todos": [{"task": "x"}]}) == "TodoWrite()"
+
+
+# ── ChoicePanel tests ──────────────────────────────────────────────────────
+
+
+class TestChoicePanel:
+    def test_renders_question_and_options(self):
+        """ChoicePanel displays question text and numbered options."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+
+            questions = [{
+                "question": "Which approach?",
+                "options": [
+                    {"label": "Fast", "description": "Quick but rough"},
+                    {"label": "Thorough", "description": "Slow but careful"},
+                ],
+            }]
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield ChoicePanel(questions, id="cp")
+
+            app = _App()
+            async with app.run_test(size=(80, 24)) as pilot:
+                cp = app.query_one("#cp", ChoicePanel)
+                await pilot.pause()
+                rendered = str(cp.render())
+                assert "Which approach?" in rendered
+                assert "1." in rendered
+                assert "Fast" in rendered
+                assert "2." in rendered
+                assert "Thorough" in rendered
+
+        _run(_test)
+
+    def test_multiple_questions(self):
+        """ChoicePanel handles multiple questions."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+
+            questions = [
+                {"question": "Q1?", "options": [{"label": "A"}, {"label": "B"}]},
+                {"question": "Q2?", "options": [{"label": "X"}, {"label": "Y"}]},
+            ]
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield ChoicePanel(questions, id="cp")
+
+            app = _App()
+            async with app.run_test(size=(80, 24)) as pilot:
+                cp = app.query_one("#cp", ChoicePanel)
+                await pilot.pause()
+                rendered = str(cp.render())
+                assert "Q1?" in rendered
+                assert "Q2?" in rendered
+
+        _run(_test)
+
+
+# ── _parse_choice_answers tests ────────────────────────────────────────────
+
+
+class TestParseChoiceAnswers:
+    _QUESTIONS = [
+        {
+            "question": "Which approach?",
+            "options": [
+                {"label": "Fast"},
+                {"label": "Thorough"},
+            ],
+        },
+    ]
+
+    def test_number_maps_to_label(self):
+        result = _parse_choice_answers("1", self._QUESTIONS)
+        assert result == {"Which approach?": "Fast"}
+
+    def test_second_option(self):
+        result = _parse_choice_answers("2", self._QUESTIONS)
+        assert result == {"Which approach?": "Thorough"}
+
+    def test_free_text(self):
+        result = _parse_choice_answers("something custom", self._QUESTIONS)
+        assert result == {"Which approach?": "something custom"}
+
+    def test_out_of_range_number(self):
+        result = _parse_choice_answers("99", self._QUESTIONS)
+        assert result == {"Which approach?": "99"}
+
+    def test_multiple_questions_semicolon(self):
+        questions = [
+            {"question": "Q1?", "options": [{"label": "A"}, {"label": "B"}]},
+            {"question": "Q2?", "options": [{"label": "X"}, {"label": "Y"}]},
+        ]
+        result = _parse_choice_answers("1; 2", questions)
+        assert result == {"Q1?": "A", "Q2?": "Y"}
+
+    def test_missing_answer_defaults_empty(self):
+        questions = [
+            {"question": "Q1?", "options": [{"label": "A"}]},
+            {"question": "Q2?", "options": [{"label": "X"}]},
+        ]
+        result = _parse_choice_answers("1", questions)
+        assert result == {"Q1?": "A", "Q2?": ""}
+
+
+# ── AskUserQuestion in ALLOWED_TOOLS test ──────────────────────────────────
+
+
+class TestAllowedTools:
+    def test_ask_user_question_in_allowed_tools(self):
+        from repo_tools.agent.claude._shared import ALLOWED_TOOLS
+        assert "AskUserQuestion" in ALLOWED_TOOLS
+
+
+# ── Handle ToolResult in UserMessage tests ─────────────────────────────────
+
+
+class TestHandleToolResultInUserMessage:
+    def test_tool_result_in_user_message_clears_pending(self):
+        """ToolResultBlock inside SDK UserMessage resolves pending tool icons."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+            from textual.containers import VerticalScroll
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield VerticalScroll(id="chat-log")
+                    yield ToolLog(id="tool-log")
+
+            app = _App()
+            async with app.run_test(size=(80, 24)) as pilot:
+                # Simulate: a tool was registered as pending
+                tg = ToolCallGroup()
+                chat_log = app.query_one("#chat-log", VerticalScroll)
+                await chat_log.mount(tg)
+                tg.add_tool("tool-123", "Read")
+                await pilot.pause()
+
+                # Before result: should show ▸
+                rendered = str(tg.render())
+                assert "\u25b8" in rendered
+
+                # Simulate tool result
+                tg.set_result("tool-123", is_error=False)
+                await pilot.pause()
+
+                # After result: should show ✓
+                rendered = str(tg.render())
+                assert "\u2713" in rendered
+                assert "\u25b8" not in rendered
+
+        _run(_test)
+
+    def test_result_message_flushes_remaining_pending(self):
+        """Pending tools left over at ResultMessage time are flushed to ✓."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+            from textual.containers import VerticalScroll
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield VerticalScroll(id="chat-log")
+                    yield ToolLog(id="tool-log")
+
+            app = _App()
+            async with app.run_test(size=(80, 24)) as pilot:
+                chat_log = app.query_one("#chat-log", VerticalScroll)
+                tg = ToolCallGroup()
+                await chat_log.mount(tg)
+
+                # Register two tools, only resolve one
+                tg.add_tool("t1", "Read")
+                tg.add_tool("t2", "Edit")
+                tg.set_result("t1", is_error=False)
+                await pilot.pause()
+
+                # t2 still pending
+                rendered = str(tg.render())
+                assert "\u25b8" in rendered  # t2 still has ▸
+
+                # Simulate the flush that ResultMessage does
+                tg.set_result("t2", is_error=False)
+                await pilot.pause()
+
+                rendered = str(tg.render())
+                assert "\u25b8" not in rendered
+                assert rendered.count("\u2713") == 2
 
         _run(_test)

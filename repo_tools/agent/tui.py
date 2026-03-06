@@ -55,7 +55,7 @@ class UserMessage(Static):
 
     DEFAULT_CSS = """
     UserMessage {
-        margin: 0 1;
+        margin: 1 1 0 1;
         padding: 0 1;
         color: $text;
         background: $boost;
@@ -69,7 +69,7 @@ class MarkdownMessage(Static):
 
     DEFAULT_CSS = """
     MarkdownMessage {
-        margin: 0 1;
+        margin: 1 1 0 1;
         padding: 0 1;
     }
     """
@@ -244,6 +244,14 @@ def _summarize_tool(name: str, input_args: dict | None) -> str:
         arg = input_args.get("pattern", "")
     elif name == "Grep":
         arg = input_args.get("pattern", "")
+    elif name == "WebFetch":
+        arg = input_args.get("url", "")
+    elif name == "WebSearch":
+        arg = input_args.get("query", "")
+    elif name in ("Task", "Agent"):
+        arg = input_args.get("description", "")
+    elif name == "TodoWrite":
+        return "TodoWrite()"
     else:
         arg = next(
             (str(v) for v in input_args.values() if isinstance(v, str)),
@@ -254,6 +262,58 @@ def _summarize_tool(name: str, input_args: dict | None) -> str:
     return f"{name}({arg})"
 
 
+class ChoicePanel(Static):
+    """Renders AskUserQuestion choices for the user."""
+
+    DEFAULT_CSS = """
+    ChoicePanel {
+        margin: 0 1;
+        padding: 1;
+        border: round $accent;
+        background: $surface;
+    }
+    """
+
+    def __init__(self, questions: list[dict], **kwargs: Any) -> None:
+        lines: list[str] = []
+        for q in questions:
+            lines.append(f"[bold]{q.get('question', '')}[/bold]")
+            for j, opt in enumerate(q.get("options", []), 1):
+                label = opt.get("label", "")
+                desc = opt.get("description", "")
+                lines.append(
+                    f"  {j}. {label}" + (f" — {desc}" if desc else ""),
+                )
+            lines.append("")
+        super().__init__("\n".join(lines), markup=True, **kwargs)
+
+
+def _parse_choice_answers(raw: str, questions: list[dict]) -> dict[str, str]:
+    """Parse user input as numbered choices or free text.
+
+    Multiple questions separated by semicolons.
+    Numbers map to option labels; free text passed as-is.
+    """
+    parts = [p.strip() for p in raw.split(";")]
+    answers: dict[str, str] = {}
+    for i, q in enumerate(questions):
+        q_text = q.get("question", f"q{i}")
+        if i < len(parts):
+            token = parts[i]
+            try:
+                idx = int(token) - 1
+                options = q.get("options", [])
+                if 0 <= idx < len(options):
+                    answers[q_text] = options[idx].get("label", token)
+                else:
+                    answers[q_text] = token
+            except ValueError:
+                answers[q_text] = token
+        else:
+            answers[q_text] = ""
+    return answers
+
+
 class ToolLog(VerticalScroll):
     """Rolling log of tool calls with collapsible arg/output details."""
 
@@ -262,18 +322,28 @@ class ToolLog(VerticalScroll):
         height: 1fr;
     }
     ToolLog Collapsible { width: 100%; }
+    ToolLog CollapsibleTitle { width: 100%; text-overflow: ellipsis; }
     ToolLog .tool-pending CollapsibleTitle { color: yellow; }
     ToolLog .tool-success CollapsibleTitle { color: green; }
     ToolLog .tool-error CollapsibleTitle { color: red; }
+    ToolLog .tool-log-output { color: $text-muted; margin-top: 1; }
+    ToolLog .tool-log-error { color: red; }
+    ToolLog Collapsible Collapsible { margin-left: 2; }
+    ToolLog Collapsible.-collapsed Collapsible { display: none; }
     """
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         # tool_id → (Collapsible, summary_text)
         self._entries: dict[str, tuple[Collapsible, str]] = {}
+        self._output_widgets: dict[str, Static] = {}
+
+    def on_mount(self) -> None:
+        self.anchor()
 
     def add_tool(
         self, tool_id: str, name: str, input_args: dict | None,
+        parent_id: str | None = None,
     ) -> None:
         """Register a new tool call as a collapsed collapsible entry."""
         summary = _summarize_tool(name, input_args)
@@ -283,20 +353,28 @@ class ToolLog(VerticalScroll):
                 body_text = json.dumps(input_args, indent=2)[:500]
             except (TypeError, ValueError):
                 body_text = str(input_args)[:500]
+        output_widget = Static("", classes="tool-log-output")
+        output_widget.display = False
         entry = Collapsible(
             Static(body_text or "(no args)", classes="tool-log-body"),
+            output_widget,
             title=f"\u23f3 {summary}",
             collapsed=True,
         )
         entry.add_class("tool-pending")
         self._entries[tool_id] = (entry, summary)
-        self.mount(entry)
-        self.scroll_end(animate=False)
+        self._output_widgets[tool_id] = output_widget
+        # Nest inside parent if it exists
+        parent_pair = self._entries.get(parent_id) if parent_id else None
+        if parent_pair is not None:
+            parent_pair[0].mount(entry)
+        else:
+            self.mount(entry)
 
     def set_result(
         self, tool_id: str, output: str, is_error: bool = False,
     ) -> None:
-        """Update an entry with its result: set icon, append output."""
+        """Update an entry with its result: set icon, show output."""
         pair = self._entries.get(tool_id)
         if pair is None:
             return
@@ -305,17 +383,19 @@ class ToolLog(VerticalScroll):
         entry.title = f"{icon} {summary}"
         entry.remove_class("tool-pending")
         entry.add_class("tool-error" if is_error else "tool-success")
-        truncated = (output or "")[:500]
-        try:
-            body = entry.query_one(".tool-log-body", Static)
-            current = str(body.renderable)
-            if is_error:
-                body.update(f"{current}\n[red]{truncated}[/red]")
-            else:
-                body.update(f"{current}\n{truncated}")
-        except Exception:
-            logger.debug("ToolLog.set_result: body update failed", exc_info=True)
-        self.scroll_end(animate=False)
+        if output:
+            output_widget = self._output_widgets.get(tool_id)
+            if output_widget is not None:
+                output_widget.update(output[:500])
+                output_widget.display = True
+                if is_error:
+                    output_widget.add_class("tool-log-error")
+
+    def clear(self) -> None:
+        """Remove all entries and reset state."""
+        self._entries.clear()
+        self._output_widgets.clear()
+        self.remove_children()
 
 
 class PromptInput(TextArea):
@@ -424,6 +504,8 @@ class AgentApp(App):
         self._queued_input: list[str] = []
         self._input_queue: asyncio.Queue[Any] = asyncio.Queue()
         self._side_pane_visible: bool = True
+        self._choice_future: asyncio.Future | None = None
+        self._choice_questions: list[dict] | None = None
 
     def compose(self) -> ComposeResult:
         workspace = getattr(self._options, "cwd", None) or os.getcwd()
@@ -457,6 +539,7 @@ class AgentApp(App):
             datefmt="%H:%M:%S",
         ))
         logging.getLogger("repo_tools").addHandler(handler)
+        self._options.can_use_tool = self._can_use_tool
         self._client_loop()
         self.query_one("#prompt-input", PromptInput).focus()
 
@@ -509,11 +592,30 @@ class AgentApp(App):
         self, event: PromptInput.Submitted,
     ) -> None:
         text = event.text
+
+        # Resolve pending AskUserQuestion choice
+        if self._choice_future is not None and not self._choice_future.done():
+            self._choice_future.set_result(text)
+            return
+
         cmd = text.strip()
 
         if cmd in ("/exit", "/quit"):
             self._input_queue.put_nowait(_SENTINEL)
             self.exit()
+            return
+
+        if cmd == "/clear":
+            self._queued_input.clear()
+            self._refresh_queue_bar()
+            self._pending_tools.clear()
+            self._current_tool_group = None
+            self.query_one("#chat-log", VerticalScroll).remove_children()
+            self.query_one("#tool-log", ToolLog).clear()
+            self.query_one("#status-bar", StatusBar).set_status(
+                "Ready", "ready",
+            )
+            self._client_loop()
             return
 
         if cmd.startswith("/"):
@@ -547,12 +649,16 @@ class AgentApp(App):
                 self._queued_input,
             )
         except Exception:
-            logger.debug("Failed to refresh queue bar", exc_info=True)
+            logger.warning("Failed to refresh queue bar", exc_info=True)
 
     # ── Message handling ──────────────────────────────────────────────────
 
     async def _handle_message(self, msg: Any) -> None:
-        from claude_agent_sdk import AssistantMessage, ResultMessage
+        from claude_agent_sdk import (
+            AssistantMessage,
+            ResultMessage,
+            UserMessage as SdkUserMessage,
+        )
         from claude_agent_sdk.types import (
             TextBlock,
             ThinkingBlock,
@@ -563,6 +669,7 @@ class AgentApp(App):
         chat_log = self.query_one("#chat-log", VerticalScroll)
 
         if isinstance(msg, AssistantMessage):
+            parent_id = getattr(msg, "parent_tool_use_id", None)
             for block in msg.content:
                 if isinstance(block, TextBlock):
                     self._current_tool_group = None
@@ -588,12 +695,10 @@ class AgentApp(App):
                         tool_log = self.query_one("#tool-log", ToolLog)
                         tool_log.add_tool(
                             block.id, block.name, input_args,
+                            parent_id=parent_id,
                         )
-                        self.query_one(
-                            "#side-pane", TabbedContent,
-                        ).active = "tab-tools"
                     except Exception:
-                        logger.debug("Failed to update tool log", exc_info=True)
+                        logger.warning("Failed to update tool log", exc_info=True)
                     self.query_one("#status-bar", StatusBar).set_status(
                         f"Working... ({block.name})", "working",
                     )
@@ -614,11 +719,44 @@ class AgentApp(App):
                             is_error=bool(block.is_error),
                         )
                     except Exception:
-                        logger.debug("Failed to update tool result", exc_info=True)
+                        logger.warning("Failed to update tool result", exc_info=True)
                 elif isinstance(block, ThinkingBlock):
                     pass
 
+        elif isinstance(msg, SdkUserMessage):
+            # SDK sends ToolResultBlocks inside UserMessage, not AssistantMessage
+            if isinstance(msg.content, list):
+                for block in msg.content:
+                    if isinstance(block, ToolResultBlock):
+                        group = self._pending_tools.pop(
+                            block.tool_use_id, None,
+                        )
+                        if group is not None:
+                            group.set_result(
+                                block.tool_use_id,
+                                is_error=bool(block.is_error),
+                            )
+                        try:
+                            tool_log = self.query_one("#tool-log", ToolLog)
+                            tool_log.set_result(
+                                block.tool_use_id,
+                                str(block.content or ""),
+                                is_error=bool(block.is_error),
+                            )
+                        except Exception:
+                            logger.warning("Failed to update tool result", exc_info=True)
+
         elif isinstance(msg, ResultMessage):
+            # Flush any remaining pending tools (edge cases)
+            for tool_id, group in self._pending_tools.items():
+                group.set_result(tool_id, is_error=False)
+                try:
+                    tool_log = self.query_one("#tool-log", ToolLog)
+                    tool_log.set_result(tool_id, "")
+                except Exception:
+                    logger.warning("Failed to flush tool result", exc_info=True)
+            self._pending_tools.clear()
+
             parts = [f"Done ({msg.subtype})"]
             if msg.total_cost_usd is not None:
                 parts.append(f"${msg.total_cost_usd:.4f}")
@@ -629,6 +767,38 @@ class AgentApp(App):
 
         chat_log.scroll_end(animate=False)
 
+    # ── Tool permission callback ────────────────────────────────────────
+
+    async def _can_use_tool(
+        self, tool_name: str, input_data: dict[str, Any], context: Any,
+    ) -> Any:
+        from claude_agent_sdk import PermissionResultAllow
+
+        if tool_name == "AskUserQuestion":
+            questions = input_data.get("questions", [])
+            if questions:
+                chat_log = self.query_one("#chat-log", VerticalScroll)
+                panel = ChoicePanel(questions)
+                await chat_log.mount(panel)
+                chat_log.scroll_end(animate=False)
+
+                self._choice_questions = questions
+                loop = asyncio.get_event_loop()
+                self._choice_future = loop.create_future()
+
+                answer_text = await self._choice_future
+                self._choice_future = None
+
+                answers = _parse_choice_answers(answer_text, questions)
+                self._choice_questions = None
+
+                return PermissionResultAllow(updated_input={
+                    "questions": questions,
+                    "answers": answers,
+                })
+
+        return PermissionResultAllow(updated_input=input_data)
+
     # ── Side pane ─────────────────────────────────────────────────────────
 
     def action_toggle_side_pane(self) -> None:
@@ -638,7 +808,7 @@ class AgentApp(App):
             pane = self.query_one("#side-pane", TabbedContent)
             pane.display = self._side_pane_visible
         except Exception:
-            logger.debug("Failed to toggle side pane", exc_info=True)
+            logger.warning("Failed to toggle side pane", exc_info=True)
 
     def on_tabbed_content_tab_activated(
         self, event: TabbedContent.TabActivated,
@@ -648,7 +818,7 @@ class AgentApp(App):
             try:
                 self.query_one("#ticket-tree", TicketPanel).refresh_tickets()
             except Exception:
-                logger.debug("Failed to refresh tickets", exc_info=True)
+                logger.warning("Failed to refresh tickets", exc_info=True)
 
     # ── Key bindings ──────────────────────────────────────────────────────
 

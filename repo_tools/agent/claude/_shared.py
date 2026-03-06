@@ -4,7 +4,10 @@ from __future__ import annotations
 
 # Tools that are always pre-approved — all are read-only or local edits.
 # Bash is excluded here; it is added per-role and gated by the PreToolUse hook.
-ALLOWED_TOOLS = ["Read", "Edit", "Write", "Glob", "Grep", "WebFetch", "WebSearch"]
+ALLOWED_TOOLS = [
+    "Read", "Edit", "Write", "Glob", "Grep", "WebFetch", "WebSearch",
+    "AskUserQuestion",
+]
 
 # JSON schemas for structured headless output, keyed by role.
 OUTPUT_SCHEMAS: dict[str, dict] = {
