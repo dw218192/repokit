@@ -18,6 +18,7 @@ from repo_tools.agent.tui import (
     AgentApp,
     ChoicePanel,
     MarkdownMessage,
+    PlanApprovalBar,
     PromptInput,
     QueueBar,
     StatusBar,
@@ -26,6 +27,7 @@ from repo_tools.agent.tui import (
     ToolLog,
     TUILogHandler,
     UserMessage,
+    _PLAN_ACCEPTED,
     _format_tool_body,
     _parse_choice_answers,
     _summarize_tool,
@@ -1652,10 +1654,10 @@ def _noop_client_app_class():
 
 
 class TestExitPlanModeApproval:
-    """ExitPlanMode tool should block for user acceptance/rejection."""
+    """ExitPlanMode: interactive Accept bar + reject-via-prompt."""
 
-    def test_accept_returns_allow(self):
-        """Typing 'accept' at the ExitPlanMode prompt returns Allow."""
+    def test_accept_via_bar_returns_allow(self):
+        """PlanApprovalBar.Accepted resolves the future as allow."""
 
         async def _test():
             App = _noop_client_app_class()
@@ -1675,16 +1677,21 @@ class TestExitPlanModeApproval:
                 await pilot.pause()
                 await pilot.pause()
 
-                app._choice_future.set_result("accept")
+                # Simulate the Accept bar being activated
+                app._choice_future.set_result(_PLAN_ACCEPTED)
                 await task
 
                 assert result_holder
                 assert result_holder[0].behavior == "allow"
 
+                # Bar should be deactivated after approval
+                bar = app.query_one("#plan-approval", PlanApprovalBar)
+                assert not bar.has_class("plan-active")
+
         _run(_test)
 
     def test_feedback_returns_deny(self):
-        """Typing feedback text at the ExitPlanMode prompt returns Deny."""
+        """Typing feedback in the prompt rejects the plan."""
 
         async def _test():
             App = _noop_client_app_class()
@@ -1740,6 +1747,33 @@ class TestExitPlanModeApproval:
                 assert result_holder
                 assert result_holder[0].behavior == "deny"
                 assert "interrupted" in result_holder[0].message
+
+        _run(_test)
+
+    def test_approval_bar_visible_during_review(self):
+        """PlanApprovalBar gets plan-active class during review."""
+
+        async def _test():
+            App = _noop_client_app_class()
+            app = App(options=_make_mock_options())
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.pause()
+                loop = asyncio.get_event_loop()
+
+                async def _call():
+                    await app._can_use_tool(
+                        "ExitPlanMode", {}, None,
+                    )
+
+                task = loop.create_task(_call())
+                await pilot.pause()
+                await pilot.pause()
+
+                bar = app.query_one("#plan-approval", PlanApprovalBar)
+                assert bar.has_class("plan-active")
+
+                app._choice_future.set_result(_PLAN_ACCEPTED)
+                await task
 
         _run(_test)
 

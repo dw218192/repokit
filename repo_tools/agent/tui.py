@@ -404,6 +404,57 @@ class ToolLog(VerticalScroll):
         self.remove_children()
 
 
+class PlanApprovalBar(Static):
+    """Interactive Accept / Reject bar for plan review.
+
+    Up/Down arrow keys toggle between "Accept" and the prompt input.
+    Enter while this bar is focused → accept.  Typing in the prompt
+    input and submitting → reject with that text.
+    """
+
+    DEFAULT_CSS = """
+    PlanApprovalBar {
+        height: 1;
+        padding: 0 1;
+        display: none;
+    }
+    PlanApprovalBar.plan-active {
+        display: block;
+        background: green 40%;
+        color: $text;
+    }
+    PlanApprovalBar.plan-focused {
+        background: green;
+        color: white;
+        text-style: bold;
+    }
+    """
+
+    can_focus = True
+
+    class Accepted(Message):
+        pass
+
+    async def _on_key(self, event: events.Key) -> None:
+        if event.key == "enter":
+            event.stop()
+            event.prevent_default()
+            self.post_message(self.Accepted())
+        elif event.key == "down":
+            event.stop()
+            event.prevent_default()
+            try:
+                self.app.query_one("#prompt-input", PromptInput).focus()
+            except Exception:
+                pass
+
+    def on_focus(self) -> None:
+        self.add_class("plan-focused")
+
+    def on_blur(self) -> None:
+        self.remove_class("plan-focused")
+
+
 class PromptInput(TextArea):
     r"""Multi-line prompt. Enter submits, ``\`` + Enter for continuation."""
 
@@ -422,13 +473,36 @@ class PromptInput(TextArea):
             super().__init__()
             self.text = text
 
+    class PopQueue(Message):
+        """Posted when user presses Up on empty input to restore queued text."""
+
     async def _on_key(self, event: events.Key) -> None:
         r"""Intercept Enter before TextArea inserts a newline.
 
         ``\`` + Enter: remove the backslash and insert a real newline.
         Plain Enter: submit the accumulated text.
+        Up on empty input: pop last queued message back into the prompt.
         Other keys: delegate to TextArea.
         """
+        if event.key == "up":
+            # If plan approval bar is active, arrow-up focuses it
+            try:
+                bar = self.app.query_one(
+                    "#plan-approval", PlanApprovalBar,
+                )
+                if bar.has_class("plan-active"):
+                    event.stop()
+                    event.prevent_default()
+                    bar.focus()
+                    return
+            except Exception:
+                pass
+            # On empty input, pop the queue
+            if not self.text.strip():
+                event.stop()
+                event.prevent_default()
+                self.post_message(self.PopQueue())
+                return
         if event.key == "enter":
             event.stop()
             event.prevent_default()
@@ -467,6 +541,7 @@ class TUILogHandler(logging.Handler):
 
 
 _SENTINEL = object()
+_PLAN_ACCEPTED = object()
 
 
 class AgentApp(App):
@@ -535,6 +610,10 @@ class AgentApp(App):
                 )
         yield StatusBar(id="status-bar")
         yield QueueBar(id="queue-bar")
+        yield PlanApprovalBar(
+            "\u2714 Accept plan  (Enter)",
+            id="plan-approval",
+        )
         yield PromptInput(id="prompt-input")
 
     async def on_mount(self) -> None:
@@ -599,8 +678,12 @@ class AgentApp(App):
     ) -> None:
         text = event.text
 
-        # Resolve pending AskUserQuestion choice
+        # Resolve pending choice (ExitPlanMode / AskUserQuestion)
         if self._choice_future is not None and not self._choice_future.done():
+            chat_log = self.query_one("#chat-log", VerticalScroll)
+            msg_widget = UserMessage(f"> {text}")
+            await chat_log.mount(msg_widget)
+            msg_widget.scroll_visible()
             self._choice_future.set_result(text)
             return
 
@@ -629,23 +712,38 @@ class AgentApp(App):
             await chat_log.mount(Static(f"Unknown command: {cmd}"))
             return
 
-        # Normal message
-        chat_log = self.query_one("#chat-log", VerticalScroll)
-        msg_widget = UserMessage(f"> {text}")
-        await chat_log.mount(msg_widget)
-        msg_widget.scroll_visible()
-
+        # Normal message — only show in chat when actually sent
         if self._query_active:
             self._queued_input.append(text)
             self._refresh_queue_bar()
             return
 
+        await self._send_input(text)
+
+    async def _send_input(self, text: str) -> None:
+        """Display a user message in chat and put it on the input queue."""
+        chat_log = self.query_one("#chat-log", VerticalScroll)
+        msg_widget = UserMessage(f"> {text}")
+        await chat_log.mount(msg_widget)
+        msg_widget.scroll_visible()
         self._input_queue.put_nowait(text)
+
+    def on_prompt_input_pop_queue(
+        self, event: PromptInput.PopQueue,
+    ) -> None:
+        """Up arrow on empty input: pop last queued message back to prompt."""
+        if self._queued_input:
+            restored = self._queued_input.pop()
+            self._refresh_queue_bar()
+            pi = self.query_one("#prompt-input", PromptInput)
+            pi.load_text(restored)
 
     def _drain_queue(self) -> None:
         """Send the next queued input, if any."""
         if self._queued_input:
-            self._input_queue.put_nowait(self._queued_input.pop(0))
+            text = self._queued_input.pop(0)
+            # Schedule _send_input so the message appears in chat when sent
+            asyncio.ensure_future(self._send_input(text))
         self._refresh_queue_bar()
 
     def _refresh_queue_bar(self) -> None:
@@ -775,13 +873,23 @@ class AgentApp(App):
 
     # ── Tool permission callback ────────────────────────────────────────
 
-    async def _wait_for_user_input(self) -> str:
-        """Block until the user submits text via PromptInput.
+    def _open_choice_future(self) -> None:
+        """Create the input future immediately so no user input is lost.
+
+        Must be called **before** any async work (widget mounts, file I/O)
+        that precedes the actual ``await``.
+        """
+        if self._choice_future is None or self._choice_future.done():
+            loop = asyncio.get_event_loop()
+            self._choice_future = loop.create_future()
+
+    async def _await_choice_future(self) -> str:
+        """Await and clean up the choice future.
 
         Raises asyncio.CancelledError if interrupted (e.g. Ctrl+C).
+        Requires ``_open_choice_future()`` to have been called first.
         """
-        loop = asyncio.get_event_loop()
-        self._choice_future = loop.create_future()
+        assert self._choice_future is not None
         try:
             return await self._choice_future
         finally:
@@ -796,13 +904,16 @@ class AgentApp(App):
             if tool_name == "AskUserQuestion":
                 questions = input_data.get("questions", [])
                 if questions:
+                    # Open future BEFORE async mount work
+                    self._open_choice_future()
+                    self._choice_questions = questions
+
                     chat_log = self.query_one("#chat-log", VerticalScroll)
                     panel = ChoicePanel(questions)
                     await chat_log.mount(panel)
                     chat_log.scroll_end(animate=False)
 
-                    self._choice_questions = questions
-                    answer_text = await self._wait_for_user_input()
+                    answer_text = await self._await_choice_future()
                     answers = _parse_choice_answers(answer_text, questions)
                     self._choice_questions = None
 
@@ -812,27 +923,61 @@ class AgentApp(App):
                     })
 
             if tool_name == "ExitPlanMode":
-                chat_log = self.query_one("#chat-log", VerticalScroll)
-                prompt = Static(
-                    "[bold]Plan ready.[/bold] Type [green]accept[/green]"
-                    " or provide feedback to reject:",
-                    markup=True,
-                )
-                prompt.styles.margin = (1, 1, 0, 1)
-                prompt.styles.padding = (0, 1)
-                prompt.styles.border = ("round", "cyan")
-                await chat_log.mount(prompt)
-                chat_log.scroll_end(animate=False)
-
-                answer = await self._wait_for_user_input()
-                if answer.strip().lower() in ("", "y", "yes", "accept"):
-                    return PermissionResultAllow(updated_input=input_data)
-                return PermissionResultDeny(message=answer)
+                return await self._handle_plan_approval(input_data)
 
         except asyncio.CancelledError:
             return PermissionResultDeny(message="interrupted")
 
         return PermissionResultAllow(updated_input=input_data)
+
+    async def _handle_plan_approval(self, input_data: dict[str, Any]) -> Any:
+        """Display the plan file and show interactive Accept / Reject UI."""
+        from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
+
+        # Open future FIRST — before any async work — so user input
+        # that arrives during file I/O or widget mounts is captured
+        # instead of falling into the queue.
+        self._open_choice_future()
+
+        chat_log = self.query_one("#chat-log", VerticalScroll)
+
+        # Find and display the most recent plan file
+        plans_dir = Path.home() / ".claude" / "plans"
+        if plans_dir.is_dir():
+            plan_files = sorted(
+                plans_dir.glob("*.md"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+            if plan_files:
+                try:
+                    content = plan_files[0].read_text(encoding="utf-8")
+                    await chat_log.mount(MarkdownMessage(Markdown(content)))
+                except Exception:
+                    logger.warning("Failed to read plan file", exc_info=True)
+
+        # Activate the approval bar and focus it
+        bar = self.query_one("#plan-approval", PlanApprovalBar)
+        bar.add_class("plan-active")
+        bar.focus()
+
+        # Wait for either Accept (via bar) or feedback text (via prompt)
+        answer = await self._await_choice_future()
+
+        # Deactivate the approval bar
+        bar.remove_class("plan-active", "plan-focused")
+        self.query_one("#prompt-input", PromptInput).focus()
+
+        if answer == _PLAN_ACCEPTED:
+            return PermissionResultAllow(updated_input=input_data)
+        return PermissionResultDeny(message=answer)
+
+    async def on_plan_approval_bar_accepted(
+        self, event: PlanApprovalBar.Accepted,
+    ) -> None:
+        """User pressed Enter on the Accept bar."""
+        if self._choice_future and not self._choice_future.done():
+            self._choice_future.set_result(_PLAN_ACCEPTED)
 
     # ── Side pane ─────────────────────────────────────────────────────────
 
