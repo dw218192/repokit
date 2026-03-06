@@ -8,6 +8,10 @@
 - **New `sdk` dependency group**: `claude-agent-sdk>=0.1.0` and `rich>=13.0` (install with `uv sync --group sdk`).
 - **`register_subcommands()` hook**: `RepoTool` subclasses can override `register_subcommands(group)` to add subcommands while still using the standard `setup()` / `default_args()` / three-way merge pipeline. `_make_tool_command()` creates a `click.Group` when this hook is overridden.
 - **Agent tool uses standard pipeline**: `AgentTool` no longer overrides `create_click_command()`. Config fields `backend` and `max_turns` are now exposed as `--backend` and `--max-turns` CLI flags with proper defaults < config < CLI merge.
+- **Textual TUI**: Interactive agent sessions use a Textual-based terminal UI with Rich rendering, replacing the plain REPL. Includes syntax-highlighted tool arguments, diff display for Edit tool, file tree view, `/clear` command, and plan approval prompt with Ctrl+C interrupt.
+- **Event subscription system**: New `events.py` module with `list_events` and `subscribe_event` MCP tools. Supports `timer.tick` (periodic test) and `github.check_failed` / `github.pr_review` event groups. Session suspends on subscribe and resumes when the event fires.
+- **Repo command discovery**: `repo_cmd.py` auto-discovers config sections with `steps` and exposes them as MCP tools (`repo_<name>`), so agents can invoke `./repo build`, `./repo test`, etc. without raw Bash. Both SDK (in-process) and CLI (stdio MCP server) backends supported.
+- **Backend protocol changes**: `ClaudeBackend.run_interactive()` now accepts `initial_prompt` and `resume` parameters and returns `(exit_code, session_id)` instead of just `exit_code`. CLI backend adds `--plan-storage-dir` for persistent plan files.
 
 ## 0.6.1
 

@@ -225,6 +225,7 @@ class SdkBackend:
         rules_path: Path | None = None,
         project_root: Path | None = None,
         tool_config: dict | None = None,
+        project_config: dict | None = None,
         cwd: Path | str | None = None,
         headless: bool = False,
     ) -> tuple[Any, list[dict[str, str]]]:
@@ -253,7 +254,7 @@ class SdkBackend:
             )
             mcp_tools.append(_make_coderabbit_tool())
             mcp_tools.extend(_make_ticket_tools(project_root, role))
-            mcp_tools.extend(_make_repo_tools(project_root, config))
+            mcp_tools.extend(_make_repo_tools(project_root, project_config or config))
 
             # Event tools — only for interactive (orchestrator) sessions
             if not headless:
@@ -345,13 +346,15 @@ class SdkBackend:
         rules_path: Path | None = None,
         project_root: Path | None = None,
         tool_config: dict | None = None,
+        project_config: dict | None = None,
         cwd: Path | str | None = None,
     ) -> tuple[str, int]:
         """Run a headless agent session. Returns (stdout_json, returncode)."""
         options, _meta = self._build_options(
             role=role, role_prompt=role_prompt,
             rules_path=rules_path, project_root=project_root,
-            tool_config=tool_config, cwd=cwd, headless=True,
+            tool_config=tool_config, project_config=project_config,
+            cwd=cwd, headless=True,
         )
         logger.info(f"SDK headless: role={role}")
         stdout, rc, _session_id = asyncio.run(
@@ -366,6 +369,7 @@ class SdkBackend:
         rules_path: Path | None = None,
         project_root: Path | None = None,
         tool_config: dict | None = None,
+        project_config: dict | None = None,
         cwd: Path | str | None = None,
         initial_prompt: str | None = None,
         resume: str | None = None,
@@ -374,7 +378,8 @@ class SdkBackend:
         options, tools_meta = self._build_options(
             role="orchestrator", role_prompt=role_prompt,
             rules_path=rules_path, project_root=project_root,
-            tool_config=tool_config, cwd=cwd, headless=False,
+            tool_config=tool_config, project_config=project_config,
+            cwd=cwd, headless=False,
         )
         logger.info("SDK interactive session")
         return asyncio.run(

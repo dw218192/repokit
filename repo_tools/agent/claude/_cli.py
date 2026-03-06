@@ -25,6 +25,7 @@ def _write_plugin(
     project_root: Path,
     role: str | None = None,
     tool_config: dict | None = None,
+    project_config: dict | None = None,
 ) -> None:
     """Write a Claude Code plugin directory with hooks and MCP config.
 
@@ -120,11 +121,11 @@ def _write_plugin(
 
     # Repo command tools — discover from config and expose as MCP tools
     from ..repo_cmd import _discover_repo_commands
-    config = tool_config or {}
-    if _discover_repo_commands(config):
+    repo_cfg = project_config or tool_config or {}
+    if _discover_repo_commands(repo_cfg):
         # Pass only the sections needed for command discovery
         filtered_config = {
-            section: value for section, value in config.items()
+            section: value for section, value in repo_cfg.items()
             if isinstance(value, dict) and any(
                 k == "steps" or k.startswith("steps@") for k in value
             )
@@ -157,6 +158,7 @@ class CliBackend:
         rules_path: Path | None = None,
         project_root: Path | None = None,
         tool_config: dict | None = None,
+        project_config: dict | None = None,
     ) -> list[str]:
         """Build a ``claude`` CLI command list."""
         config = tool_config or {}
@@ -185,6 +187,7 @@ class CliBackend:
             _write_plugin(
                 plugin_dir, rules_path, project_root,
                 role=role, tool_config=config,
+                project_config=project_config,
             )
             cmd.extend(["--plugin-dir", str(plugin_dir)])
         else:
@@ -217,13 +220,14 @@ class CliBackend:
         rules_path: Path | None = None,
         project_root: Path | None = None,
         tool_config: dict | None = None,
+        project_config: dict | None = None,
         cwd: Path | str | None = None,
     ) -> tuple[str, int]:
         """Run a headless agent session. Returns (stdout, returncode)."""
         cmd = self._build_command(
             prompt=prompt, role=role, role_prompt=role_prompt,
             rules_path=rules_path, project_root=project_root,
-            tool_config=tool_config,
+            tool_config=tool_config, project_config=project_config,
         )
         logger.info(f"CLI headless: {cmd[0]} (role={role})")
         proc = subprocess.run(
@@ -239,6 +243,7 @@ class CliBackend:
         rules_path: Path | None = None,
         project_root: Path | None = None,
         tool_config: dict | None = None,
+        project_config: dict | None = None,
         cwd: Path | str | None = None,
         initial_prompt: str | None = None,
         resume: str | None = None,
@@ -247,7 +252,7 @@ class CliBackend:
         cmd = self._build_command(
             role="orchestrator", role_prompt=role_prompt,
             rules_path=rules_path, project_root=project_root,
-            tool_config=tool_config,
+            tool_config=tool_config, project_config=project_config,
         )
         if resume:
             cmd.extend(["--resume", resume])

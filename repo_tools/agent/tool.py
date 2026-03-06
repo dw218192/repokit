@@ -367,6 +367,7 @@ def _agent_run(tool_ctx: ToolContext, args: dict[str, Any]) -> str | None:
             rules_path=rules_path,
             project_root=tool_ctx.workspace_root,
             tool_config=args,
+            project_config=tool_ctx.config,
             cwd=agent_cwd,
         )
 
@@ -408,6 +409,7 @@ def _agent_run(tool_ctx: ToolContext, args: dict[str, Any]) -> str | None:
         rules_path=rules_path,
         project_root=tool_ctx.workspace_root,
         tool_config=args,
+        project_config=tool_ctx.config,
         cwd=agent_cwd,
     )
 

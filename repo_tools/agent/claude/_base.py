@@ -19,6 +19,7 @@ class ClaudeBackend(Protocol):
         rules_path: Path | None = None,
         project_root: Path | None = None,
         tool_config: dict | None = None,
+        project_config: dict | None = None,
         cwd: Path | str | None = None,
     ) -> tuple[str, int]: ...
 
@@ -29,6 +30,7 @@ class ClaudeBackend(Protocol):
         rules_path: Path | None = None,
         project_root: Path | None = None,
         tool_config: dict | None = None,
+        project_config: dict | None = None,
         cwd: Path | str | None = None,
         initial_prompt: str | None = None,
         resume: str | None = None,
