@@ -7,6 +7,7 @@ Writes a plugin directory with hooks and MCP server config, then launches
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -218,10 +219,14 @@ class CliBackend:
             tool_config=tool_config, project_config=project_config,
         )
         logger.info(f"CLI headless: {cmd[0]} (role={role})")
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
         proc = subprocess.run(
             cmd, capture_output=True, text=True,
             cwd=str(cwd) if cwd else None,
+            env=env,
         )
+        if proc.returncode != 0 and proc.stderr:
+            logger.warning(f"claude-cli stderr: {proc.stderr.strip()}")
         return (proc.stdout, proc.returncode)
 
     def run_interactive(
@@ -247,9 +252,11 @@ class CliBackend:
         if initial_prompt:
             cmd.extend(["-p", initial_prompt])
         logger.info("CLI interactive session")
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
         proc = subprocess.run(
             cmd,
             cwd=str(cwd) if cwd else None,
+            env=env,
         )
         # CLI doesn't expose session_id in interactive mode
         return (proc.returncode, None)
