@@ -48,6 +48,60 @@ from textual.widgets import (
 )
 
 
+# ── Windows subprocess console fix ────────────────────────────────────────────
+
+_console_detach_applied = False
+
+
+def _patch_subprocess_console_detach() -> None:
+    """Detach the SDK CLI subprocess from the parent console on Windows.
+
+    Without this, the Claude CLI subprocess inherits Textual's console.
+    The CLI (or its MCP server children) can briefly interact with the
+    console — e.g. during resize or MCP tool calls — disrupting the
+    byte stream Textual reads for mouse tracking.  The ESC byte gets
+    split from SGR mouse sequences, causing fragments like
+    ``[<35;14;33M`` to appear as text in the prompt.
+
+    Fix: monkey-patch ``SubprocessCLITransport.connect`` to pass
+    ``CREATE_NO_WINDOW`` so the child never touches the parent console.
+    """
+    global _console_detach_applied
+    if _console_detach_applied:
+        return
+    _console_detach_applied = True
+
+    import subprocess
+
+    try:
+        from claude_agent_sdk._internal.transport.subprocess_cli import (
+            SubprocessCLITransport,
+        )
+    except ImportError:
+        return
+
+    import anyio as _anyio
+
+    _original_connect = SubprocessCLITransport.connect
+
+    async def _patched_connect(self: SubprocessCLITransport) -> None:
+        # Wrap anyio.open_process temporarily to inject creationflags.
+        _orig_open = _anyio.open_process
+
+        async def _open_with_flags(*args: Any, **kwargs: Any) -> Any:
+            kwargs.setdefault("creationflags", 0)
+            kwargs["creationflags"] |= subprocess.CREATE_NO_WINDOW
+            return await _orig_open(*args, **kwargs)
+
+        _anyio.open_process = _open_with_flags  # type: ignore[assignment]
+        try:
+            return await _original_connect(self)
+        finally:
+            _anyio.open_process = _orig_open  # type: ignore[assignment]
+
+    SubprocessCLITransport.connect = _patched_connect  # type: ignore[assignment]
+
+
 # ── Widgets ───────────────────────────────────────────────────────────────────
 
 
@@ -849,6 +903,8 @@ class AgentApp(App):
             workspace = self._options.cwd or os.getcwd()
             await self._replay_history(workspace, self._resume)
 
+        if sys.platform == "win32":
+            _patch_subprocess_console_detach()
         self._install_tui_hooks()
         self._client_loop()
         self.query_one("#prompt-input", PromptInput).focus()
