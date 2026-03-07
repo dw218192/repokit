@@ -1356,7 +1356,13 @@ class AgentApp(App):
         self, input_data: dict[str, Any],
         tool_use_id: str | None, context: Any,
     ) -> dict[str, Any]:
-        """PreToolUse hook for AskUserQuestion — shows the choice panel."""
+        """PreToolUse hook for AskUserQuestion — shows the choice panel.
+
+        Collects user answers via the TUI, then allows the tool to proceed
+        with ``updatedInput`` containing pre-filled ``answers``.  The CLI
+        sees the answers already populated and skips interactive prompting
+        (which would hang because stdin/stdout are piped).
+        """
         try:
             tool_input = input_data.get("tool_input", {})
             questions = tool_input.get("questions", [])
@@ -1375,21 +1381,11 @@ class AgentApp(App):
             answers = _parse_choice_answers(answer_text, questions)
             self._choice_questions = None
 
-            # Deny the tool to prevent the CLI from trying to prompt
-            # interactively (which hangs because it runs as a subprocess).
-            # Deliver the collected answers via the denial reason so
-            # Claude can proceed with them.
-            answer_lines = []
-            for q_text, a_text in answers.items():
-                answer_lines.append(f"- {q_text}: {a_text}")
             return {
                 "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": (
-                        "User answered via application UI:\n"
-                        + "\n".join(answer_lines)
-                    ),
+                    "permissionDecision": "allow",
+                    "updatedInput": {**tool_input, "answers": answers},
                 },
             }
         except asyncio.CancelledError:

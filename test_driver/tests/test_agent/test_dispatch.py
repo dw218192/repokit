@@ -19,7 +19,14 @@ class TestToolSchema:
         assert "role" in props
         assert props["role"]["enum"] == ["worker", "reviewer"]
 
-    def test_schema_requires_both_params(self):
+    def test_schema_has_optional_branch_and_project_dir(self):
+        props = TOOL_SCHEMA["inputSchema"]["properties"]
+        assert "branch" in props
+        assert props["branch"]["type"] == "string"
+        assert "project_dir" in props
+        assert props["project_dir"]["type"] == "string"
+
+    def test_schema_requires_only_ticket_and_role(self):
         assert set(TOOL_SCHEMA["inputSchema"]["required"]) == {"ticket_id", "role"}
 
 
@@ -90,6 +97,39 @@ class TestCallDispatchSubprocess:
         assert "--ticket" in cmd
         assert "fix-bug" in cmd
         assert "--workspace-root" in cmd
+
+    @patch("repo_tools.agent.dispatch.subprocess.run")
+    def test_branch_passed_to_subprocess(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
+        call_dispatch(
+            {"role": "worker", "ticket_id": "t1", "branch": "main"},
+            workspace_root=Path("/tmp/project"),
+        )
+        cmd = mock_run.call_args[0][0]
+        assert "--branch" in cmd
+        idx = cmd.index("--branch")
+        assert cmd[idx + 1] == "main"
+
+    @patch("repo_tools.agent.dispatch.subprocess.run")
+    def test_branch_omitted_when_not_provided(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
+        call_dispatch(
+            {"role": "worker", "ticket_id": "t1"},
+            workspace_root=Path("/tmp/project"),
+        )
+        cmd = mock_run.call_args[0][0]
+        assert "--branch" not in cmd
+
+    @patch("repo_tools.agent.dispatch.subprocess.run")
+    def test_project_dir_overrides_workspace_root(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
+        call_dispatch(
+            {"role": "worker", "ticket_id": "t1", "project_dir": "/other/project"},
+            workspace_root=Path("/tmp/project"),
+        )
+        cmd = mock_run.call_args[0][0]
+        ws_idx = cmd.index("--workspace-root")
+        assert cmd[ws_idx + 1] == str(Path("/other/project"))
 
     @patch("repo_tools.agent.dispatch.subprocess.run")
     def test_nonzero_exit_returns_error(self, mock_run):

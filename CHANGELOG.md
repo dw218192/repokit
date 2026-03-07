@@ -2,16 +2,27 @@
 
 ## 0.7.0
 
-- **Agent SDK backend**: Replace CLI subprocess (`subprocess.run("claude", ...)`) with `claude-agent-sdk` Python API. Headless mode uses `query()`, interactive mode uses `ClaudeSDKClient` REPL with Rich rendering.
-- **In-process hooks**: PreToolUse (bash allowlist) and PermissionRequest (MCP auto-approve) hooks run as Python async callbacks instead of shell subprocess commands.
-- **In-process MCP tools**: Lint, CodeRabbit, and ticket CRUD tools are registered via SDK `@tool` decorator, eliminating three stdio subprocess spawns per agent session.
-- **New `sdk` dependency group**: `claude-agent-sdk>=0.1.0` and `rich>=13.0` (install with `uv sync --group sdk`).
+### Agent
+
+- **Dual backend architecture**: Agent sessions run on either a **CLI backend** (subprocess `claude` binary) or an **SDK backend** (`claude-agent-sdk` Python API). The SDK backend runs hooks and MCP tools in-process; the CLI backend writes a plugin directory and launches `claude` as a subprocess. Auto-detection prefers SDK when installed, falls back to CLI. Headless roles (worker/reviewer) always use CLI to avoid nesting SDK sessions. Configure with `agent.backend: cli|sdk` or `--backend` flag.
+- **Textual TUI**: Interactive agent sessions use a Textual-based terminal UI replacing the plain REPL. Chat log, collapsible tool call pane with syntax-highlighted arguments, diff display for Edit tool, file tree, ticket panel with color-coded status, task panel with TodoWrite integration, plan approval prompt, `/clear` command, Ctrl+C interrupt, and chat history persistence to JSONL.
+- **In-process hooks** (SDK backend): PreToolUse (bash allowlist) and PermissionRequest (MCP auto-approve) hooks run as async Python callbacks instead of shell subprocess commands.
+- **In-process MCP tools** (SDK backend): Lint, CodeRabbit, ticket CRUD, repo commands, dispatch, and event tools are registered via `@tool` decorator — no stdio subprocess spawns.
+- **Agent dispatch MCP tool**: New `dispatch_agent` tool lets the orchestrator spawn worker/reviewer agents directly via MCP instead of going through Bash.
+- **Repo command MCP tools**: `repo_cmd.py` auto-discovers config sections with `steps` (and registered `RepoTool` instances) and exposes each as a `repo_<name>` MCP tool, so agents invoke `./repo build`, `./repo test`, etc. without raw Bash.
+- **Event subscriptions**: `list_events` and `subscribe_event` MCP tools. Session suspends on subscribe and resumes when the event fires. Built-in event groups: `github.check_failed` (polls `gh run list`), `github.pr_review` (polls for CHANGES_REQUESTED). Poll intervals and payload commands configurable via `agent.events` in config.
+- **Checkpoint gates**: Optional human-in-the-loop confirmation before critical actions (`before_worker`, `before_merge`, `before_push`, `before_pr`). Enable via `agent.checkpoints` in config.
+- **Prompt injection**: Project-specific instructions appended to agent role prompts. Configure via `agent.prompts.common`, `agent.prompts.orchestrator`, etc.
+- **File logging**: Agent sessions logged to `_agent/logs/<role>-<ticket>-<timestamp>.log`.
+
+### Framework
+
 - **`register_subcommands()` hook**: `RepoTool` subclasses can override `register_subcommands(group)` to add subcommands while still using the standard `setup()` / `default_args()` / three-way merge pipeline. `_make_tool_command()` creates a `click.Group` when this hook is overridden.
-- **Agent tool uses standard pipeline**: `AgentTool` no longer overrides `create_click_command()`. Config fields `backend` and `max_turns` are now exposed as `--backend` and `--max-turns` CLI flags with proper defaults < config < CLI merge.
-- **Textual TUI**: Interactive agent sessions use a Textual-based terminal UI with Rich rendering, replacing the plain REPL. Includes syntax-highlighted tool arguments, diff display for Edit tool, file tree view, `/clear` command, and plan approval prompt with Ctrl+C interrupt.
-- **Event subscription system**: New `events.py` module with `list_events` and `subscribe_event` MCP tools. Supports `timer.tick` (periodic test) and `github.check_failed` / `github.pr_review` event groups. Session suspends on subscribe and resumes when the event fires.
-- **Repo command discovery**: `repo_cmd.py` auto-discovers config sections with `steps` and exposes them as MCP tools (`repo_<name>`), so agents can invoke `./repo build`, `./repo test`, etc. without raw Bash. Both SDK (in-process) and CLI (stdio MCP server) backends supported.
-- **Backend protocol changes**: `ClaudeBackend.run_interactive()` now accepts `initial_prompt` and `resume` parameters and returns `(exit_code, session_id)` instead of just `exit_code`. CLI backend adds `--plan-storage-dir` for persistent plan files.
+- **Agent tool uses standard pipeline**: `AgentTool` no longer overrides `create_click_command()`. Config fields `backend` and `max_turns` are exposed as `--backend` and `--max-turns` CLI flags with proper defaults < config < CLI merge.
+- **Configurable config filename**: `get_config_file()` resolves the project config filename (default `config.yaml`), with an override mechanism via `{framework_root}/_managed/config_name`. `_is_repokit_config()` detects whether an existing YAML is a repokit config by checking keys against `_TOOL_REGISTRY`.
+- **Config template generation**: `./repo init` generates a starter `config.yaml` when none exists. If the default filename conflicts with a non-repokit config, prompts for an alternate name and persists the override.
+- **MCP package reorganization**: Standalone stdio MCP scripts replaced by `repo_tools/agent/mcp/` package with shared JSON-RPC infrastructure (`_jsonrpc.py`). Launch individual servers via `python -m repo_tools.agent.mcp <server>`.
+- **New `sdk` dependency group**: `claude-agent-sdk>=0.1.0`, `textual>=3.0`, and `rich>=13.0` (install with `uv sync --group sdk`).
 
 ## 0.6.1
 

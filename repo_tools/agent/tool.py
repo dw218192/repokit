@@ -364,7 +364,9 @@ def _agent_run(tool_ctx: ToolContext, args: dict[str, Any]) -> str | None:
 
     # Worktree setup — always for ticket-based runs
     if role and ticket:
-        agent_cwd = ensure_worktree(tool_ctx.workspace_root, ticket)
+        agent_cwd = ensure_worktree(
+            tool_ctx.workspace_root, ticket, base_ref=args.get("branch"),
+        )
 
     # Session setup — ticket or interactive
     if role and ticket:
@@ -502,6 +504,10 @@ class AgentTool(RepoTool):
             "--max-turns", default=None, type=int,
             help="Maximum turns for headless mode",
         )(cmd)
+        cmd = click.option(
+            "--branch", default=None,
+            help="Base branch/ref for worktree (default: HEAD)",
+        )(cmd)
         return cmd
 
     def default_args(self, tokens: dict[str, str]) -> dict[str, Any]:
@@ -511,6 +517,7 @@ class AgentTool(RepoTool):
             "debug_hooks": False,
             "backend": "cli",
             "max_turns": None,
+            "branch": None,
         }
 
     def register_subcommands(self, group: click.Group) -> None:

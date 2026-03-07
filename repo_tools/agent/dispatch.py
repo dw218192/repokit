@@ -30,6 +30,20 @@ TOOL_SCHEMA: dict[str, Any] = {
                 "enum": ["worker", "reviewer"],
                 "description": "Agent role to dispatch.",
             },
+            "branch": {
+                "type": "string",
+                "description": (
+                    "Base branch or ref for the worktree (default: HEAD). "
+                    "Only used when creating a new worktree branch."
+                ),
+            },
+            "project_dir": {
+                "type": "string",
+                "description": (
+                    "Override workspace root for the dispatched agent. "
+                    "Allows dispatching into a different project directory."
+                ),
+            },
         },
         "required": ["ticket_id", "role"],
     },
@@ -48,17 +62,23 @@ def call_dispatch(
     """
     role = (args.get("role") or "").strip()
     ticket_id = (args.get("ticket_id") or "").strip()
+    branch = (args.get("branch") or "").strip() or None
+    project_dir = (args.get("project_dir") or "").strip() or None
 
     if role not in ("worker", "reviewer"):
         return {"isError": True, "text": f"Invalid role: {role!r}. Must be 'worker' or 'reviewer'."}
     if not ticket_id:
         return {"isError": True, "text": "ticket_id is required."}
 
+    effective_root = Path(project_dir) if project_dir else workspace_root
+
     cmd = [
         sys.executable, "-m", "repo_tools.cli",
-        "--workspace-root", str(workspace_root),
+        "--workspace-root", str(effective_root),
         "agent", "--role", role, "--ticket", ticket_id,
     ]
+    if branch:
+        cmd.extend(["--branch", branch])
 
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True)

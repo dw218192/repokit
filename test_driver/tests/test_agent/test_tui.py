@@ -1867,6 +1867,110 @@ class TestExitPlanModeApproval:
         _run(_test)
 
 
+# ── AskUserQuestion hook tests ─────────────────────────────────────────────
+
+
+class TestAskUserQuestionHook:
+    """_ask_user_question_hook: allow with updatedInput containing answers."""
+
+    _QUESTIONS = [
+        {
+            "question": "Pick a color?",
+            "header": "Color",
+            "options": [
+                {"label": "Red", "description": "Warm"},
+                {"label": "Blue", "description": "Cool"},
+            ],
+            "multiSelect": False,
+        },
+    ]
+
+    def test_answer_returns_allow_with_updated_input(self):
+        """Selecting an option returns allow with answers in updatedInput."""
+
+        async def _test():
+            App = _noop_client_app_class()
+            app = App(options=_make_mock_options())
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.pause()
+                loop = asyncio.get_event_loop()
+                result_holder: list = []
+
+                tool_input = {"questions": self._QUESTIONS}
+
+                async def _call():
+                    r = await app._ask_user_question_hook(
+                        {"tool_input": tool_input}, None, None,
+                    )
+                    result_holder.append(r)
+
+                task = loop.create_task(_call())
+                await pilot.pause()
+                await pilot.pause()
+
+                # Simulate user typing "1" (selects "Red")
+                app._choice_future.set_result("1")
+                await task
+
+                assert result_holder
+                hook_out = result_holder[0]["hookSpecificOutput"]
+                assert hook_out["permissionDecision"] == "allow"
+                assert "updatedInput" in hook_out
+                answers = hook_out["updatedInput"]["answers"]
+                assert answers["Pick a color?"] == "Red"
+
+        _run(_test)
+
+    def test_cancel_returns_deny(self):
+        """Cancelling during AskUserQuestion returns deny."""
+
+        async def _test():
+            App = _noop_client_app_class()
+            app = App(options=_make_mock_options())
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.pause()
+                loop = asyncio.get_event_loop()
+                result_holder: list = []
+
+                tool_input = {"questions": self._QUESTIONS}
+
+                async def _call():
+                    r = await app._ask_user_question_hook(
+                        {"tool_input": tool_input}, None, None,
+                    )
+                    result_holder.append(r)
+
+                task = loop.create_task(_call())
+                await pilot.pause()
+                await pilot.pause()
+
+                app._choice_future.cancel()
+                await task
+
+                assert result_holder
+                hook_out = result_holder[0]["hookSpecificOutput"]
+                assert hook_out["permissionDecision"] == "deny"
+                assert "interrupted" in hook_out["permissionDecisionReason"]
+
+        _run(_test)
+
+    def test_empty_questions_returns_empty(self):
+        """No questions → empty dict (no hook interference)."""
+
+        async def _test():
+            App = _noop_client_app_class()
+            app = App(options=_make_mock_options())
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.pause()
+
+                r = await app._ask_user_question_hook(
+                    {"tool_input": {"questions": []}}, None, None,
+                )
+                assert r == {}
+
+        _run(_test)
+
+
 # ── Ctrl+C interrupt tests ──────────────────────────────────────────────────
 
 
