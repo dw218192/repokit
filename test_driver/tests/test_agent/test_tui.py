@@ -1637,14 +1637,13 @@ class TestParseChoiceAnswers:
         assert result == {"Q1?": "A", "Q2?": ""}
 
 
-# ── AskUserQuestion NOT in ALLOWED_TOOLS (replaced by MCP tool) ────────────
+# ── AskUserQuestion in ALLOWED_TOOLS test ──────────────────────────────────
 
 
 class TestAllowedTools:
-    def test_ask_user_question_not_in_allowed_tools(self):
-        """Built-in AskUserQuestion is replaced by an MCP tool."""
+    def test_ask_user_question_in_allowed_tools(self):
         from repo_tools.agent.claude._shared import ALLOWED_TOOLS
-        assert "AskUserQuestion" not in ALLOWED_TOOLS
+        assert "AskUserQuestion" in ALLOWED_TOOLS
 
 
 # ── Handle ToolResult in UserMessage tests ─────────────────────────────────

@@ -150,76 +150,6 @@ def _make_dispatch_tool(workspace_root: Path):
     return dispatch_tool
 
 
-def _make_ask_user_tool(app_holder: dict):
-    """Create an MCP tool that replaces the built-in AskUserQuestion.
-
-    The built-in tool tries to prompt interactively through the CLI
-    subprocess, which hangs.  This MCP replacement delegates to the TUI
-    via ``app_holder["app"].ask_user_via_mcp()`` so answers are
-    collected from Textual widgets and returned as a normal tool result.
-    """
-    from claude_agent_sdk import tool
-
-    schema = {
-        "type": "object",
-        "properties": {
-            "questions": {
-                "description": "Questions to ask the user (1-4 questions)",
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "question": {"type": "string"},
-                        "header": {"type": "string", "maxLength": 12},
-                        "options": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "label": {"type": "string"},
-                                    "description": {"type": "string"},
-                                },
-                                "required": ["label", "description"],
-                            },
-                            "minItems": 2,
-                            "maxItems": 4,
-                        },
-                        "multiSelect": {
-                            "type": "boolean",
-                            "default": False,
-                        },
-                    },
-                    "required": ["question", "header", "options", "multiSelect"],
-                },
-                "minItems": 1,
-                "maxItems": 4,
-            },
-        },
-        "required": ["questions"],
-    }
-
-    @tool(
-        "ask_user_question",
-        "Ask the user a question with multiple-choice options. "
-        "Use when you need user input, preferences, or decisions.",
-        schema,
-    )
-    async def ask_user(args: dict[str, Any]) -> dict[str, Any]:
-        app = app_holder.get("app")
-        if app is None:
-            return {
-                "content": [{"type": "text", "text": "TUI not available"}],
-                "is_error": True,
-            }
-        answers = await app.ask_user_via_mcp(args.get("questions", []))
-        lines = []
-        for q_text, a_text in answers.items():
-            lines.append(f"{q_text}: {a_text}")
-        return {"content": [{"type": "text", "text": "\n".join(lines)}]}
-
-    return ask_user
-
-
 def _make_event_tools(config: dict):
     """Create list_events and subscribe_event MCP tools."""
     from claude_agent_sdk import tool
@@ -295,7 +225,6 @@ async def _run_interactive(
     initial_prompt: str | None = None,
     resume: str | None = None,
     tools_metadata: list[dict[str, str]] | None = None,
-    app_holder: dict | None = None,
 ) -> tuple[int, str | None]:
     """Run an interactive TUI session. Returns (exit_code, session_id)."""
     from ..tui import AgentApp
@@ -304,8 +233,6 @@ async def _run_interactive(
         options=options, initial_prompt=initial_prompt, resume=resume,
         tools_metadata=tools_metadata or [],
     )
-    if app_holder is not None:
-        app_holder["app"] = app
     await app.run_async()
     return (0, app._session_id)
 
@@ -327,14 +254,8 @@ class SdkBackend:
         project_config: dict | None = None,
         cwd: Path | str | None = None,
         headless: bool = False,
-    ) -> tuple[Any, list[dict[str, str]], dict]:
-        """Construct ClaudeAgentOptions and tool metadata for a session.
-
-        Returns (options, tools_meta, app_holder).  For interactive
-        sessions the caller must set ``app_holder["app"]`` to the
-        ``AgentApp`` instance before the first query so that the
-        ``ask_user_question`` MCP tool can delegate to the TUI.
-        """
+    ) -> tuple[Any, list[dict[str, str]]]:
+        """Construct ClaudeAgentOptions and tool metadata for a session."""
         from claude_agent_sdk import (
             ClaudeAgentOptions,
             HookMatcher,
@@ -342,7 +263,6 @@ class SdkBackend:
         )
 
         config = tool_config or {}
-        app_holder: dict = {}
 
         # Build allowed tools list — roles get Bash
         allowed = list(ALLOWED_TOOLS)
@@ -365,7 +285,6 @@ class SdkBackend:
             # Orchestrator-only tools (interactive sessions)
             if not headless:
                 mcp_tools.append(_make_dispatch_tool(project_root))
-                mcp_tools.append(_make_ask_user_tool(app_holder))
                 events_cfg = config.get("agent", config).get("events")
                 if events_cfg:
                     mcp_tools.extend(_make_event_tools(config))
@@ -443,7 +362,7 @@ class SdkBackend:
                 "group": "MCP",
             })
 
-        return (ClaudeAgentOptions(**opts_kwargs), tools_meta, app_holder)
+        return (ClaudeAgentOptions(**opts_kwargs), tools_meta)
 
     def run_headless(
         self,
@@ -458,7 +377,7 @@ class SdkBackend:
         cwd: Path | str | None = None,
     ) -> tuple[str, int]:
         """Run a headless agent session. Returns (stdout_json, returncode)."""
-        options, _meta, _holder = self._build_options(
+        options, _meta = self._build_options(
             role=role, role_prompt=role_prompt,
             rules_path=rules_path, project_root=project_root,
             tool_config=tool_config, project_config=project_config,
@@ -483,7 +402,7 @@ class SdkBackend:
         resume: str | None = None,
     ) -> tuple[int, str | None]:
         """Run an interactive agent session. Returns (exit_code, session_id)."""
-        options, tools_meta, app_holder = self._build_options(
+        options, tools_meta = self._build_options(
             role="orchestrator", role_prompt=role_prompt,
             rules_path=rules_path, project_root=project_root,
             tool_config=tool_config, project_config=project_config,
@@ -494,6 +413,5 @@ class SdkBackend:
             _run_interactive(
                 options, initial_prompt,
                 resume=resume, tools_metadata=tools_meta,
-                app_holder=app_holder,
             ),
         )
