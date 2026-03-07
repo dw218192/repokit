@@ -10,6 +10,7 @@ import pytest
 
 from repo_tools.agent.tool import (
     _agent_run,
+    _augment_role_prompt,
     _find_rules_file,
     _has_reviewable_changes,
 )
@@ -569,3 +570,76 @@ class TestAgentRunInteractive:
             _agent_run(tool_ctx, {})
 
         mock_exit.assert_called_once_with(42)
+
+
+# ── _augment_role_prompt ─────────────────────────────────────────
+
+
+class TestAugmentRolePrompt:
+    def test_augment_no_config(self):
+        """Empty config leaves role_prompt unchanged."""
+        original = "base prompt"
+        assert _augment_role_prompt(original, {}, "worker") == original
+
+    def test_augment_common_prompt(self):
+        """agent.prompts.common is appended for all roles."""
+        config = {"agent": {"prompts": {"common": "Always use pytest."}}}
+        for role in ("worker", "reviewer", "orchestrator"):
+            result = _augment_role_prompt("base", config, role)
+            assert "## Project Instructions" in result
+            assert "Always use pytest." in result
+
+    def test_augment_role_specific_prompt(self):
+        """agent.prompts.{role} is appended only for the matching role."""
+        config = {"agent": {"prompts": {"worker": "Worker-only rule."}}}
+        result_worker = _augment_role_prompt("base", config, "worker")
+        assert "## Project Instructions (worker)" in result_worker
+        assert "Worker-only rule." in result_worker
+
+        result_reviewer = _augment_role_prompt("base", config, "reviewer")
+        assert "Worker-only rule." not in result_reviewer
+
+    def test_augment_checkpoints_orchestrator(self):
+        """Checkpoints generate a section only for orchestrator."""
+        config = {"agent": {"checkpoints": ["before_push"]}}
+        result = _augment_role_prompt("base", config, "orchestrator")
+        assert "## Human-in-the-Loop Checkpoints" in result
+        assert "before_push" in result
+
+    def test_augment_checkpoints_ignored_for_worker(self):
+        """Checkpoints in config with role=worker produces no checkpoint section."""
+        config = {"agent": {"checkpoints": ["before_push"]}}
+        result = _augment_role_prompt("base", config, "worker")
+        assert "## Human-in-the-Loop Checkpoints" not in result
+
+    def test_augment_invalid_checkpoint(self):
+        """Invalid checkpoint name raises ValueError."""
+        config = {"agent": {"checkpoints": ["before_lunch"]}}
+        with pytest.raises(ValueError, match="Invalid checkpoint"):
+            _augment_role_prompt("base", config, "orchestrator")
+
+    def test_augment_multiple_checkpoints(self):
+        """Multiple checkpoints all appear in the output."""
+        config = {"agent": {"checkpoints": ["before_worker", "before_merge", "before_pr"]}}
+        result = _augment_role_prompt("base", config, "orchestrator")
+        assert "before_worker" in result
+        assert "before_merge" in result
+        assert "before_pr" in result
+
+    def test_augment_combined(self):
+        """Both prompts and checkpoints together."""
+        config = {
+            "agent": {
+                "prompts": {
+                    "common": "Shared rule.",
+                    "orchestrator": "Orch-only rule.",
+                },
+                "checkpoints": ["before_push", "before_pr"],
+            }
+        }
+        result = _augment_role_prompt("base", config, "orchestrator")
+        assert "## Project Instructions\n\nShared rule." in result
+        assert "## Project Instructions (orchestrator)\n\nOrch-only rule." in result
+        assert "## Human-in-the-Loop Checkpoints" in result
+        assert "before_push" in result
+        assert "before_pr" in result
