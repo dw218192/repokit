@@ -349,6 +349,11 @@ def _agent_run(tool_ctx: ToolContext, args: dict[str, Any]) -> str | None:
         configured=args.get("allowlist"),
     )
 
+    # Headless roles (worker/reviewer) always use CLI backend — the SDK
+    # backend launches an in-process Claude Code session which cannot run
+    # nested inside another Claude Code process.
+    if role and ticket:
+        args = {**args, "backend": "cli"}
     backend = _ensure_backend(args)
 
     if prompt is None:

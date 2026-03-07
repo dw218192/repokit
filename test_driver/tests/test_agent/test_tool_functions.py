@@ -243,6 +243,27 @@ class TestHasReviewableChanges:
 
 class TestAgentRunHeadless:
     @patch("repo_tools.agent.tool.ensure_worktree")
+    def test_headless_forces_cli_backend(self, mock_wt, tool_ctx, monkeypatch):
+        """Headless roles (worker/reviewer) always use CLI backend, even if config says sdk."""
+        import repo_tools.agent.tool as tool_mod
+
+        mock_wt.return_value = tool_ctx.workspace_root
+        _make_ticket(tool_ctx)
+
+        # Reset cached backend so _ensure_backend re-creates it
+        monkeypatch.setattr(tool_mod, "_backend", None)
+
+        mock_backend = MagicMock()
+        mock_backend.run_headless.return_value = (
+            _claude_envelope({"ticket_id": "G1_1", "status": "in_progress", "notes": "ok"}),
+            0,
+        )
+        with patch("repo_tools.agent.claude.get_backend", return_value=mock_backend) as mock_factory:
+            _agent_run(tool_ctx, {"role": "worker", "ticket": "G1_1", "backend": "sdk"})
+            # Even though config says "sdk", headless should force "cli"
+            mock_factory.assert_called_once_with("cli")
+
+    @patch("repo_tools.agent.tool.ensure_worktree")
     @patch("repo_tools.agent.tool._backend")
     def test_headless_updates_ticket(self, mock_backend, mock_wt, tool_ctx):
         """Headless mode parses structured output and writes it back to the ticket JSON."""
