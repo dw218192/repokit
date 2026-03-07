@@ -789,6 +789,7 @@ class AgentApp(App):
         self._todos: list[dict] = []
         self._side_pane_visible: bool = True
         self._choice_future: asyncio.Future | None = None
+        self._ticket_fingerprint: tuple[int, float] = (0, 0.0)
         self._choice_questions: list[dict] | None = None
 
     def compose(self) -> ComposeResult:
@@ -839,7 +840,9 @@ class AgentApp(App):
             "%(asctime)s %(name)s %(levelname)s %(message)s",
             datefmt="%H:%M:%S",
         ))
-        logging.getLogger("repo_tools").addHandler(handler)
+        repo_logger = logging.getLogger("repo_tools")
+        repo_logger.addHandler(handler)
+        repo_logger.propagate = False
 
         # Replay previous conversation when resuming
         if self._resume:
@@ -1124,6 +1127,7 @@ class AgentApp(App):
                         )
                     except Exception:
                         logger.warning("Failed to update tool result", exc_info=True)
+                    self._maybe_refresh_tickets()
                 elif isinstance(block, ThinkingBlock):
                     pass
 
@@ -1149,6 +1153,7 @@ class AgentApp(App):
                             )
                         except Exception:
                             logger.warning("Failed to update tool result", exc_info=True)
+                        self._maybe_refresh_tickets()
 
         elif isinstance(msg, ResultMessage):
             # Capture session_id for event-loop resume + chat history
@@ -1356,6 +1361,23 @@ class AgentApp(App):
     ) -> None:
         """Refresh tickets when the Tickets tab is activated."""
         if event.pane.id == "tab-tickets":
+            try:
+                self.query_one("#ticket-tree", TicketPanel).refresh_tickets()
+            except Exception:
+                logger.warning("Failed to refresh tickets", exc_info=True)
+
+    def _maybe_refresh_tickets(self) -> None:
+        """Refresh ticket panel if any ticket file changed on disk."""
+        workspace = self._options.cwd or os.getcwd()
+        ticket_dir = Path(workspace) / "_agent" / "tickets"
+        try:
+            files = list(ticket_dir.glob("*.json"))
+            mtime = max((f.stat().st_mtime for f in files), default=0.0)
+            fp = (len(files), mtime)
+        except (FileNotFoundError, OSError):
+            fp = (0, 0.0)
+        if fp != self._ticket_fingerprint:
+            self._ticket_fingerprint = fp
             try:
                 self.query_one("#ticket-tree", TicketPanel).refresh_tickets()
             except Exception:
