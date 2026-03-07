@@ -10,6 +10,8 @@ import json
 import re
 from pathlib import Path
 
+from ..core import get_config_file
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -299,13 +301,13 @@ def _tickets_dir(root: Path) -> Path:
 
 
 def _load_required_criteria(root: Path) -> list[str]:
-    """Read ``agent.required_criteria`` from config.yaml.
+    """Read ``agent.required_criteria`` from the project config file.
 
     Raises on corrupt YAML or unexpected structure so broken configs
     are caught early rather than silently producing tickets without
     required criteria.
     """
-    config_path = root / "config.yaml"
+    config_path = root / get_config_file(str(root))
     if not config_path.exists():
         return []
     import yaml

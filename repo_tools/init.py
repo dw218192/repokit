@@ -10,7 +10,7 @@ from typing import Any
 import click
 
 from . import _bootstrap
-from .core import RepoTool, ToolContext, registered_tool_deps
+from .core import RepoTool, ToolContext, get_config_file, registered_tool_deps
 
 
 def _is_local_venv(framework_root: Path) -> bool:
@@ -70,6 +70,36 @@ class InitTool(RepoTool):
             tool_deps=all_deps,
         )
 
+        self._generate_config_template(ctx.workspace_root, framework_root)
+
+    @staticmethod
+    def _generate_config_template(workspace_root: Path, framework_root: Path) -> None:
+        config_filename = get_config_file(str(workspace_root))
+        config_path = workspace_root / config_filename
+
+        if config_path.exists():
+            print(f"Config file found: {config_filename}, skipping template generation")
+            return
+
+        # No repokit config exists yet
+        default_path = workspace_root / "config.yaml"
+        if not default_path.exists():
+            # No config at all — write template to config.yaml
+            default_path.write_text(_CONFIG_TEMPLATE, encoding="utf-8")
+            print(f"Generated config template: config.yaml")
+        else:
+            # Foreign config.yaml exists — prompt for an alternate name
+            alt_name = click.prompt(
+                "config.yaml already exists. Enter config filename for repokit",
+                default="repokit.yaml",
+            )
+            (workspace_root / alt_name).write_text(_CONFIG_TEMPLATE, encoding="utf-8")
+            print(f"Generated config template: {alt_name}")
+            # Persist the override so get_config_file() picks it up
+            config_name_path = framework_root / "_managed" / "config_name"
+            config_name_path.parent.mkdir(parents=True, exist_ok=True)
+            config_name_path.write_text(alt_name, encoding="utf-8")
+
     @staticmethod
     def _clean(framework_root: Path) -> None:
         managed_dir = framework_root / "_managed"
@@ -79,3 +109,40 @@ class InitTool(RepoTool):
             if path.is_file():
                 path.unlink()
                 print(f"Removed {path}")
+
+
+_CONFIG_TEMPLATE = """\
+# ── Repo section ──────────────────────────────────────────────────────
+# repo:
+#   tokens:
+#     my_token: "value"           # custom token usable as {my_token}
+#   extra_deps:
+#     - "requests>=2.0"           # additional pip dependencies
+#   features:
+#     - python                    # enable feature groups (python, cpp, ...)
+
+# ── Build / Test / Format ─────────────────────────────────────────────
+# test:
+#   steps:
+#     - run: "{repo} python -m pytest tests/"
+
+# build:
+#   steps:
+#     - run: "echo build step here"
+
+# format:
+#   paths:
+#     - "src/"
+#     - "tests/"
+
+# ── Agent section ─────────────────────────────────────────────────────
+# agent:
+#   backend: sdk                  # sdk or cli
+#   checkpoints: true             # enable checkpoint commits
+#   prompts:
+#     system: "prompts/system.md"
+#   required_criteria:
+#     - "All existing tests still pass"
+#   allowlist:
+#     - "pytest"
+"""

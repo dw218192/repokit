@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 import yaml
 
-from repo_tools.core import _CONFIG_DEFAULTS, _deep_merge, load_config, resolve_filters
+from repo_tools.core import _CONFIG_DEFAULTS, _deep_merge, get_config_file, load_config, resolve_filters
 
 _NO_DEFAULTS = patch("repo_tools.core._CONFIG_DEFAULTS", Path("/nonexistent"))
 
@@ -319,3 +319,54 @@ class TestConfigDefaults:
     def test_no_defaults_file_returns_empty(self, tmp_path: Path):
         """Without defaults file, load_config returns only project config."""
         assert load_config(str(tmp_path)) == {}
+
+
+# ── get_config_file ──────────────────────────────────────────────────
+
+
+class TestGetConfigFile:
+    """Tests for get_config_file() config filename resolution."""
+
+    def test_returns_default_without_override(self, tmp_path: Path):
+        """Returns 'config.yaml' when no _managed/config_name exists."""
+        assert get_config_file(str(tmp_path)) == "config.yaml"
+
+    def test_reads_override_from_config_name(self, tmp_path: Path):
+        """Reads filename from _managed/config_name when present."""
+        managed = tmp_path / "tools" / "framework" / "_managed"
+        managed.mkdir(parents=True)
+        (managed / "config_name").write_text("repokit.yaml\n", encoding="utf-8")
+        assert get_config_file(str(tmp_path)) == "repokit.yaml"
+
+    def test_ignores_empty_config_name(self, tmp_path: Path):
+        """Falls back to default when config_name file is empty."""
+        managed = tmp_path / "tools" / "framework" / "_managed"
+        managed.mkdir(parents=True)
+        (managed / "config_name").write_text("   \n", encoding="utf-8")
+        assert get_config_file(str(tmp_path)) == "config.yaml"
+
+
+# ── load_config with override filename ───────────────────────────────
+
+
+class TestLoadConfigOverride:
+    """Tests for load_config() using a non-default config filename."""
+
+    @_NO_DEFAULTS
+    def test_loads_override_config_file(self, tmp_path: Path):
+        """load_config uses the filename from get_config_file()."""
+        managed = tmp_path / "tools" / "framework" / "_managed"
+        managed.mkdir(parents=True)
+        (managed / "config_name").write_text("myconfig.yaml", encoding="utf-8")
+        (tmp_path / "myconfig.yaml").write_text("key: value\n", encoding="utf-8")
+        assert load_config(str(tmp_path)) == {"key": "value"}
+
+    @_NO_DEFAULTS
+    def test_local_override_uses_derived_stem(self, tmp_path: Path):
+        """Local override file derives from config stem (myconfig.local.yaml)."""
+        managed = tmp_path / "tools" / "framework" / "_managed"
+        managed.mkdir(parents=True)
+        (managed / "config_name").write_text("myconfig.yaml", encoding="utf-8")
+        (tmp_path / "myconfig.yaml").write_text("key: base\n", encoding="utf-8")
+        (tmp_path / "myconfig.local.yaml").write_text("key: local\n", encoding="utf-8")
+        assert load_config(str(tmp_path)) == {"key": "local"}
