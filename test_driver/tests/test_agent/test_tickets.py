@@ -724,19 +724,17 @@ class TestCorruptionHandling:
 # ── required criteria (config.yaml) ─────────────────────────────
 
 
-def _write_config(project, required_criteria):
-    """Write a config.yaml with agent.required_criteria."""
-    import yaml
-    data = {"agent": {"required_criteria": required_criteria}}
-    (project / "config.yaml").write_text(yaml.dump(data), encoding="utf-8")
+def _make_config(required_criteria):
+    """Build a config dict with agent.required_criteria."""
+    return {"agent": {"required_criteria": required_criteria}}
 
 
 class TestRequiredCriteria:
     def test_required_criteria_added(self, project):
-        _write_config(project, ["Tests pass", "No regressions"])
+        config = _make_config(["Tests pass", "No regressions"])
         result = _tool_create_ticket(project, {
             "id": "T1", "title": "t", "description": "d",
-        })
+        }, config=config)
         assert not result.get("isError")
         path = project / "_agent" / "tickets" / "T1.json"
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -745,11 +743,11 @@ class TestRequiredCriteria:
         assert "No regressions" in texts
 
     def test_merged_with_user_criteria(self, project):
-        _write_config(project, ["Tests pass"])
+        config = _make_config(["Tests pass"])
         result = _tool_create_ticket(project, {
             "id": "T1", "title": "t", "description": "d",
             "criteria": ["Custom check"],
-        })
+        }, config=config)
         assert not result.get("isError")
         path = project / "_agent" / "tickets" / "T1.json"
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -757,19 +755,19 @@ class TestRequiredCriteria:
         assert texts == ["Custom check", "Tests pass"]
 
     def test_deduplication(self, project):
-        _write_config(project, ["Tests pass"])
+        config = _make_config(["Tests pass"])
         result = _tool_create_ticket(project, {
             "id": "T1", "title": "t", "description": "d",
             "criteria": ["Tests pass", "Other"],
-        })
+        }, config=config)
         assert not result.get("isError")
         path = project / "_agent" / "tickets" / "T1.json"
         data = json.loads(path.read_text(encoding="utf-8"))
         texts = [c["criterion"] for c in data["criteria"]]
         assert texts == ["Tests pass", "Other"]
 
-    def test_no_config_file(self, project):
-        """No config.yaml → no required criteria, no error."""
+    def test_no_config(self, project):
+        """No config → no required criteria, no error."""
         result = _tool_create_ticket(project, {
             "id": "T1", "title": "t", "description": "d",
         })
@@ -779,11 +777,11 @@ class TestRequiredCriteria:
         assert data["criteria"] == []
 
     def test_empty_required_list(self, project):
-        _write_config(project, [])
+        config = _make_config([])
         result = _tool_create_ticket(project, {
             "id": "T1", "title": "t", "description": "d",
             "criteria": ["User criterion"],
-        })
+        }, config=config)
         assert not result.get("isError")
         path = project / "_agent" / "tickets" / "T1.json"
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -791,10 +789,10 @@ class TestRequiredCriteria:
         assert texts == ["User criterion"]
 
     def test_all_criteria_start_unmet(self, project):
-        _write_config(project, ["Tests pass"])
+        config = _make_config(["Tests pass"])
         _tool_create_ticket(project, {
             "id": "T1", "title": "t", "description": "d",
-        })
+        }, config=config)
         path = project / "_agent" / "tickets" / "T1.json"
         data = json.loads(path.read_text(encoding="utf-8"))
         assert all(c["met"] is False for c in data["criteria"])

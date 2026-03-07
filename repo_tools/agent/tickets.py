@@ -10,7 +10,6 @@ import json
 import re
 from pathlib import Path
 
-from ..core import get_config_file
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -300,21 +299,11 @@ def _tickets_dir(root: Path) -> Path:
     return root / "_agent" / "tickets"
 
 
-def _load_required_criteria(root: Path) -> list[str]:
-    """Read ``agent.required_criteria`` from the project config file.
-
-    Raises on corrupt YAML or unexpected structure so broken configs
-    are caught early rather than silently producing tickets without
-    required criteria.
-    """
-    config_path = root / get_config_file(str(root))
-    if not config_path.exists():
+def _load_required_criteria(config: dict) -> list[str]:
+    """Extract ``agent.required_criteria`` from an already-loaded config dict."""
+    if not isinstance(config, dict):
         return []
-    import yaml
-    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict):
-        return []
-    agent = data.get("agent")
+    agent = config.get("agent")
     if not isinstance(agent, dict):
         return []
     criteria = agent.get("required_criteria")
@@ -371,7 +360,7 @@ def _tool_get_ticket(root: Path, args: dict, *, role: str | None = None) -> dict
     return {"text": content}
 
 
-def _tool_create_ticket(root: Path, args: dict, *, role: str | None = None) -> dict:
+def _tool_create_ticket(root: Path, args: dict, *, role: str | None = None, config: dict | None = None) -> dict:
     tid = args.get("id", "").strip()
     if err := _validate_id(tid, "id"):
         return {"isError": True, "text": err}
@@ -389,7 +378,7 @@ def _tool_create_ticket(root: Path, args: dict, *, role: str | None = None) -> d
 
     # Merge required criteria (appended, deduplicated)
     seen = set(raw_criteria)
-    for rc in _load_required_criteria(root):
+    for rc in _load_required_criteria(config or {}):
         if rc not in seen:
             raw_criteria.append(rc)
             seen.add(rc)
