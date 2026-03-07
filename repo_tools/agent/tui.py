@@ -114,6 +114,7 @@ class StatusBar(Static):
     }
     StatusBar.status-ready { background: green; }
     StatusBar.status-working { background: darkorange; }
+    StatusBar.status-planning { background: dodgerblue; }
     StatusBar.status-error { background: red; }
     """
 
@@ -122,9 +123,9 @@ class StatusBar(Static):
         self.add_class("status-ready")
 
     def set_status(self, text: str, state: str = "ready") -> None:
-        """Update text and color. state: ready, working, or error."""
+        """Update text and color. state: ready, working, planning, or error."""
         self.update(text)
-        self.remove_class("status-ready", "status-working", "status-error")
+        self.remove_class("status-ready", "status-working", "status-planning", "status-error")
         self.add_class(f"status-{state}")
 
 
@@ -1080,6 +1081,12 @@ class AgentApp(App):
                         )
                     except Exception:
                         logger.warning("Failed to update tool log", exc_info=True)
+                    # EnterPlanMode — switch status to planning
+                    if block.name == "EnterPlanMode":
+                        self.query_one("#status-bar", StatusBar).set_status(
+                            "Planning...", "planning",
+                        )
+                        return
                     # TodoWrite — update task panel and status bar
                     if block.name == "TodoWrite" and input_args:
                         todos = input_args.get("todos", [])
@@ -1267,6 +1274,9 @@ class AgentApp(App):
         bar = self.query_one("#plan-approval", PlanApprovalBar)
         bar.add_class("plan-active")
         bar.focus()
+        self.query_one("#status-bar", StatusBar).set_status(
+            "Awaiting plan approval...", "planning",
+        )
 
         # Wait for either Accept (via bar) or feedback text (via prompt)
         answer = await self._await_choice_future()
@@ -1274,6 +1284,9 @@ class AgentApp(App):
         # Deactivate the approval bar
         bar.remove_class("plan-active", "plan-focused")
         self.query_one("#prompt-input", PromptInput).focus()
+        self.query_one("#status-bar", StatusBar).set_status(
+            "Working...", "working",
+        )
 
         if answer == _PLAN_ACCEPTED:
             return PermissionResultAllow(updated_input=input_data)
