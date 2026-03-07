@@ -846,7 +846,7 @@ class AgentApp(App):
             workspace = self._options.cwd or os.getcwd()
             await self._replay_history(workspace, self._resume)
 
-        self._options.can_use_tool = self._can_use_tool
+        self._install_tui_hooks()
         self._client_loop()
         self.query_one("#prompt-input", PromptInput).focus()
         if self._initial_prompt:
@@ -1175,7 +1175,7 @@ class AgentApp(App):
 
         chat_log.scroll_end(animate=False)
 
-    # ── Tool permission callback ────────────────────────────────────────
+    # ── PreToolUse hooks (plan approval + user questions) ───────────────
 
     def _open_choice_future(self) -> None:
         """Create the input future immediately so no user input is lost.
@@ -1199,98 +1199,139 @@ class AgentApp(App):
         finally:
             self._choice_future = None
 
-    async def _can_use_tool(
-        self, tool_name: str, input_data: dict[str, Any], context: Any,
-    ) -> Any:
-        from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
+    def _install_tui_hooks(self) -> None:
+        """Register PreToolUse hooks so the TUI intercepts ExitPlanMode
+        and AskUserQuestion.  These fire regardless of permission_mode
+        (unlike can_use_tool which is skipped under bypassPermissions).
+        """
+        from claude_agent_sdk import HookMatcher
 
+        hooks = self._options.hooks
+        if hooks is None:
+            hooks = {}
+            self._options.hooks = hooks
+
+        pre_tool_use = hooks.setdefault("PreToolUse", [])
+        pre_tool_use.append(HookMatcher(
+            matcher="ExitPlanMode",
+            hooks=[self._exit_plan_mode_hook],
+        ))
+        pre_tool_use.append(HookMatcher(
+            matcher="AskUserQuestion",
+            hooks=[self._ask_user_question_hook],
+        ))
+
+    async def _exit_plan_mode_hook(
+        self, input_data: dict[str, Any],
+        tool_use_id: str | None, context: Any,
+    ) -> dict[str, Any]:
+        """PreToolUse hook for ExitPlanMode — shows the plan approval bar."""
         try:
-            if tool_name == "AskUserQuestion":
-                questions = input_data.get("questions", [])
-                if questions:
-                    # Open future BEFORE async mount work
-                    self._open_choice_future()
-                    self._choice_questions = questions
+            self._open_choice_future()
 
-                    chat_log = self.query_one("#chat-log", VerticalScroll)
-                    panel = ChoicePanel(questions)
-                    await chat_log.mount(panel)
-                    chat_log.scroll_end(animate=False)
+            chat_log = self.query_one("#chat-log", VerticalScroll)
 
-                    answer_text = await self._await_choice_future()
-                    answers = _parse_choice_answers(answer_text, questions)
-                    self._choice_questions = None
+            # Find and display the most recent plan file.
+            cwd = Path(self._options.cwd or os.getcwd())
+            search_dirs = [
+                cwd / "_agent" / "plans",
+                Path.home() / ".claude" / "plans",
+            ]
+            content = None
+            for plans_dir in search_dirs:
+                if plans_dir.is_dir():
+                    plan_files = sorted(
+                        plans_dir.glob("*.md"),
+                        key=lambda p: p.stat().st_mtime,
+                        reverse=True,
+                    )
+                    if plan_files:
+                        try:
+                            content = plan_files[0].read_text(encoding="utf-8")
+                            break
+                        except OSError as exc:
+                            logger.warning(
+                                "Failed to read plan file %s: %s",
+                                plan_files[0], exc,
+                            )
+                            continue
+            if content:
+                await chat_log.mount(MarkdownMessage(Markdown(content)))
 
-                    return PermissionResultAllow(updated_input={
+            bar = self.query_one("#plan-approval", PlanApprovalBar)
+            bar.add_class("plan-active")
+            bar.focus()
+            self.query_one("#status-bar", StatusBar).set_status(
+                "Awaiting plan approval...", "planning",
+            )
+
+            answer = await self._await_choice_future()
+
+            bar.remove_class("plan-active", "plan-focused")
+            self.query_one("#prompt-input", PromptInput).focus()
+            self.query_one("#status-bar", StatusBar).set_status(
+                "Working...", "working",
+            )
+
+            if answer is _PLAN_ACCEPTED:
+                return {}
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": answer,
+                },
+            }
+        except asyncio.CancelledError:
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": "interrupted",
+                },
+            }
+
+    async def _ask_user_question_hook(
+        self, input_data: dict[str, Any],
+        tool_use_id: str | None, context: Any,
+    ) -> dict[str, Any]:
+        """PreToolUse hook for AskUserQuestion — shows the choice panel."""
+        try:
+            tool_input = input_data.get("tool_input", {})
+            questions = tool_input.get("questions", [])
+            if not questions:
+                return {}
+
+            self._open_choice_future()
+            self._choice_questions = questions
+
+            chat_log = self.query_one("#chat-log", VerticalScroll)
+            panel = ChoicePanel(questions)
+            await chat_log.mount(panel)
+            chat_log.scroll_end(animate=False)
+
+            answer_text = await self._await_choice_future()
+            answers = _parse_choice_answers(answer_text, questions)
+            self._choice_questions = None
+
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "allow",
+                    "updatedInput": {
                         "questions": questions,
                         "answers": answers,
-                    })
-
-            if tool_name == "ExitPlanMode":
-                return await self._handle_plan_approval(input_data)
-
+                    },
+                },
+            }
         except asyncio.CancelledError:
-            return PermissionResultDeny(message="interrupted")
-
-        return PermissionResultAllow(updated_input=input_data)
-
-    async def _handle_plan_approval(self, input_data: dict[str, Any]) -> Any:
-        """Display the plan file and show interactive Accept / Reject UI."""
-        from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
-
-        # Open future FIRST — before any async work — so user input
-        # that arrives during file I/O or widget mounts is captured
-        # instead of falling into the queue.
-        self._open_choice_future()
-
-        chat_log = self.query_one("#chat-log", VerticalScroll)
-
-        # Find and display the most recent plan file.
-        # Check _agent/plans/ first (project-local), then ~/.claude/plans/.
-        cwd = Path(self._options.cwd or os.getcwd())
-        search_dirs = [
-            cwd / "_agent" / "plans",
-            Path.home() / ".claude" / "plans",
-        ]
-        content = None
-        for plans_dir in search_dirs:
-            if plans_dir.is_dir():
-                plan_files = sorted(
-                    plans_dir.glob("*.md"),
-                    key=lambda p: p.stat().st_mtime,
-                    reverse=True,
-                )
-                if plan_files:
-                    try:
-                        content = plan_files[0].read_text(encoding="utf-8")
-                        break
-                    except OSError as exc:
-                        logger.warning("Failed to read plan file %s: %s", plan_files[0], exc)
-                        continue
-        if content:
-            await chat_log.mount(MarkdownMessage(Markdown(content)))
-
-        # Activate the approval bar and focus it
-        bar = self.query_one("#plan-approval", PlanApprovalBar)
-        bar.add_class("plan-active")
-        bar.focus()
-        self.query_one("#status-bar", StatusBar).set_status(
-            "Awaiting plan approval...", "planning",
-        )
-
-        # Wait for either Accept (via bar) or feedback text (via prompt)
-        answer = await self._await_choice_future()
-
-        # Deactivate the approval bar
-        bar.remove_class("plan-active", "plan-focused")
-        self.query_one("#prompt-input", PromptInput).focus()
-        self.query_one("#status-bar", StatusBar).set_status(
-            "Working...", "working",
-        )
-
-        if answer == _PLAN_ACCEPTED:
-            return PermissionResultAllow(updated_input=input_data)
-        return PermissionResultDeny(message=answer)
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": "interrupted",
+                },
+            }
 
     async def on_plan_approval_bar_accepted(
         self, event: PlanApprovalBar.Accepted,
@@ -1330,7 +1371,7 @@ class AgentApp(App):
                 "Cancelled", "error",
             )
             # Cancel any pending user-input Future (plan approval,
-            # AskUserQuestion) so _can_use_tool unblocks immediately.
+            # AskUserQuestion) so the PreToolUse hook unblocks immediately.
             if self._choice_future and not self._choice_future.done():
                 self._choice_future.cancel()
             # Send interrupt through the SDK transport so the CLI
