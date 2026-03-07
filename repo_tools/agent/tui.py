@@ -208,34 +208,18 @@ class TicketPanel(VerticalScroll):
 
     def refresh_tickets(self) -> None:
         """Re-scan ticket directory and rebuild the panel."""
-
-        def _load_tickets() -> list[tuple[str, dict | None]]:
-            ticket_dir = Path(self._workspace) / "_agent" / "tickets"
-            if not ticket_dir.is_dir():
-                return []
-            results: list[tuple[str, dict | None]] = []
-            for path in sorted(ticket_dir.glob("*.json")):
-                try:
-                    data = json.loads(path.read_text(encoding="utf-8"))
-                    results.append((path.stem, data))
-                except Exception:
-                    logger.warning("Failed to load ticket %s", path, exc_info=True)
-                    results.append((path.stem, None))
-            return results
-
-        async def _refresh_worker() -> None:
-            tickets = await asyncio.to_thread(_load_tickets)
-            self.remove_children()
-            if not tickets:
-                await self.mount(Static("(no tickets)"))
-                return
-            for ticket_id, data in tickets:
-                if data is not None:
-                    self._add_ticket(ticket_id, data)
-                else:
-                    await self.mount(Static(f"{ticket_id} (error)"))
-
-        self.run_worker(_refresh_worker(), exclusive=True)
+        self.remove_children()
+        ticket_dir = Path(self._workspace) / "_agent" / "tickets"
+        if not ticket_dir.is_dir():
+            self.mount(Static("(no tickets)"))
+            return
+        for path in sorted(ticket_dir.glob("*.json")):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                self._add_ticket(path.stem, data)
+            except Exception:
+                logger.warning("Failed to load ticket %s", path, exc_info=True)
+                self.mount(Static(f"{path.stem} (error)"))
 
     def _add_ticket(self, ticket_id: str, data: dict) -> None:
         status = data.get("status", "")
@@ -710,21 +694,17 @@ class ChatHistory:
                 logger.warning("Failed to flush chat history buffer", exc_info=True)
             self._buffer.clear()
 
-    async def append(self, role: str, text: str) -> None:
+    def append(self, role: str, text: str) -> None:
         """Append a message to the log."""
         entry = {"role": role, "text": text}
         if self._path is None:
             self._buffer.append(entry)
             return
-
-        def _write() -> None:
-            try:
-                with self._path.open("a", encoding="utf-8") as f:
-                    f.write(json.dumps(entry) + "\n")
-            except OSError:
-                logger.warning("Failed to write chat history", exc_info=True)
-
-        await asyncio.to_thread(_write)
+        try:
+            with self._path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(entry) + "\n")
+        except OSError:
+            logger.warning("Failed to write chat history", exc_info=True)
 
     @staticmethod
     def load(workspace: str | Path, session_id: str) -> list[dict[str, str]]:
@@ -1013,7 +993,7 @@ class AgentApp(App):
         msg_widget = UserMessage(f"> {text}")
         await chat_log.mount(msg_widget)
         msg_widget.scroll_visible()
-        await self._chat_history.append("user", text)
+        self._chat_history.append("user", text)
         self._input_queue.put_nowait(text)
 
     def on_prompt_input_pop_queue(
@@ -1077,7 +1057,7 @@ class AgentApp(App):
                     await chat_log.mount(
                         MarkdownMessage(Markdown(block.text)),
                     )
-                    await self._chat_history.append("assistant", block.text)
+                    self._chat_history.append("assistant", block.text)
                 elif isinstance(block, ToolUseBlock):
                     # Compact group in chat
                     if self._current_tool_group is None:
@@ -1272,23 +1252,21 @@ class AgentApp(App):
             cwd / "_agent" / "plans",
             Path.home() / ".claude" / "plans",
         ]
-        def _find_latest_plan() -> str | None:
-            for plans_dir in search_dirs:
-                if plans_dir.is_dir():
-                    plan_files = sorted(
-                        plans_dir.glob("*.md"),
-                        key=lambda p: p.stat().st_mtime,
-                        reverse=True,
-                    )
-                    if plan_files:
-                        try:
-                            return plan_files[0].read_text(encoding="utf-8")
-                        except OSError as exc:
-                            logger.warning("Failed to read plan file %s: %s", plan_files[0], exc)
-                            continue
-            return None
-
-        content = await asyncio.to_thread(_find_latest_plan)
+        content = None
+        for plans_dir in search_dirs:
+            if plans_dir.is_dir():
+                plan_files = sorted(
+                    plans_dir.glob("*.md"),
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True,
+                )
+                if plan_files:
+                    try:
+                        content = plan_files[0].read_text(encoding="utf-8")
+                        break
+                    except OSError as exc:
+                        logger.warning("Failed to read plan file %s: %s", plan_files[0], exc)
+                        continue
         if content:
             await chat_log.mount(MarkdownMessage(Markdown(content)))
 
