@@ -1319,14 +1319,21 @@ class AgentApp(App):
             answers = _parse_choice_answers(answer_text, questions)
             self._choice_questions = None
 
+            # Deny the tool to prevent the CLI from trying to prompt
+            # interactively (which hangs because it runs as a subprocess).
+            # Deliver the collected answers via the denial reason so
+            # Claude can proceed with them.
+            answer_lines = []
+            for q_text, a_text in answers.items():
+                answer_lines.append(f"- {q_text}: {a_text}")
             return {
                 "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
-                    "permissionDecision": "allow",
-                    "updatedInput": {
-                        "questions": questions,
-                        "answers": answers,
-                    },
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": (
+                        "User answered via application UI:\n"
+                        + "\n".join(answer_lines)
+                    ),
                 },
             }
         except asyncio.CancelledError:
