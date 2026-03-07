@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -581,6 +582,12 @@ class PlanApprovalBar(Static):
         self.remove_class("plan-focused")
 
 
+# Matches SGR mouse tracking fragments that leak when ESC is split from the
+# rest of the sequence (common on Windows terminals).
+_SGR_MOUSE_RE = re.compile(r"\[?<\d+;\d+;\d+[Mm]")
+_MOUSE_FRAG_RE = re.compile(r"\[[OM]")
+
+
 class PromptInput(TextArea):
     r"""Multi-line prompt. Enter submits, ``\`` + Enter for continuation."""
 
@@ -601,6 +608,25 @@ class PromptInput(TextArea):
 
     class PopQueue(Message):
         """Posted when user presses Up on empty input to restore queued text."""
+
+    def _strip_mouse_garbage(self) -> None:
+        """Remove any SGR mouse tracking fragments from the text buffer."""
+        text = self.text
+        cleaned = _SGR_MOUSE_RE.sub("", text)
+        cleaned = _MOUSE_FRAG_RE.sub("", cleaned)
+        if cleaned != text:
+            self.text = cleaned
+
+    def _on_paste(self, event: events.Paste) -> None:
+        """Strip leaked SGR mouse tracking sequences from pasted text."""
+        cleaned = _SGR_MOUSE_RE.sub("", event.text)
+        cleaned = _MOUSE_FRAG_RE.sub("", cleaned)
+        if not cleaned.strip():
+            event.prevent_default()
+            return
+        if cleaned != event.text:
+            event.prevent_default()
+            self.insert(cleaned)
 
     async def _on_key(self, event: events.Key) -> None:
         r"""Intercept Enter before TextArea inserts a newline.
@@ -647,6 +673,7 @@ class PromptInput(TextArea):
                 self.post_message(self.Submitted(submitted))
             return
         await super()._on_key(event)
+        self._strip_mouse_garbage()
 
 
 class TUILogHandler(logging.Handler):
