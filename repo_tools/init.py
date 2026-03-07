@@ -96,20 +96,24 @@ class InitTool(RepoTool):
     @staticmethod
     def _generate_config_template(workspace_root: Path, framework_root: Path) -> None:
         config_filename = get_config_file(str(workspace_root))
-        config_path = workspace_root / config_filename
 
-        if config_path.exists() and _is_repokit_config(config_path):
-            print(f"Config file found: {config_filename}, skipping template generation")
+        # Explicit override — existence alone is sufficient to skip
+        if config_filename != "config.yaml":
+            config_path = workspace_root / config_filename
+            if config_path.exists():
+                print(f"Config file found: {config_filename}, skipping template generation")
+                return
+            config_path.write_text(_CONFIG_TEMPLATE, encoding="utf-8")
+            print(f"Generated config template: {config_filename}")
             return
 
-        # No repokit config exists yet
+        # Default case — need _is_repokit_config to distinguish from foreign configs
         default_path = workspace_root / "config.yaml"
         if not default_path.exists():
-            # No config at all — write template to config.yaml
             default_path.write_text(_CONFIG_TEMPLATE, encoding="utf-8")
             print(f"Generated config template: config.yaml")
         elif _is_repokit_config(default_path):
-            print(f"Config file found: config.yaml, skipping template generation")
+            print("Config file found: config.yaml, skipping template generation")
         else:
             # Foreign config.yaml exists — prompt for an alternate name
             alt_name = click.prompt(
