@@ -136,6 +136,17 @@ def _write_plugin(
             "args": repo_cmd_args,
         }
 
+    # Dispatch tool — orchestrator only (role is None for interactive sessions)
+    if role is None:
+        mcp_config["mcpServers"]["dispatch"] = {
+            "type": "stdio",
+            "command": posix_path(sys.executable),
+            "args": [
+                "-m", "repo_tools.agent.mcp.dispatch",
+                "--project-root", project_root.as_posix(),
+            ],
+        }
+
     (plugin_dir / ".mcp.json").write_text(
         json.dumps(mcp_config, indent=2), encoding="utf-8",
     )

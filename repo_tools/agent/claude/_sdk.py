@@ -127,6 +127,23 @@ def _make_repo_tools(workspace_root: Path):
     return tools
 
 
+def _make_dispatch_tool(workspace_root: Path):
+    """Create dispatch_agent MCP tool for orchestrator sessions."""
+    from claude_agent_sdk import tool
+
+    from ..dispatch import TOOL_SCHEMA, call_dispatch as _call_dispatch
+
+    @tool(TOOL_SCHEMA["name"], TOOL_SCHEMA["description"], TOOL_SCHEMA["inputSchema"])
+    async def dispatch_tool(args: dict[str, Any]) -> dict[str, Any]:
+        result = _call_dispatch(args, workspace_root=workspace_root)
+        return {
+            "content": [{"type": "text", "text": result.get("text", "")}],
+            **({"is_error": True} if result.get("isError") else {}),
+        }
+
+    return dispatch_tool
+
+
 def _make_event_tools(config: dict):
     """Create list_events and subscribe_event MCP tools."""
     from claude_agent_sdk import tool
@@ -259,8 +276,9 @@ class SdkBackend:
             mcp_tools.extend(_make_ticket_tools(project_root, role))
             mcp_tools.extend(_make_repo_tools(project_root))
 
-            # Event tools — only for interactive (orchestrator) sessions
+            # Orchestrator-only tools (interactive sessions)
             if not headless:
+                mcp_tools.append(_make_dispatch_tool(project_root))
                 events_cfg = config.get("agent", config).get("events")
                 if events_cfg:
                     mcp_tools.extend(_make_event_tools(config))
