@@ -494,10 +494,8 @@ class TestInitConfigTemplate:
         ws.mkdir()
         (fw_root / "_managed").mkdir(parents=True, exist_ok=True)
 
-        # Set override at the canonical path that get_config_file() checks
-        canonical_managed = ws / "tools" / "framework" / "_managed"
-        canonical_managed.mkdir(parents=True)
-        (canonical_managed / "config_name").write_text("repokit.yaml")
+        # Set override at the framework root that get_config_file() checks
+        (fw_root / "_managed" / "config_name").write_text("repokit.yaml")
         (ws / "repokit.yaml").write_text("existing: config\n")
 
         ctx = make_tool_context(
@@ -505,7 +503,8 @@ class TestInitConfigTemplate:
             tokens_override={"framework_root": str(fw_root)},
         )
         tool = InitTool()
-        tool.execute(ctx, {})
+        with patch("repo_tools.core._FRAMEWORK_ROOT", fw_root):
+            tool.execute(ctx, {})
 
         output = capsys.readouterr().out
         assert "skipping template generation" in output

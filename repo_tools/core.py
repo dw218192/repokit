@@ -318,6 +318,7 @@ def _deep_merge(base: dict, overlay: dict) -> dict:
 
 
 _CONFIG_DEFAULTS = Path(__file__).parent / "config.defaults.yaml"
+_FRAMEWORK_ROOT = Path(__file__).resolve().parent.parent
 
 
 def get_config_file(workspace_root: str) -> str:
@@ -327,7 +328,7 @@ def get_config_file(workspace_root: str) -> str:
     falls back to ``"config.yaml"``.  Returns just the filename, not a
     full path.
     """
-    framework_root = Path(workspace_root) / "tools" / "framework"
+    framework_root = _FRAMEWORK_ROOT
     override_path = framework_root / "_managed" / "config_name"
     if override_path.is_file():
         name = override_path.read_text(encoding="utf-8").strip()
