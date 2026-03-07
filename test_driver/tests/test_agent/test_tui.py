@@ -1755,8 +1755,8 @@ class TestExitPlanModeApproval:
                 result_holder: list = []
 
                 async def _call():
-                    r = await app._can_use_tool(
-                        "ExitPlanMode", {"allowedPrompts": []}, None,
+                    r = await app._exit_plan_mode_hook(
+                        {"allowedPrompts": []}, None, None,
                     )
                     result_holder.append(r)
 
@@ -1769,7 +1769,7 @@ class TestExitPlanModeApproval:
                 await task
 
                 assert result_holder
-                assert result_holder[0].behavior == "allow"
+                assert result_holder[0] == {}
 
                 # Bar should be deactivated after approval
                 bar = app.query_one("#plan-approval", PlanApprovalBar)
@@ -1789,8 +1789,8 @@ class TestExitPlanModeApproval:
                 result_holder: list = []
 
                 async def _call():
-                    r = await app._can_use_tool(
-                        "ExitPlanMode", {"allowedPrompts": []}, None,
+                    r = await app._exit_plan_mode_hook(
+                        {"allowedPrompts": []}, None, None,
                     )
                     result_holder.append(r)
 
@@ -1802,8 +1802,9 @@ class TestExitPlanModeApproval:
                 await task
 
                 assert result_holder
-                assert result_holder[0].behavior == "deny"
-                assert "error handling" in result_holder[0].message
+                hook_out = result_holder[0]["hookSpecificOutput"]
+                assert hook_out["permissionDecision"] == "deny"
+                assert "error handling" in hook_out["permissionDecisionReason"]
 
         _run(_test)
 
@@ -1819,8 +1820,8 @@ class TestExitPlanModeApproval:
                 result_holder: list = []
 
                 async def _call():
-                    r = await app._can_use_tool(
-                        "ExitPlanMode", {}, None,
+                    r = await app._exit_plan_mode_hook(
+                        {}, None, None,
                     )
                     result_holder.append(r)
 
@@ -1832,8 +1833,9 @@ class TestExitPlanModeApproval:
                 await task
 
                 assert result_holder
-                assert result_holder[0].behavior == "deny"
-                assert "interrupted" in result_holder[0].message
+                hook_out = result_holder[0]["hookSpecificOutput"]
+                assert hook_out["permissionDecision"] == "deny"
+                assert "interrupted" in hook_out["permissionDecisionReason"]
 
         _run(_test)
 
@@ -1848,8 +1850,8 @@ class TestExitPlanModeApproval:
                 loop = asyncio.get_event_loop()
 
                 async def _call():
-                    await app._can_use_tool(
-                        "ExitPlanMode", {}, None,
+                    await app._exit_plan_mode_hook(
+                        {}, None, None,
                     )
 
                 task = loop.create_task(_call())
