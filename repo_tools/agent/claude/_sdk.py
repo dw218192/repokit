@@ -26,8 +26,9 @@ def _make_lint_tool(
 
     @tool(TOOL_SCHEMA["name"], TOOL_SCHEMA["description"], TOOL_SCHEMA["inputSchema"])
     async def lint_tool(args: dict[str, Any]) -> dict[str, Any]:
-        result = _call_lint(
-            args, default_select=default_select, default_ignore=default_ignore,
+        result = await asyncio.to_thread(
+            _call_lint, args,
+            default_select=default_select, default_ignore=default_ignore,
         )
         return {
             "content": [{"type": "text", "text": result.get("text", "")}],
@@ -45,7 +46,7 @@ def _make_coderabbit_tool():
 
     @tool(TOOL_SCHEMA["name"], TOOL_SCHEMA["description"], TOOL_SCHEMA["inputSchema"])
     async def coderabbit_tool(args: dict[str, Any]) -> dict[str, Any]:
-        result = _call_review(args)
+        result = await asyncio.to_thread(_call_review, args)
         return {
             "content": [{"type": "text", "text": result.get("text", "")}],
             **({"is_error": True} if result.get("isError") else {}),
@@ -69,7 +70,7 @@ def _make_ticket_tools(workspace_root: Path, role: str | None):
 
     def _mk_handler(fn):
         async def handler(args: dict[str, Any]) -> dict[str, Any]:
-            result = fn(workspace_root, args, role=role)
+            result = await asyncio.to_thread(fn, workspace_root, args, role=role)
             return {
                 "content": [{"type": "text", "text": result.get("text", "")}],
                 **({"is_error": True} if result.get("isError") else {}),
@@ -116,7 +117,9 @@ def _make_repo_tools(workspace_root: Path):
         def _mk(name: str, desc: str):
             @tool(f"repo_{name}", desc, input_schema)
             async def repo_tool(args: dict[str, Any]) -> dict[str, Any]:
-                result = call_repo_run(name, args, workspace_root=workspace_root)
+                result = await asyncio.to_thread(
+                    call_repo_run, name, args, workspace_root=workspace_root,
+                )
                 return {
                     "content": [{"type": "text", "text": result.get("text", "")}],
                     **({"is_error": True} if result.get("isError") else {}),
@@ -135,7 +138,9 @@ def _make_dispatch_tool(workspace_root: Path):
 
     @tool(TOOL_SCHEMA["name"], TOOL_SCHEMA["description"], TOOL_SCHEMA["inputSchema"])
     async def dispatch_tool(args: dict[str, Any]) -> dict[str, Any]:
-        result = _call_dispatch(args, workspace_root=workspace_root)
+        result = await asyncio.to_thread(
+            _call_dispatch, args, workspace_root=workspace_root,
+        )
         return {
             "content": [{"type": "text", "text": result.get("text", "")}],
             **({"is_error": True} if result.get("isError") else {}),
