@@ -1261,9 +1261,10 @@ class AgentApp(App):
             self._choice_future = None
 
     def _install_tui_hooks(self) -> None:
-        """Register PreToolUse hooks so the TUI intercepts ExitPlanMode
-        and AskUserQuestion.  These fire regardless of permission_mode
-        (unlike can_use_tool which is skipped under bypassPermissions).
+        """Register PreToolUse hooks so the TUI intercepts ExitPlanMode.
+
+        These fire regardless of permission_mode (unlike can_use_tool
+        which is skipped under bypassPermissions).
         """
         from claude_agent_sdk import HookMatcher
 
@@ -1276,10 +1277,6 @@ class AgentApp(App):
         pre_tool_use.append(HookMatcher(
             matcher="ExitPlanMode",
             hooks=[self._exit_plan_mode_hook],
-        ))
-        pre_tool_use.append(HookMatcher(
-            matcher="AskUserQuestion",
-            hooks=[self._ask_user_question_hook],
         ))
 
     async def _exit_plan_mode_hook(
@@ -1352,54 +1349,26 @@ class AgentApp(App):
                 },
             }
 
-    async def _ask_user_question_hook(
-        self, input_data: dict[str, Any],
-        tool_use_id: str | None, context: Any,
-    ) -> dict[str, Any]:
-        """PreToolUse hook for AskUserQuestion — shows the choice panel."""
-        try:
-            tool_input = input_data.get("tool_input", {})
-            questions = tool_input.get("questions", [])
-            if not questions:
-                return {}
+    async def ask_user_via_mcp(
+        self, questions: list[dict],
+    ) -> dict[str, str]:
+        """Called by the ask_user_question MCP tool to collect answers.
 
-            self._open_choice_future()
-            self._choice_questions = questions
+        Shows a ChoicePanel, waits for user input, and returns the
+        parsed answers dict.
+        """
+        self._open_choice_future()
+        self._choice_questions = questions
 
-            chat_log = self.query_one("#chat-log", VerticalScroll)
-            panel = ChoicePanel(questions)
-            await chat_log.mount(panel)
-            chat_log.scroll_end(animate=False)
+        chat_log = self.query_one("#chat-log", VerticalScroll)
+        panel = ChoicePanel(questions)
+        await chat_log.mount(panel)
+        chat_log.scroll_end(animate=False)
 
-            answer_text = await self._await_choice_future()
-            answers = _parse_choice_answers(answer_text, questions)
-            self._choice_questions = None
-
-            # Deny the tool to prevent the CLI from trying to prompt
-            # interactively (which hangs because it runs as a subprocess).
-            # Deliver the collected answers via the denial reason so
-            # Claude can proceed with them.
-            answer_lines = []
-            for q_text, a_text in answers.items():
-                answer_lines.append(f"- {q_text}: {a_text}")
-            return {
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": (
-                        "User answered via application UI:\n"
-                        + "\n".join(answer_lines)
-                    ),
-                },
-            }
-        except asyncio.CancelledError:
-            return {
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": "interrupted",
-                },
-            }
+        answer_text = await self._await_choice_future()
+        answers = _parse_choice_answers(answer_text, questions)
+        self._choice_questions = None
+        return answers
 
     async def on_plan_approval_bar_accepted(
         self, event: PlanApprovalBar.Accepted,
