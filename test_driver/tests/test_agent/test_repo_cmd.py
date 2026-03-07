@@ -9,7 +9,9 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from repo_tools.agent.repo_cmd import (
+    _discover_registered_tools,
     _discover_repo_commands,
+    _merge_commands,
     build_tool_handlers,
     build_tool_schemas,
     call_repo_run,
@@ -266,3 +268,143 @@ def test_mcp_unknown_tool():
     })
     result = responses[0]["result"]
     assert result.get("isError") is True
+
+
+# ── Registered tool discovery ─────────────────────────────────────────────────
+
+
+def test_discover_registered_tools():
+    """Registered RepoTool subclasses are discovered (except agent)."""
+    from repo_tools.core import RepoTool, _TOOL_REGISTRY
+
+    class _FakeClean(RepoTool):
+        name = "clean"
+        help = "Clean up"
+        def execute(self, ctx, args): pass
+
+    class _FakeAgent(RepoTool):
+        name = "agent"
+        help = "Agent"
+        def execute(self, ctx, args): pass
+
+    saved = dict(_TOOL_REGISTRY)
+    try:
+        _TOOL_REGISTRY["clean"] = _FakeClean()
+        _TOOL_REGISTRY["agent"] = _FakeAgent()
+        tools = _discover_registered_tools()
+        names = {t["name"] for t in tools}
+        assert "clean" in names
+        assert "agent" not in names
+        for t in tools:
+            assert "name" in t
+            assert "description" in t
+            assert t["description"]
+    finally:
+        _TOOL_REGISTRY.clear()
+        _TOOL_REGISTRY.update(saved)
+
+
+# ── _merge_commands ───────────────────────────────────────────────────────────
+
+
+def test_merge_commands_deduplicates():
+    config_cmds = [{"name": "test", "description": "Run ./repo test"}]
+    extra = [
+        {"name": "test", "description": "duplicate"},
+        {"name": "clean", "description": "Clean up"},
+    ]
+    merged = _merge_commands(config_cmds, extra)
+    names = [c["name"] for c in merged]
+    assert names.count("test") == 1
+    assert "clean" in names
+
+
+def test_merge_commands_no_extra():
+    cmds = [{"name": "test", "description": "d"}]
+    assert _merge_commands(cmds, None) is cmds
+    assert _merge_commands(cmds, []) is cmds
+
+
+# ── Schemas/handlers with extra tools ─────────────────────────────────────────
+
+
+def test_build_tool_schemas_with_extra():
+    config = {"test": {"steps": ["pytest"]}}
+    extra = [{"name": "clean", "description": "Clean up"}]
+    schemas = build_tool_schemas(config, extra=extra)
+    names = [s["name"] for s in schemas]
+    assert "repo_test" in names
+    assert "repo_clean" in names
+
+
+def test_build_tool_handlers_with_extra(tmp_path):
+    config = {"test": {"steps": ["pytest"]}}
+    extra = [{"name": "clean", "description": "Clean up"}]
+    handlers = build_tool_handlers(config, tmp_path, extra=extra)
+    assert "repo_test" in handlers
+    assert "repo_clean" in handlers
+
+
+# ── MCP stdio server with --extra-tools ───────────────────────────────────────
+
+
+def _call_mcp_with_extra(*requests, config=None, project_root=None, extra_tools=None):
+    """Run the repo_cmd MCP server with --extra-tools."""
+    from repo_tools.agent.mcp.repo_cmd import main
+
+    if config is None:
+        config = {}
+    if project_root is None:
+        project_root = "/tmp/test"
+
+    argv = [
+        "repo_cmd_mcp",
+        "--project-root", str(project_root),
+        "--config", json.dumps(config),
+    ]
+    if extra_tools:
+        argv.extend(["--extra-tools", json.dumps(extra_tools)])
+
+    lines = "\n".join(json.dumps(r) for r in requests) + "\n"
+    captured = io.StringIO()
+    with (
+        patch("sys.stdin", io.StringIO(lines)),
+        patch("sys.stdout", captured),
+        patch("sys.argv", argv),
+    ):
+        main()
+    output = captured.getvalue().strip()
+    if not output:
+        return []
+    return [json.loads(line) for line in output.splitlines() if line.strip()]
+
+
+def test_mcp_extra_tools_in_list():
+    extra = [{"name": "clean", "description": "Clean up"}]
+    responses = _call_mcp_with_extra(
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+        extra_tools=extra,
+    )
+    tools = responses[0]["result"]["tools"]
+    names = [t["name"] for t in tools]
+    assert "repo_clean" in names
+
+
+def test_mcp_extra_tools_callable(tmp_path):
+    extra = [{"name": "clean", "description": "Clean up"}]
+    mock_proc = MagicMock()
+    mock_proc.stdout = "cleaned"
+    mock_proc.stderr = ""
+    mock_proc.returncode = 0
+
+    with patch("subprocess.run", return_value=mock_proc):
+        responses = _call_mcp_with_extra(
+            {
+                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": {"name": "repo_clean", "arguments": {}},
+            },
+            project_root=str(tmp_path),
+            extra_tools=extra,
+        )
+    result = responses[0]["result"]
+    assert "cleaned" in result["content"][0]["text"]

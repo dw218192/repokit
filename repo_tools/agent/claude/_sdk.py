@@ -89,11 +89,13 @@ def _make_ticket_tools(workspace_root: Path, role: str | None):
     return tools
 
 
-def _make_repo_tools(workspace_root: Path, config: dict):
-    """Create one MCP tool per discovered repo command."""
+def _make_repo_tools(workspace_root: Path):
+    """Create one MCP tool per registered repo command."""
     from claude_agent_sdk import tool
 
-    from ..repo_cmd import _discover_repo_commands, call_repo_run
+    from ..repo_cmd import _discover_registered_tools, call_repo_run
+
+    all_cmds = _discover_registered_tools()
 
     input_schema = {
         "type": "object",
@@ -107,11 +109,12 @@ def _make_repo_tools(workspace_root: Path, config: dict):
     }
 
     tools = []
-    for cmd_info in _discover_repo_commands(config):
+    for cmd_info in all_cmds:
         cmd_name = cmd_info["name"]
+        cmd_desc = cmd_info["description"]
 
-        def _mk(name: str):
-            @tool(f"repo_{name}", f"Run ./repo {name}", input_schema)
+        def _mk(name: str, desc: str):
+            @tool(f"repo_{name}", desc, input_schema)
             async def repo_tool(args: dict[str, Any]) -> dict[str, Any]:
                 result = call_repo_run(name, args, workspace_root=workspace_root)
                 return {
@@ -120,7 +123,7 @@ def _make_repo_tools(workspace_root: Path, config: dict):
                 }
             return repo_tool
 
-        tools.append(_mk(cmd_name))
+        tools.append(_mk(cmd_name, cmd_desc))
     return tools
 
 
@@ -254,7 +257,7 @@ class SdkBackend:
             )
             mcp_tools.append(_make_coderabbit_tool())
             mcp_tools.extend(_make_ticket_tools(project_root, role))
-            mcp_tools.extend(_make_repo_tools(project_root, project_config or config))
+            mcp_tools.extend(_make_repo_tools(project_root))
 
             # Event tools — only for interactive (orchestrator) sessions
             if not headless:

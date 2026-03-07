@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 _SKIP_SECTIONS = {"repo", "tokens", "agent", "clean"}
+_SKIP_REGISTERED = {"agent"}
 
 
 def _discover_repo_commands(config: dict[str, Any]) -> list[dict[str, str]]:
@@ -33,6 +34,22 @@ def _discover_repo_commands(config: dict[str, Any]) -> list[dict[str, str]]:
         if has_steps:
             commands.append({"name": section, "description": f"Run ./repo {section}"})
     return commands
+
+
+def _discover_registered_tools() -> list[dict[str, str]]:
+    """Return registered ``RepoTool`` instances as command descriptors.
+
+    Reads ``_TOOL_REGISTRY`` (populated by the CLI bootstrap) and returns
+    the same ``{"name", "description"}`` format as ``_discover_repo_commands``.
+    The ``agent`` tool is excluded to prevent recursion.
+    """
+    from ..core import _TOOL_REGISTRY
+
+    return [
+        {"name": t.name, "description": t.help or f"Run ./repo {t.name}"}
+        for t in _TOOL_REGISTRY.values()
+        if t.name not in _SKIP_REGISTERED
+    ]
 
 
 def call_repo_run(
@@ -67,10 +84,14 @@ def call_repo_run(
     return {"text": output.strip() or f"repo {subcommand} completed."}
 
 
-def build_tool_schemas(config: dict[str, Any]) -> list[dict[str, Any]]:
+def build_tool_schemas(
+    config: dict[str, Any],
+    extra: list[dict[str, str]] | None = None,
+) -> list[dict[str, Any]]:
     """Build MCP tool schemas for all discovered repo commands."""
+    all_cmds = _merge_commands(_discover_repo_commands(config), extra)
     schemas: list[dict[str, Any]] = []
-    for cmd in _discover_repo_commands(config):
+    for cmd in all_cmds:
         schemas.append({
             "name": f"repo_{cmd['name']}",
             "description": cmd["description"],
@@ -91,10 +112,12 @@ def build_tool_schemas(config: dict[str, Any]) -> list[dict[str, Any]]:
 def build_tool_handlers(
     config: dict[str, Any],
     workspace_root: Path,
+    extra: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Build MCP tool handlers for all discovered repo commands."""
+    all_cmds = _merge_commands(_discover_repo_commands(config), extra)
     handlers: dict[str, Any] = {}
-    for cmd in _discover_repo_commands(config):
+    for cmd in all_cmds:
         name = f"repo_{cmd['name']}"
 
         def _mk(cmd_name: str):
@@ -104,3 +127,19 @@ def build_tool_handlers(
 
         handlers[name] = _mk(cmd["name"])
     return handlers
+
+
+def _merge_commands(
+    config_cmds: list[dict[str, str]],
+    extra: list[dict[str, str]] | None,
+) -> list[dict[str, str]]:
+    """Merge config-discovered commands with extra tool descriptors, dedup by name."""
+    if not extra:
+        return config_cmds
+    seen = {c["name"] for c in config_cmds}
+    merged = list(config_cmds)
+    for cmd in extra:
+        if cmd["name"] not in seen:
+            merged.append(cmd)
+            seen.add(cmd["name"])
+    return merged

@@ -121,6 +121,59 @@ class TestBuildOptions:
         assert any("coderabbit" in n for n in mcp_names)
         assert any("list_tickets" in n for n in mcp_names)
 
+    def test_registered_tools_in_allowed(self, tmp_path, rules_file):
+        """Registered RepoTool subclasses appear as MCP tools."""
+        from repo_tools.agent.claude import Claude
+
+        fake_registered = [
+            {"name": "clean", "description": "Clean up"},
+            {"name": "format", "description": "Format code"},
+        ]
+        with patch(
+            "repo_tools.agent.repo_cmd._discover_registered_tools",
+            return_value=fake_registered,
+        ):
+            opts, meta = Claude._build_options(
+                role="worker", rules_path=rules_file, project_root=tmp_path,
+                cwd=tmp_path,
+            )
+        mcp_names = [t for t in opts.allowed_tools if t.startswith("mcp__")]
+        assert any("repo_clean" in n for n in mcp_names)
+        assert any("repo_format" in n for n in mcp_names)
+
+        mcp_meta = [t for t in meta if t["group"] == "MCP"]
+        repo_names = {t["name"] for t in mcp_meta if t["name"].startswith("repo_")}
+        assert "repo_clean" in repo_names
+        assert "repo_format" in repo_names
+
+    def test_all_repo_tools_from_registry(self, tmp_path, rules_file):
+        """All repo tools come from the tool registry (config + built-in)."""
+        from repo_tools.agent.claude import Claude
+
+        fake_registered = [
+            {"name": "test", "description": "Run ./repo test"},
+            {"name": "test-cov", "description": "Run ./repo test-cov"},
+            {"name": "clean", "description": "Clean up"},
+        ]
+        with patch(
+            "repo_tools.agent.repo_cmd._discover_registered_tools",
+            return_value=fake_registered,
+        ):
+            opts, meta = Claude._build_options(
+                role="orchestrator", rules_path=rules_file, project_root=tmp_path,
+                cwd=tmp_path,
+            )
+        mcp_names = [t for t in opts.allowed_tools if t.startswith("mcp__")]
+        assert any("repo_test" == n.split("__")[-1] for n in mcp_names)
+        assert any("repo_test-cov" in n for n in mcp_names)
+        assert any("repo_clean" in n for n in mcp_names)
+
+        mcp_meta = [t for t in meta if t["group"] == "MCP"]
+        repo_names = {t["name"] for t in mcp_meta if t["name"].startswith("repo_")}
+        assert "repo_test" in repo_names
+        assert "repo_test-cov" in repo_names
+        assert "repo_clean" in repo_names
+
     def test_system_prompt_from_role_prompt(self, tmp_path, rules_file):
         """role_prompt is set as an appended system prompt preset."""
         from repo_tools.agent.claude import Claude

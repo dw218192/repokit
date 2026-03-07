@@ -271,6 +271,32 @@ class TestWritePlugin:
         assert "--role" in bash_hook
         assert "reviewer" in bash_hook
 
+    def test_registered_tools_in_mcp_config(self, tmp_path):
+        """Registered RepoTool subclasses appear in .mcp.json repo_cmd server."""
+        plugin_dir = tmp_path / "plugin"
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        fake_registered = [
+            {"name": "clean", "description": "Clean up"},
+            {"name": "format", "description": "Format code"},
+        ]
+        with patch(
+            "repo_tools.agent.repo_cmd._discover_registered_tools",
+            return_value=fake_registered,
+        ):
+            _write_plugin(plugin_dir, rules, tmp_path)
+
+        mcp = json.loads((plugin_dir / ".mcp.json").read_text())
+        assert "repo_cmd" in mcp["mcpServers"]
+        repo_args = mcp["mcpServers"]["repo_cmd"]["args"]
+        assert "--extra-tools" in repo_args
+        extra_idx = repo_args.index("--extra-tools")
+        extra_tools = json.loads(repo_args[extra_idx + 1])
+        names = {t["name"] for t in extra_tools}
+        assert "clean" in names
+        assert "format" in names
+
 
 # ── run_headless / run_interactive tests ─────────────────────────
 

@@ -119,21 +119,15 @@ def _write_plugin(
         }
     }
 
-    # Repo command tools — discover from config and expose as MCP tools
-    from ..repo_cmd import _discover_repo_commands
-    repo_cfg = project_config or tool_config or {}
-    if _discover_repo_commands(repo_cfg):
-        # Pass only the sections needed for command discovery
-        filtered_config = {
-            section: value for section, value in repo_cfg.items()
-            if isinstance(value, dict) and any(
-                k == "steps" or k.startswith("steps@") for k in value
-            )
-        }
+    # Repo command tools — all from the tool registry
+    from ..repo_cmd import _discover_registered_tools
+    registered = _discover_registered_tools()
+    if registered:
         repo_cmd_args = [
             "-m", "repo_tools.agent.mcp.repo_cmd",
             "--project-root", project_root.as_posix(),
-            "--config", json.dumps(filtered_config),
+            "--config", "{}",
+            "--extra-tools", json.dumps(registered),
         ]
         mcp_config["mcpServers"]["repo_cmd"] = {
             "type": "stdio",
