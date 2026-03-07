@@ -55,7 +55,7 @@ def _make_coderabbit_tool():
     return coderabbit_tool
 
 
-def _make_ticket_tools(workspace_root: Path, role: str | None):
+def _make_ticket_tools(workspace_root: Path, role: str | None, config: dict | None = None):
     """Create ticket MCP tools filtered by role."""
     from claude_agent_sdk import tool
 
@@ -68,9 +68,10 @@ def _make_ticket_tools(workspace_root: Path, role: str | None):
     allowed = _ROLE_ALLOWED_TOOLS.get(role or "orchestrator", set())
     tools = []
 
-    def _mk_handler(fn):
+    def _mk_handler(name, fn):
+        extra = {"config": config or {}} if name == "create_ticket" else {}
         async def handler(args: dict[str, Any]) -> dict[str, Any]:
-            result = await asyncio.to_thread(fn, workspace_root, args, role=role)
+            result = await asyncio.to_thread(fn, workspace_root, args, role=role, **extra)
             return {
                 "content": [{"type": "text", "text": result.get("text", "")}],
                 **({"is_error": True} if result.get("isError") else {}),
@@ -83,7 +84,7 @@ def _make_ticket_tools(workspace_root: Path, role: str | None):
             handler_fn = TOOL_HANDLERS[name]
             tools.append(
                 tool(name, schema["description"], schema["inputSchema"])(
-                    _mk_handler(handler_fn)
+                    _mk_handler(name, handler_fn)
                 )
             )
 
@@ -278,7 +279,7 @@ class SdkBackend:
                 ),
             )
             mcp_tools.append(_make_coderabbit_tool())
-            mcp_tools.extend(_make_ticket_tools(project_root, role))
+            mcp_tools.extend(_make_ticket_tools(project_root, role, config=config))
             mcp_tools.extend(_make_repo_tools(project_root))
 
             # Orchestrator-only tools (interactive sessions)

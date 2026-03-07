@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from ...core import load_config
 from ..tickets import TOOL_HANDLERS, TOOL_SCHEMAS, _ROLE_ALLOWED_TOOLS
 
 from ._jsonrpc import make_dispatch, serve_stdio
@@ -26,10 +27,16 @@ def main() -> None:
     args = parser.parse_args()
     root = Path(args.project_root)
     role = args.role
+    config = load_config(str(root))
 
-    # Wrap shared handlers to inject root and role via closure.
+    # Wrap shared handlers to inject root, role, and config via closure.
+    def _wrap(name, handler):
+        if name == "create_ticket":
+            return lambda tool_args: handler(root, tool_args, role=role, config=config)
+        return lambda tool_args: handler(root, tool_args, role=role)
+
     handlers = {
-        name: (lambda h: lambda tool_args: h(root, tool_args, role=role))(handler)
+        name: _wrap(name, handler)
         for name, handler in TOOL_HANDLERS.items()
     }
 
