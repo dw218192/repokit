@@ -10,7 +10,28 @@ from typing import Any
 import click
 
 from . import _bootstrap
-from .core import RepoTool, ToolContext, get_config_file, registered_tool_deps
+from .core import RepoTool, ToolContext, _TOOL_REGISTRY, get_config_file, registered_tool_deps
+
+
+_NON_TOOL_SECTIONS = {"repo", "agent"}
+
+
+def _is_repokit_config(path: Path) -> bool:
+    """Detect whether an existing YAML file is a repokit config.
+
+    Checks if any top-level keys match known repokit sections
+    (registered tool names + repo/agent).
+    """
+    import yaml
+
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    if not isinstance(data, dict):
+        return False
+    known_keys = {t.name for t in _TOOL_REGISTRY.values()} | _NON_TOOL_SECTIONS
+    return bool(data.keys() & known_keys)
 
 
 def _is_local_venv(framework_root: Path) -> bool:
@@ -77,7 +98,7 @@ class InitTool(RepoTool):
         config_filename = get_config_file(str(workspace_root))
         config_path = workspace_root / config_filename
 
-        if config_path.exists():
+        if config_path.exists() and _is_repokit_config(config_path):
             print(f"Config file found: {config_filename}, skipping template generation")
             return
 
@@ -87,6 +108,8 @@ class InitTool(RepoTool):
             # No config at all — write template to config.yaml
             default_path.write_text(_CONFIG_TEMPLATE, encoding="utf-8")
             print(f"Generated config template: config.yaml")
+        elif _is_repokit_config(default_path):
+            print(f"Config file found: config.yaml, skipping template generation")
         else:
             # Foreign config.yaml exists — prompt for an alternate name
             alt_name = click.prompt(
