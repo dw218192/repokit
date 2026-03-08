@@ -1349,14 +1349,14 @@ class TestWrapScrollToggle:
                 await pilot.pause()
                 assert "hscroll" in panel.classes
                 assert log_pane.wrap is False
-                assert "[F3 Scroll]" in toggle.render().plain
+                assert "[F3 Scroll]" in toggle.content
 
                 # F3 again switches back to wrap mode
                 await pilot.press("f3")
                 await pilot.pause()
                 assert "hscroll" not in panel.classes
                 assert log_pane.wrap is True
-                assert "[F3 Wrap]" in toggle.render().plain
+                assert "[F3 Wrap]" in toggle.content
 
         _run(_test)
 
