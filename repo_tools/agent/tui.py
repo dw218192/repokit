@@ -53,18 +53,16 @@ from textual.widgets import (
 _console_detach_applied = False
 
 
-def _patch_subprocess_console_detach() -> None:
-    """Detach the SDK CLI subprocess from the parent console on Windows.
+def _patch_subprocess_no_console() -> None:
+    """Prevent ALL subprocesses from inheriting the TUI's console on Windows.
 
-    Without this, the Claude CLI subprocess inherits Textual's console.
-    The CLI (or its MCP server children) can briefly interact with the
-    console — e.g. during resize or MCP tool calls — disrupting the
-    byte stream Textual reads for mouse tracking.  The ESC byte gets
-    split from SGR mouse sequences, causing fragments like
-    ``[<35;14;33M`` to appear as text in the prompt.
+    Without this, child processes can briefly interact with the console,
+    splitting SGR mouse escape sequences and injecting garbage like
+    ``[<35;14;33M`` into the prompt.  Applies ``CREATE_NO_WINDOW`` to every
+    ``subprocess.Popen`` call so no child can touch the parent console.
 
-    Fix: monkey-patch ``SubprocessCLITransport.connect`` to pass
-    ``CREATE_NO_WINDOW`` so the child never touches the parent console.
+    This covers ``subprocess.run()``, ``asyncio.create_subprocess_exec()``,
+    and ``anyio.open_process()`` — all of which use ``Popen`` internally.
     """
     global _console_detach_applied
     if _console_detach_applied:
@@ -73,33 +71,14 @@ def _patch_subprocess_console_detach() -> None:
 
     import subprocess
 
-    try:
-        from claude_agent_sdk._internal.transport.subprocess_cli import (
-            SubprocessCLITransport,
-        )
-    except ImportError:
-        return
+    _original_popen_init = subprocess.Popen.__init__
 
-    import anyio as _anyio
+    def _patched_popen_init(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        kwargs.setdefault("creationflags", 0)
+        kwargs["creationflags"] |= subprocess.CREATE_NO_WINDOW
+        _original_popen_init(self, *args, **kwargs)
 
-    _original_connect = SubprocessCLITransport.connect
-
-    async def _patched_connect(self: SubprocessCLITransport) -> None:
-        # Wrap anyio.open_process temporarily to inject creationflags.
-        _orig_open = _anyio.open_process
-
-        async def _open_with_flags(*args: Any, **kwargs: Any) -> Any:
-            kwargs.setdefault("creationflags", 0)
-            kwargs["creationflags"] |= subprocess.CREATE_NO_WINDOW
-            return await _orig_open(*args, **kwargs)
-
-        _anyio.open_process = _open_with_flags  # type: ignore[assignment]
-        try:
-            return await _original_connect(self)
-        finally:
-            _anyio.open_process = _orig_open  # type: ignore[assignment]
-
-    SubprocessCLITransport.connect = _patched_connect  # type: ignore[assignment]
+    subprocess.Popen.__init__ = _patched_popen_init  # type: ignore[assignment]
 
 
 # ── Widgets ───────────────────────────────────────────────────────────────────
@@ -908,7 +887,7 @@ class AgentApp(App):
             await self._replay_history(workspace, self._resume)
 
         if sys.platform == "win32":
-            _patch_subprocess_console_detach()
+            _patch_subprocess_no_console()
         self._install_tui_hooks()
         self._client_loop()
         self.query_one("#prompt-input", PromptInput).focus()
