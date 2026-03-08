@@ -788,6 +788,19 @@ class TestRequiredCriteria:
         texts = [c["criterion"] for c in data["criteria"]]
         assert texts == ["User criterion"]
 
+    def test_flat_config_without_agent_key(self, project):
+        """SDK backend passes flat config (no nested 'agent' key)."""
+        config = {"required_criteria": ["Tests pass", "No regressions"]}
+        result = _tool_create_ticket(project, {
+            "id": "T1", "title": "t", "description": "d",
+        }, config=config)
+        assert not result.get("isError")
+        path = project / "_agent" / "tickets" / "T1.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        texts = [c["criterion"] for c in data["criteria"]]
+        assert "Tests pass" in texts
+        assert "No regressions" in texts
+
     def test_all_criteria_start_unmet(self, project):
         config = _make_config(["Tests pass"])
         _tool_create_ticket(project, {

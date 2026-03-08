@@ -158,25 +158,19 @@ todo ──→ in_progress ──→ verify ──→ closed
 | `feedback` | yes | — | yes |
 | `description` | yes | — | — |
 
-Agent settings (like any framework tool, configured under its own top-level key):
-
 ```yaml
 agent:
   backend: sdk                               # "cli" or "sdk" (auto-detect if omitted)
-  allowlist: "path/to/custom_rules.toml"     # override default command allowlist
-  debug_hooks: true                          # log hook decisions to _agent/hooks.log
+  human_ticket_review: true                      # gate create_ticket with interactive approval (SDK)
   max_turns: 30                              # turn limit for headless agents
-  checkpoints:                               # optional human confirmation gates
-    before_worker: true
-    before_merge: true
-  prompts:                                   # project-specific instructions appended to role prompts
+  prompts:                                   # appended to role prompts
     common: "Always use ruff for formatting."
     orchestrator: "Prefer small tickets."
-  events:                                    # event subscriptions (see config.defaults.yaml)
-    github:
-      check_failed:
-        poll_interval: 120
+  required_criteria:                         # mandatory criteria on every new ticket
+    - "All existing tests still pass"
 ```
+
+See [Tool configuration](#tool-configuration) for the general config model (3-way merge, `key+` extension, local overrides).
 
 ## Configuration
 
@@ -230,6 +224,34 @@ repo:
 ```
 
 **Framework defaults** — The framework ships `config.defaults.yaml` with sensible defaults (e.g. built-in event definitions, clean paths). These form the base layer — project config extends or overrides them. Merge order: `config.defaults.yaml` ← `config.yaml` ← `config.local.yaml`.
+
+### Tool configuration
+
+Every tool (built-in or project-defined) owns a **top-level key** in `config.yaml` whose name matches the tool name. The entire key is passed to the tool as its config dict, after the 3-way merge.
+
+```yaml
+# config.yaml
+build:                    # ← config for the "build" tool
+  steps:
+    - "cmake --build {build_dir}"
+
+clean:                    # ← config for the "clean" tool
+  paths:
+    - "{workspace_root}/dist"
+
+agent:                    # ← config for the "agent" tool
+  backend: sdk
+```
+
+Some keys ship with **framework defaults** (defined in `config.defaults.yaml`) and are active out of the box — for example `agent.backend` defaults to `"cli"` and `clean.paths` includes `__pycache__`. Keys without a default are inert until you set them in project or local config.
+
+Use `key+` to **extend** a default list instead of replacing it:
+
+```yaml
+clean:
+  paths+:                 # append to the framework-default paths list
+    - "{workspace_root}/dist"
+```
 
 ### Config key syntax
 

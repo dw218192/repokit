@@ -303,7 +303,7 @@ def _load_required_criteria(config: dict) -> list[str]:
     """Extract ``agent.required_criteria`` from an already-loaded config dict."""
     if not isinstance(config, dict):
         return []
-    agent = config.get("agent")
+    agent = config.get("agent", config)
     if not isinstance(agent, dict):
         return []
     criteria = agent.get("required_criteria")

@@ -16,8 +16,9 @@ test-cov:
 agent:
   debug_hooks: false
   backend: "sdk"
+  human_ticket_review: true
   events:
-    timer:
+    test_timer:
       tick:
         poll:
           - "{repo} python -c \"import sys; sys.exit(0)\""
@@ -25,3 +26,9 @@ agent:
           - "{repo} python -c \"import datetime; print(datetime.datetime.utcnow().isoformat())\""
         interval: 3600
         description: "Periodic timer (test)"
+  required_criteria+:
+    - "All existing tests pass (run via `repo_test`)"
+    - "No coverage regression (run via `repo_test-cov`)"
+    - "New features must have tests; tests must cover meaningful behavior, not trivial plumbing"
+    - "Stay true to the principles specified in @repo_tools/agent/prompts/common.txt"
+    - "Dogfooding as much as possible: use the repo tool's core features to implement a new feature. DRY."

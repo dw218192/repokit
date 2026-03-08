@@ -11,7 +11,7 @@
 - **Agent dispatch MCP tool**: New `dispatch_agent` tool lets the orchestrator spawn worker/reviewer agents directly via MCP instead of going through Bash.
 - **Repo command MCP tools**: `repo_cmd.py` auto-discovers config sections with `steps` (and registered `RepoTool` instances) and exposes each as a `repo_<name>` MCP tool, so agents invoke `./repo build`, `./repo test`, etc. without raw Bash.
 - **Event subscriptions**: `list_events` and `subscribe_event` MCP tools. Session suspends on subscribe and resumes when the event fires. Built-in event groups: `github.check_failed` (polls `gh run list`), `github.pr_review` (polls for CHANGES_REQUESTED). Poll intervals and payload commands configurable via `agent.events` in config.
-- **Checkpoint gates**: Optional human-in-the-loop confirmation before critical actions (`before_worker`, `before_merge`, `before_push`, `before_pr`). Enable via `agent.checkpoints` in config.
+- **Ticket approval**: Optional user approval before creating tickets. Enable via `agent.human_ticket_review: true` in config.
 - **Prompt injection**: Project-specific instructions appended to agent role prompts. Configure via `agent.prompts.common`, `agent.prompts.orchestrator`, etc.
 - **File logging**: Agent sessions logged to `_agent/logs/<role>-<ticket>-<timestamp>.log`.
 

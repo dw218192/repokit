@@ -1971,6 +1971,190 @@ class TestAskUserQuestionHook:
         _run(_test)
 
 
+# ── Ticket approval hook tests ─────────────────────────────────────────────
+
+
+class TestApproveTicketHook:
+    """_approve_ticket_hook: gate create_ticket with user approval."""
+
+    _TOOL_INPUT = {
+        "id": "add-retry",
+        "title": "Add retry logic",
+        "description": "Wrap HTTP calls in a retry loop.",
+        "criteria": ["Retries on 5xx", "Tests pass"],
+    }
+
+    def test_approve_returns_allow(self):
+        """Selecting 'Create ticket' lets the tool proceed."""
+
+        async def _test():
+            App = _noop_client_app_class()
+            app = App(
+                options=_make_mock_options(), human_ticket_review=True,
+            )
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.pause()
+                loop = asyncio.get_event_loop()
+                result_holder: list = []
+
+                async def _call():
+                    r = await app._approve_ticket_hook(
+                        {"tool_input": self._TOOL_INPUT}, None, None,
+                    )
+                    result_holder.append(r)
+
+                task = loop.create_task(_call())
+                await pilot.pause()
+                await pilot.pause()
+
+                # "1" selects "Create ticket"
+                app._choice_future.set_result("1")
+                await task
+
+                assert result_holder
+                assert result_holder[0] == {}
+
+        _run(_test)
+
+    def test_skip_returns_deny(self):
+        """Selecting 'Skip' denies the tool call."""
+
+        async def _test():
+            App = _noop_client_app_class()
+            app = App(
+                options=_make_mock_options(), human_ticket_review=True,
+            )
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.pause()
+                loop = asyncio.get_event_loop()
+                result_holder: list = []
+
+                async def _call():
+                    r = await app._approve_ticket_hook(
+                        {"tool_input": self._TOOL_INPUT}, None, None,
+                    )
+                    result_holder.append(r)
+
+                task = loop.create_task(_call())
+                await pilot.pause()
+                await pilot.pause()
+
+                # "2" selects "Skip"
+                app._choice_future.set_result("2")
+                await task
+
+                assert result_holder
+                hook_out = result_holder[0]["hookSpecificOutput"]
+                assert hook_out["permissionDecision"] == "deny"
+                assert "add-retry" in hook_out["permissionDecisionReason"]
+
+        _run(_test)
+
+    def test_required_criteria_merged_in_display(self):
+        """Required criteria from project config appear in the review panel."""
+
+        async def _test():
+            App = _noop_client_app_class()
+            required = ["Lint passes", "Tests pass"]
+            app = App(
+                options=_make_mock_options(), human_ticket_review=True,
+                required_criteria=required,
+            )
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.pause()
+                loop = asyncio.get_event_loop()
+
+                async def _call():
+                    return await app._approve_ticket_hook(
+                        {"tool_input": self._TOOL_INPUT}, None, None,
+                    )
+
+                task = loop.create_task(_call())
+                await pilot.pause()
+                await pilot.pause()
+
+                # Inspect the question text shown to the user — it should
+                # contain both user-provided AND required criteria.
+                assert app._choice_questions is not None
+                q_text = app._choice_questions[0]["question"]
+                # "Tests pass" is in both user and required — should appear once
+                assert "Retries on 5xx" in q_text
+                assert "Lint passes" in q_text
+                assert "Tests pass" in q_text
+
+                app._choice_future.set_result("1")
+                await task
+
+        _run(_test)
+
+    def test_cancel_returns_deny(self):
+        """Cancelling returns deny."""
+
+        async def _test():
+            App = _noop_client_app_class()
+            app = App(
+                options=_make_mock_options(), human_ticket_review=True,
+            )
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.pause()
+                loop = asyncio.get_event_loop()
+                result_holder: list = []
+
+                async def _call():
+                    r = await app._approve_ticket_hook(
+                        {"tool_input": self._TOOL_INPUT}, None, None,
+                    )
+                    result_holder.append(r)
+
+                task = loop.create_task(_call())
+                await pilot.pause()
+                await pilot.pause()
+
+                app._choice_future.cancel()
+                await task
+
+                assert result_holder
+                hook_out = result_holder[0]["hookSpecificOutput"]
+                assert hook_out["permissionDecision"] == "deny"
+                assert "interrupted" in hook_out["permissionDecisionReason"]
+
+        _run(_test)
+
+    def test_free_text_returns_deny(self):
+        """Free-text input is treated as rejection with the text as reason."""
+
+        async def _test():
+            App = _noop_client_app_class()
+            app = App(
+                options=_make_mock_options(), human_ticket_review=True,
+            )
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.pause()
+                loop = asyncio.get_event_loop()
+                result_holder: list = []
+
+                async def _call():
+                    r = await app._approve_ticket_hook(
+                        {"tool_input": self._TOOL_INPUT}, None, None,
+                    )
+                    result_holder.append(r)
+
+                task = loop.create_task(_call())
+                await pilot.pause()
+                await pilot.pause()
+
+                # Free-text: not a numbered option, passes through as-is
+                app._choice_future.set_result("needs more detail")
+                await task
+
+                assert result_holder
+                hook_out = result_holder[0]["hookSpecificOutput"]
+                assert hook_out["permissionDecision"] == "deny"
+                assert hook_out["permissionDecisionReason"] == "needs more detail"
+
+        _run(_test)
+
+
 # ── Ctrl+C interrupt tests ──────────────────────────────────────────────────
 
 

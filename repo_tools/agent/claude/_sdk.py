@@ -225,6 +225,8 @@ async def _run_interactive(
     initial_prompt: str | None = None,
     resume: str | None = None,
     tools_metadata: list[dict[str, str]] | None = None,
+    human_ticket_review: bool = False,
+    required_criteria: list[str] | None = None,
 ) -> tuple[int, str | None]:
     """Run an interactive TUI session. Returns (exit_code, session_id)."""
     from ..tui import AgentApp
@@ -232,6 +234,8 @@ async def _run_interactive(
     app = AgentApp(
         options=options, initial_prompt=initial_prompt, resume=resume,
         tools_metadata=tools_metadata or [],
+        human_ticket_review=human_ticket_review,
+        required_criteria=required_criteria or [],
     )
     await app.run_async()
     return (0, app._session_id)
@@ -408,10 +412,18 @@ class SdkBackend:
             tool_config=tool_config, project_config=project_config,
             cwd=cwd, headless=False,
         )
+        config = tool_config or {}
+        human_ticket_review = bool(
+            config.get("agent", config).get("human_ticket_review"),
+        )
+        from ..tickets import _load_required_criteria
+        required_criteria = _load_required_criteria(config)
         logger.info("SDK interactive session")
         return asyncio.run(
             _run_interactive(
                 options, initial_prompt,
                 resume=resume, tools_metadata=tools_meta,
+                human_ticket_review=human_ticket_review,
+                required_criteria=required_criteria,
             ),
         )

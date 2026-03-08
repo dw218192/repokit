@@ -165,7 +165,7 @@ _CONFIG_TEMPLATE = """\
 # ── Agent section ─────────────────────────────────────────────────────
 # agent:
 #   backend: sdk                  # sdk or cli
-#   checkpoints: true             # enable checkpoint commits
+#   human_ticket_review: true          # require user approval before creating tickets
 #   prompts:
 #     system: "prompts/system.md"
 #   required_criteria:

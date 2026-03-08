@@ -599,47 +599,16 @@ class TestAugmentRolePrompt:
         result_reviewer = _augment_role_prompt("base", config, "reviewer")
         assert "Worker-only rule." not in result_reviewer
 
-    def test_augment_checkpoints_orchestrator(self):
-        """Checkpoints generate a section only for orchestrator."""
-        config = {"agent": {"checkpoints": ["before_push"]}}
-        result = _augment_role_prompt("base", config, "orchestrator")
-        assert "## Human-in-the-Loop Checkpoints" in result
-        assert "before_push" in result
-
-    def test_augment_checkpoints_ignored_for_worker(self):
-        """Checkpoints in config with role=worker produces no checkpoint section."""
-        config = {"agent": {"checkpoints": ["before_push"]}}
-        result = _augment_role_prompt("base", config, "worker")
-        assert "## Human-in-the-Loop Checkpoints" not in result
-
-    def test_augment_invalid_checkpoint(self):
-        """Invalid checkpoint name raises ValueError."""
-        config = {"agent": {"checkpoints": ["before_lunch"]}}
-        with pytest.raises(ValueError, match="Invalid checkpoint"):
-            _augment_role_prompt("base", config, "orchestrator")
-
-    def test_augment_multiple_checkpoints(self):
-        """Multiple checkpoints all appear in the output."""
-        config = {"agent": {"checkpoints": ["before_worker", "before_merge", "before_pr"]}}
-        result = _augment_role_prompt("base", config, "orchestrator")
-        assert "before_worker" in result
-        assert "before_merge" in result
-        assert "before_pr" in result
-
     def test_augment_combined(self):
-        """Both prompts and checkpoints together."""
+        """Both common and role-specific prompts together."""
         config = {
             "agent": {
                 "prompts": {
                     "common": "Shared rule.",
                     "orchestrator": "Orch-only rule.",
                 },
-                "checkpoints": ["before_push", "before_pr"],
             }
         }
         result = _augment_role_prompt("base", config, "orchestrator")
         assert "## Project Instructions\n\nShared rule." in result
         assert "## Project Instructions (orchestrator)\n\nOrch-only rule." in result
-        assert "## Human-in-the-Loop Checkpoints" in result
-        assert "before_push" in result
-        assert "before_pr" in result

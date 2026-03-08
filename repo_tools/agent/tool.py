@@ -139,18 +139,8 @@ def _has_reviewable_changes(workspace_root: Path) -> bool:
 
 _SAFE_AGENT_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
-_CHECKPOINT_INSTRUCTIONS = {
-    "before_worker": "Before dispatching a worker or reviewer agent, show the ticket ID and description and ask the user for explicit confirmation.",
-    "before_merge": "Before merging a worktree branch, show the branch name and ask the user for explicit confirmation.",
-    "before_push": "Before running `git push`, show the remote and branch and ask the user for explicit confirmation.",
-    "before_pr": "Before creating a pull request, show the title and target branch and ask the user for explicit confirmation.",
-}
-
-_VALID_CHECKPOINTS = frozenset(_CHECKPOINT_INSTRUCTIONS)
-
-
 def _augment_role_prompt(role_prompt: str, config: dict, role: str) -> str:
-    """Append project-specific prompts and checkpoint gates to *role_prompt*."""
+    """Append project-specific prompts to *role_prompt*."""
     prompts = config.get("agent", {}).get("prompts", {})
 
     common = prompts.get("common")
@@ -160,20 +150,6 @@ def _augment_role_prompt(role_prompt: str, config: dict, role: str) -> str:
     role_specific = prompts.get(role)
     if role_specific:
         role_prompt += f"\n\n## Project Instructions ({role})\n\n{role_specific}"
-
-    if role == "orchestrator":
-        checkpoints = config.get("agent", {}).get("checkpoints")
-        if checkpoints:
-            invalid = set(checkpoints) - _VALID_CHECKPOINTS
-            if invalid:
-                raise ValueError(
-                    f"Invalid checkpoint names: {sorted(invalid)}. "
-                    f"Valid checkpoints: {sorted(_VALID_CHECKPOINTS)}"
-                )
-            lines = ["## Human-in-the-Loop Checkpoints", ""]
-            for cp in checkpoints:
-                lines.append(f"- **{cp}**: {_CHECKPOINT_INSTRUCTIONS[cp]}")
-            role_prompt += "\n\n" + "\n".join(lines)
 
     return role_prompt
 

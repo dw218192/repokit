@@ -823,6 +823,8 @@ class AgentApp(App):
         initial_prompt: str | None = None,
         resume: str | None = None,
         tools_metadata: list[dict[str, str]] | None = None,
+        human_ticket_review: bool = False,
+        required_criteria: list[str] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -830,6 +832,8 @@ class AgentApp(App):
         self._initial_prompt = initial_prompt
         self._resume = resume
         self._tools_metadata = tools_metadata or []
+        self._human_ticket_review = human_ticket_review
+        self._required_criteria: list[str] = required_criteria or []
         self._session_id: str | None = None
         self._chat_history = ChatHistory(
             workspace=options.cwd,
@@ -1281,6 +1285,11 @@ class AgentApp(App):
             matcher="AskUserQuestion",
             hooks=[self._ask_user_question_hook],
         ))
+        if self._human_ticket_review:
+            pre_tool_use.append(HookMatcher(
+                matcher="mcp__repokit-agent__create_ticket",
+                hooks=[self._approve_ticket_hook],
+            ))
 
     async def _exit_plan_mode_hook(
         self, input_data: dict[str, Any],
@@ -1388,6 +1397,87 @@ class AgentApp(App):
                     "updatedInput": {**tool_input, "answers": answers},
                 },
             }
+        except asyncio.CancelledError:
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": "interrupted",
+                },
+            }
+
+    async def _approve_ticket_hook(
+        self, input_data: dict[str, Any],
+        tool_use_id: str | None, context: Any,
+    ) -> dict[str, Any]:
+        """PreToolUse hook for create_ticket — asks user to approve."""
+        try:
+            tool_input = input_data.get("tool_input", {})
+            title = tool_input.get("title", "Untitled")
+            ticket_id = tool_input.get("id", "")
+            desc = tool_input.get("description", "")
+            user_criteria = list(tool_input.get("criteria") or [])
+
+            # Merge project-required criteria (same dedup logic as tickets.py)
+            seen = set(user_criteria)
+            for rc in self._required_criteria:
+                if rc not in seen:
+                    user_criteria.append(rc)
+                    seen.add(rc)
+            criteria = user_criteria
+
+            # Build a readable summary as the question body.
+            parts = [f"[bold]{ticket_id}[/bold] — {title}"]
+            if desc:
+                # Show first ~200 chars of description to keep it concise.
+                summary = desc[:200] + ("..." if len(desc) > 200 else "")
+                parts.append(f"\n{summary}")
+            if criteria:
+                parts.append("\n[bold]Acceptance criteria:[/bold]")
+                for c in criteria:
+                    parts.append(f"  \u2022 {c}")
+
+            question_text = "\n".join(parts)
+            questions = [{
+                "question": question_text,
+                "header": "New ticket",
+                "options": [
+                    {
+                        "label": "Create ticket",
+                        "description": "Approve and create this ticket",
+                    },
+                    {
+                        "label": "Skip",
+                        "description": "Do not create this ticket",
+                    },
+                ],
+                "multiSelect": False,
+            }]
+
+            self._open_choice_future()
+            self._choice_questions = questions
+
+            chat_log = self.query_one("#chat-log", VerticalScroll)
+            panel = ChoicePanel(questions)
+            await chat_log.mount(panel)
+            chat_log.scroll_end(animate=False)
+
+            answer_text = await self._await_choice_future()
+            answers = _parse_choice_answers(answer_text, questions)
+            self._choice_questions = None
+
+            chosen = answers.get(question_text, "")
+            if chosen == "Create ticket":
+                return {}
+            reason = chosen if chosen and chosen != "Skip" else f"User skipped ticket '{ticket_id}'."
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": reason,
+                },
+            }
+
         except asyncio.CancelledError:
             return {
                 "hookSpecificOutput": {
