@@ -24,6 +24,7 @@ class TestFormatTool:
         args = {"verify": False}
 
         with (
+            patch("repo_tools.format._git_tracked_files", return_value=None),
             patch("repo_tools.format.subprocess.run") as mock_run,
             patch("repo_tools.format.require_executable", return_value="/usr/bin/clang-format"),
         ):
@@ -92,6 +93,7 @@ class TestFormatTool:
         args = {"verify": True}
 
         with (
+            patch("repo_tools.format._git_tracked_files", return_value=None),
             patch("repo_tools.format.subprocess.run") as mock_run,
             patch("repo_tools.format.require_executable", return_value="/usr/bin/clang-format"),
         ):
