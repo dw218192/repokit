@@ -48,6 +48,7 @@ def _write_plugin(
     )
 
     # -- hooks --
+    config = tool_config or {}
     debug_log = project_root / "_agent" / "hooks.log"
     base_cmd = [posix_path(sys.executable), "-m", "repo_tools.agent.hooks"]
 
@@ -79,6 +80,20 @@ def _write_plugin(
         ],
     }
 
+    # Human ticket review hook
+    if bool(config.get("agent", config).get("human_ticket_review")):
+        from ..tickets import _load_required_criteria
+        required_criteria = _load_required_criteria(config)
+        approve_ticket_cmd = shlex.join([
+            *base_cmd, "approve_ticket",
+            "--required-criteria", json.dumps(required_criteria),
+            "--debug-log", debug_log.as_posix(),
+        ])
+        hook_events["PreToolUse"].append({
+            "matcher": "create_ticket$",
+            "hooks": [{"type": "command", "command": approve_ticket_cmd}],
+        })
+
     hooks_dir = plugin_dir / "hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
     (hooks_dir / "hooks.json").write_text(
@@ -92,8 +107,6 @@ def _write_plugin(
     ]
     if role:
         ticket_args.extend(["--role", role])
-
-    config = tool_config or {}
     lint_args = ["-m", "repo_tools.agent.mcp.lint"]
     if config.get("ruff_select"):
         lint_args.extend(["--select", config["ruff_select"]])

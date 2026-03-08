@@ -271,6 +271,47 @@ class TestWritePlugin:
         assert "--role" in bash_hook
         assert "reviewer" in bash_hook
 
+    def test_human_ticket_review_adds_hook(self, tmp_path):
+        """human_ticket_review adds a PreToolUse hook for create_ticket."""
+        plugin_dir = tmp_path / "plugin"
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        _write_plugin(
+            plugin_dir, rules, tmp_path,
+            tool_config={"agent": {
+                "human_ticket_review": True,
+                "required_criteria": ["Must pass tests", "Must lint clean"],
+            }},
+        )
+
+        hooks = json.loads(
+            (plugin_dir / "hooks" / "hooks.json").read_text()
+        )
+        pre_tool = hooks["hooks"]["PreToolUse"]
+        # Should have Bash hook + create_ticket hook
+        assert len(pre_tool) == 2
+        ticket_hook = pre_tool[1]
+        assert ticket_hook["matcher"] == "create_ticket$"
+        cmd = ticket_hook["hooks"][0]["command"]
+        assert "approve_ticket" in cmd
+        assert "Must pass tests" in cmd
+        assert "Must lint clean" in cmd
+
+    def test_no_ticket_review_hook_by_default(self, tmp_path):
+        """Without human_ticket_review, no create_ticket hook is added."""
+        plugin_dir = tmp_path / "plugin"
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        _write_plugin(plugin_dir, rules, tmp_path)
+
+        hooks = json.loads(
+            (plugin_dir / "hooks" / "hooks.json").read_text()
+        )
+        pre_tool = hooks["hooks"]["PreToolUse"]
+        assert len(pre_tool) == 1  # Only the Bash hook
+
     def test_registered_tools_in_mcp_config(self, tmp_path):
         """Registered RepoTool subclasses appear in .mcp.json repo_cmd server."""
         plugin_dir = tmp_path / "plugin"
