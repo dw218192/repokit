@@ -1259,6 +1259,160 @@ class TestSidePaneToggle:
         _run(_test)
 
 
+# ── F3 wrap/scroll toggle tests ─────────────────────────────────────────────
+
+
+class TestWrapScrollToggle:
+    def test_f3_toggles_hscroll_class_on_panels(self):
+        """F3 adds .hscroll class to VerticalScroll panels and removes it on second press."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+            from textual.binding import Binding as _Binding
+            from textual.containers import Horizontal, Vertical, VerticalScroll
+            from textual.widgets import (
+                RichLog, Static, TabbedContent, TabPane,
+            )
+
+            class _App(App):
+                CSS = """
+                #main-area { height: 1fr; }
+                #chat-log { width: 7fr; }
+                #side-container { width: 3fr; }
+                #side-pane { width: 1fr; }
+                #wrap-toggle { height: 1; dock: bottom; }
+                .hscroll { overflow-x: auto !important; }
+                """
+                BINDINGS = [
+                    _Binding("f3", "toggle_wrap", show=False),
+                ]
+                _side_wrap = True
+
+                def compose(self) -> ComposeResult:
+                    with Horizontal(id="main-area"):
+                        yield VerticalScroll(id="chat-log")
+                        with Vertical(id="side-container"):
+                            with TabbedContent(id="side-pane"):
+                                yield TabPane(
+                                    "Tools",
+                                    VerticalScroll(id="tool-log"),
+                                    id="t1",
+                                )
+                                yield TabPane(
+                                    "Logs",
+                                    RichLog(
+                                        id="log-pane", wrap=True,
+                                        highlight=True,
+                                    ),
+                                    id="t2",
+                                )
+                            yield Static("[F3 Wrap]", id="wrap-toggle")
+
+                def action_toggle_wrap(self):
+                    self._side_wrap = not self._side_wrap
+                    try:
+                        panel = self.query_one(
+                            "#tool-log", VerticalScroll,
+                        )
+                        if self._side_wrap:
+                            panel.remove_class("hscroll")
+                        else:
+                            panel.add_class("hscroll")
+                    except Exception:
+                        pass
+                    try:
+                        log = self.query_one("#log-pane", RichLog)
+                        log.wrap = self._side_wrap
+                    except Exception:
+                        pass
+                    try:
+                        toggle = self.query_one("#wrap-toggle", Static)
+                        toggle.update(
+                            "[F3 Wrap]" if self._side_wrap
+                            else "[F3 Scroll]",
+                        )
+                    except Exception:
+                        pass
+
+            app = _App()
+            async with app.run_test(size=(80, 24)) as pilot:
+                panel = app.query_one("#tool-log", VerticalScroll)
+                log_pane = app.query_one("#log-pane", RichLog)
+                toggle = app.query_one("#wrap-toggle", Static)
+
+                # Initially in wrap mode
+                assert "hscroll" not in panel.classes
+                assert log_pane.wrap is True
+
+                # F3 switches to scroll mode
+                await pilot.press("f3")
+                await pilot.pause()
+                assert "hscroll" in panel.classes
+                assert log_pane.wrap is False
+                assert "[F3 Scroll]" in toggle.render().plain
+
+                # F3 again switches back to wrap mode
+                await pilot.press("f3")
+                await pilot.pause()
+                assert "hscroll" not in panel.classes
+                assert log_pane.wrap is True
+                assert "[F3 Wrap]" in toggle.render().plain
+
+        _run(_test)
+
+    def test_f2_hides_side_container(self):
+        """F2 hides #side-container (including wrap-toggle toolbar)."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+            from textual.binding import Binding as _Binding
+            from textual.containers import Horizontal, Vertical, VerticalScroll
+            from textual.widgets import Static, TabbedContent, TabPane
+
+            class _App(App):
+                CSS = """
+                #main-area { height: 1fr; }
+                #chat-log { width: 7fr; }
+                #side-container { width: 3fr; }
+                """
+                BINDINGS = [
+                    _Binding("f2", "toggle_side", show=False),
+                ]
+                _visible = True
+
+                def compose(self) -> ComposeResult:
+                    with Horizontal(id="main-area"):
+                        yield VerticalScroll(id="chat-log")
+                        with Vertical(id="side-container"):
+                            with TabbedContent(id="side-pane"):
+                                yield TabPane(
+                                    "Info", Static("hi"), id="t1",
+                                )
+                            yield Static("[F3 Wrap]", id="wrap-toggle")
+
+                def action_toggle_side(self):
+                    self._visible = not self._visible
+                    container = self.query_one(
+                        "#side-container", Vertical,
+                    )
+                    container.display = self._visible
+
+            app = _App()
+            async with app.run_test(size=(80, 24)) as pilot:
+                sc = app.query_one("#side-container", Vertical)
+                assert sc.display is True
+
+                await pilot.press("f2")
+                await pilot.pause()
+                assert sc.display is False
+
+                await pilot.press("f2")
+                await pilot.pause()
+                assert sc.display is True
+
+        _run(_test)
+
+
 # ── Slash command tests ─────────────────────────────────────────────────────
 
 

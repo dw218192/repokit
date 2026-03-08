@@ -32,10 +32,10 @@ if sys.platform == "win32":
 
 from rich.markdown import Markdown
 from rich.syntax import Syntax
-from textual import events
+from textual import events, on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
 from textual import work
 from textual.widgets import (
@@ -802,8 +802,29 @@ class AgentApp(App):
         width: 7fr;
         padding: 1 0 0 0;
     }
-    #side-pane {
+    #side-container {
         width: 3fr;
+    }
+    #side-pane {
+        width: 1fr;
+    }
+    #wrap-toggle {
+        height: 1;
+        dock: bottom;
+        text-align: right;
+        color: $text-muted;
+    }
+    .hscroll {
+        overflow-x: auto !important;
+    }
+    .hscroll > * {
+        width: auto;
+    }
+    .hscroll Static {
+        width: auto;
+    }
+    .hscroll Collapsible {
+        width: auto;
     }
     .history {
         opacity: 60%;
@@ -815,6 +836,7 @@ class AgentApp(App):
         Binding("ctrl+d", "quit", "Quit", show=False),
         Binding("ctrl+l", "clear_log", "Clear", show=False),
         Binding("f2", "toggle_side_pane", "Side Pane", show=False),
+        Binding("f3", "toggle_wrap", "Wrap/Scroll", show=False),
     ]
 
     def __init__(
@@ -846,6 +868,7 @@ class AgentApp(App):
         self._input_queue: asyncio.Queue[Any] = asyncio.Queue()
         self._todos: list[dict] = []
         self._side_pane_visible: bool = True
+        self._side_wrap: bool = True
         self._choice_future: asyncio.Future | None = None
         self._ticket_fingerprint: tuple[int, float] = (0, 0.0)
         self._choice_questions: list[dict] | None = None
@@ -854,35 +877,37 @@ class AgentApp(App):
         workspace = self._options.cwd or os.getcwd()
         with Horizontal(id="main-area"):
             yield VerticalScroll(id="chat-log")
-            with TabbedContent(id="side-pane"):
-                yield TabPane(
-                    "Tickets",
-                    TicketPanel(workspace=workspace, id="ticket-tree"),
-                    id="tab-tickets",
-                )
-                yield TabPane(
-                    "Tasks",
-                    TaskPanel(id="task-panel"),
-                    id="tab-tasks",
-                )
-                yield TabPane(
-                    "Tools",
-                    AvailableToolsPanel(
-                        tools=self._tools_metadata,
-                        id="available-tools",
-                    ),
-                    id="tab-available",
-                )
-                yield TabPane(
-                    "Tool Log",
-                    ToolLog(id="tool-log"),
-                    id="tab-tools",
-                )
-                yield TabPane(
-                    "Logs",
-                    RichLog(id="log-pane", wrap=True, highlight=True),
-                    id="tab-logs",
-                )
+            with Vertical(id="side-container"):
+                with TabbedContent(id="side-pane"):
+                    yield TabPane(
+                        "Tickets",
+                        TicketPanel(workspace=workspace, id="ticket-tree"),
+                        id="tab-tickets",
+                    )
+                    yield TabPane(
+                        "Tasks",
+                        TaskPanel(id="task-panel"),
+                        id="tab-tasks",
+                    )
+                    yield TabPane(
+                        "Tools",
+                        AvailableToolsPanel(
+                            tools=self._tools_metadata,
+                            id="available-tools",
+                        ),
+                        id="tab-available",
+                    )
+                    yield TabPane(
+                        "Tool Log",
+                        ToolLog(id="tool-log"),
+                        id="tab-tools",
+                    )
+                    yield TabPane(
+                        "Logs",
+                        RichLog(id="log-pane", wrap=True, highlight=True),
+                        id="tab-logs",
+                    )
+                yield Static("[F3 Wrap]", id="wrap-toggle")
         yield StatusBar(id="status-bar")
         yield QueueBar(id="queue-bar")
         yield PlanApprovalBar(
@@ -1500,10 +1525,39 @@ class AgentApp(App):
         """F2: toggle side pane visibility."""
         self._side_pane_visible = not self._side_pane_visible
         try:
-            pane = self.query_one("#side-pane", TabbedContent)
-            pane.display = self._side_pane_visible
+            container = self.query_one("#side-container", Vertical)
+            container.display = self._side_pane_visible
         except Exception:
             logger.warning("Failed to toggle side pane", exc_info=True)
+
+    def action_toggle_wrap(self) -> None:
+        """F3: toggle between wrap and horizontal-scroll modes."""
+        self._side_wrap = not self._side_wrap
+        for panel_id in (
+            "#ticket-tree", "#task-panel", "#available-tools", "#tool-log",
+        ):
+            try:
+                panel = self.query_one(panel_id, VerticalScroll)
+                if self._side_wrap:
+                    panel.remove_class("hscroll")
+                else:
+                    panel.add_class("hscroll")
+            except Exception:
+                pass
+        try:
+            log_pane = self.query_one("#log-pane", RichLog)
+            log_pane.wrap = self._side_wrap
+        except Exception:
+            pass
+        try:
+            toggle = self.query_one("#wrap-toggle", Static)
+            toggle.update("[F3 Wrap]" if self._side_wrap else "[F3 Scroll]")
+        except Exception:
+            pass
+
+    @on(events.Click, "#wrap-toggle")
+    def _on_wrap_toggle_click(self) -> None:
+        self.action_toggle_wrap()
 
     def on_tabbed_content_tab_activated(
         self, event: TabbedContent.TabActivated,
