@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.1
+
+- **Format tool**: Add `_managed` and `_agent` to always-excluded directories. Fixes format verify scanning hundreds of thousands of files from uv cache and agent worktrees.
+
 ## 0.7.0
 
 ### Agent

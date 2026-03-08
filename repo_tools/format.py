@@ -15,7 +15,7 @@ from .features import require_executable
 
 _CLANG_FORMAT_EXTENSIONS = {".cpp", ".h", ".hpp", ".c", ".cc", ".cxx", ".hxx"}
 _PYTHON_EXTENSIONS = {".py"}
-_ALWAYS_EXCLUDE = {"_tools", "ext", ".git", ".vs", "build", "_build", "_logs", "node_modules"}
+_ALWAYS_EXCLUDE = {"_tools", "_managed", "ext", ".git", ".vs", "build", "_build", "_logs", "_agent", "node_modules"}
 _BATCH_SIZE = 200  # max files per clang-format invocation (Windows cmdline limit)
 
 
