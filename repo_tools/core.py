@@ -318,17 +318,39 @@ def _deep_merge(base: dict, overlay: dict) -> dict:
 
 
 _CONFIG_DEFAULTS = Path(__file__).parent / "config.defaults.yaml"
+_FRAMEWORK_ROOT = Path(__file__).resolve().parent.parent
+
+
+def get_config_file(workspace_root: str) -> str:
+    """Resolve the project config filename.
+
+    Checks ``{framework_root}/_managed/config_name`` for an override;
+    falls back to ``"config.yaml"``.  Returns just the filename, not a
+    full path.
+    """
+    framework_root = _FRAMEWORK_ROOT
+    override_path = framework_root / "_managed" / "config_name"
+    if override_path.is_file():
+        name = override_path.read_text(encoding="utf-8").strip()
+        if name:
+            return name
+    return "config.yaml"
 
 
 def load_config(workspace_root: str) -> dict[str, Any]:
-    """Load config with 3-layer merge: defaults ← config.yaml ← config.local.yaml.
+    """Load config with 3-layer merge: defaults ← project config ← local overrides.
 
     Framework defaults (``config.defaults.yaml`` shipped with repo_tools) form
-    the base layer.  The project's ``config.yaml`` extends or overrides them,
-    and ``config.local.yaml`` (gitignored) overrides everything.
+    the base layer.  The project config file (resolved via
+    ``get_config_file()``) extends or overrides them, and the corresponding
+    ``.local.yaml`` variant (gitignored) overrides everything.
 
     Dicts are deep-merged; all other types are replaced by the higher layer.
     """
+    config_filename = get_config_file(workspace_root)
+    stem = config_filename.rsplit(".", 1)[0] if "." in config_filename else config_filename
+    local_filename = f"{stem}.local.yaml"
+
     # Layer 1: framework defaults
     data: dict[str, Any] = {}
     if _CONFIG_DEFAULTS.exists():
@@ -339,21 +361,21 @@ def load_config(workspace_root: str) -> dict[str, Any]:
             data = defaults
 
     # Layer 2: project config
-    config_path = Path(workspace_root) / "config.yaml"
+    config_path = Path(workspace_root) / config_filename
     if config_path.exists():
         project = yaml.safe_load(config_path.read_text(encoding="utf-8"))
         if project is not None:
             if not isinstance(project, dict):
-                raise TypeError("config.yaml must contain a top-level mapping.")
+                raise TypeError(f"{config_filename} must contain a top-level mapping.")
             data = _deep_merge(data, project)
 
     # Layer 3: local overrides
-    local_path = Path(workspace_root) / "config.local.yaml"
+    local_path = Path(workspace_root) / local_filename
     if local_path.exists():
         local_data = yaml.safe_load(local_path.read_text(encoding="utf-8"))
         if local_data is not None:
             if not isinstance(local_data, dict):
-                raise TypeError("config.local.yaml must contain a top-level mapping.")
+                raise TypeError(f"{local_filename} must contain a top-level mapping.")
             data = _deep_merge(data, local_data)
 
     return data
@@ -504,6 +526,14 @@ class RepoTool:
     def default_args(self, tokens: dict[str, str]) -> dict[str, Any]:
         """Return default args dict before config/CLI merge."""
         return {}
+
+    def register_subcommands(self, group: click.Group) -> None:
+        """Add subcommands to the tool's click group.
+
+        When overridden, ``_make_tool_command()`` creates a
+        ``click.Group`` with ``invoke_without_command=True`` instead
+        of a plain ``click.Command``.
+        """
 
     def create_click_command(self) -> click.BaseCommand | None:
         """Override to provide a custom Click group/command. Returns None by default."""

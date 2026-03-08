@@ -1,7 +1,7 @@
 ## Repo Tooling Framework
 
 This repository uses the **repokit** framework — a unified `{repo_cmd}` CLI
-configured per-project via `config.yaml`. All building, testing, formatting,
+configured per-project via its project config file. All building, testing, formatting,
 and repository operations should go through it rather than being invoked
 directly.
 

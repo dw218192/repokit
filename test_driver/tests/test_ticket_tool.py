@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from repo_tools.agent.ticket_mcp import _tool_reset_ticket
+from repo_tools.agent.tickets import _tool_reset_ticket
 
 
 @pytest.fixture

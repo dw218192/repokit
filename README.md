@@ -89,19 +89,43 @@ Framework tools with non-trivial logic:
 The `agent` tool launches [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions with pre-approved tools and a Bash command allowlist.
 
 ```
-./repo agent                                                # interactive orchestrator
-./repo agent --role worker --ticket add-hierarchical-config -w   # headless worker (worktree)
-./repo agent --role reviewer --ticket add-hierarchical-config    # headless reviewer
+./repo agent                                                # interactive orchestrator (TUI)
+./repo agent --backend cli                                  # force CLI subprocess backend
+./repo agent --role worker --ticket add-auth-hook           # headless worker (auto-worktree)
+./repo agent --role reviewer --ticket add-auth-hook         # headless reviewer
 ```
 
-**Interactive mode** (no `--ticket`) opens a Claude Code session as an **orchestrator**. The orchestrator owns the full lifecycle: plan changes, create tickets, dispatch workers, merge results, and verify acceptance criteria. Bash calls are checked against `allowlist_default.toml` (deny-first, then allow). Hooks and MCP configs are written to `_agent/plugin/` via `--plugin-dir`, keeping user settings untouched. Two stdio MCP servers are always available: `coderabbit` (code review) and `tickets` (ticket CRUD).
+**Two backends** are available. The **CLI backend** (default) launches the `claude` binary as a subprocess with a generated plugin directory — hooks run as shell commands and MCP tools as stdio servers. The **SDK backend** (`claude-agent-sdk`) runs everything in-process and adds features not available in the CLI backend:
 
-**Headless mode** (`--role` + `--ticket`) runs `claude -p` as a subprocess, reads the ticket JSON, and returns structured output. Workers and reviewers are dispatched by the orchestrator.
+| | CLI | SDK |
+|---|---|---|
+| Interactive UI | Claude Code's built-in terminal | Textual TUI (chat log, tool pane, ticket/task panels) |
+| Hooks | Shell subprocess commands | Async Python callbacks (in-process) |
+| MCP tools | Stdio subprocess servers | In-process `@tool` functions |
+| Event subscriptions | — | `list_events`, `subscribe_event` (pause/resume on GitHub events) |
+| Session resume | — | Session ID tracking for event-driven resume |
+
+Auto-detection prefers SDK when installed (`uv sync --group sdk`), falls back to CLI. Headless roles (worker/reviewer) always use CLI to avoid nesting.
+
+**Interactive mode** (no `--ticket`) opens an orchestrator session. With the SDK backend, this launches a **Textual TUI** with a chat log, collapsible tool call pane with syntax-highlighted arguments, ticket panel with color-coded status, task tracker, and plan approval prompt. With the CLI backend, you get Claude Code's standard terminal.
+
+**Headless mode** (`--role` + `--ticket`) reads the ticket JSON and returns structured output. Workers and reviewers are dispatched by the orchestrator via the `dispatch_agent` MCP tool.
+
+MCP tools available to the agent (registered automatically):
+
+| Tool | Purpose | Backend |
+|---|---|---|
+| `dispatch_agent` | Spawn worker/reviewer agents for a ticket | both |
+| `repo_<name>` | Invoke any configured `./repo` subcommand | both |
+| `lint` | Run ruff / clang-tidy | both |
+| `coderabbit_review` | CodeRabbit code review | both |
+| Ticket CRUD | `list_tickets`, `get_ticket`, `create_ticket`, `update_ticket`, etc. | both |
+| `list_events`, `subscribe_event` | Pause session until a GitHub event fires | SDK only |
 
 ```
 _agent/
     tickets/            ← one JSON file per ticket
-    plugin/             ← auto-generated hooks and MCP config
+    logs/               ← session logs (role-ticket-timestamp.log)
 ```
 
 ### Usage
@@ -134,14 +158,19 @@ todo ──→ in_progress ──→ verify ──→ closed
 | `feedback` | yes | — | yes |
 | `description` | yes | — | — |
 
-Agent settings (like any framework tool, configured under its own top-level key):
-
 ```yaml
 agent:
-  allowlist: "path/to/custom_rules.toml"    # override default command allowlist
-  debug_hooks: true                          # log hook decisions to _agent/hooks.log
+  backend: sdk                               # "cli" or "sdk" (auto-detect if omitted)
+  human_ticket_review: true                      # gate create_ticket with interactive approval (SDK)
   max_turns: 30                              # turn limit for headless agents
+  prompts:                                   # appended to role prompts
+    common: "Always use ruff for formatting."
+    orchestrator: "Prefer small tickets."
+  required_criteria:                         # mandatory criteria on every new ticket
+    - "All existing tests still pass"
 ```
+
+See [Tool configuration](#tool-configuration) for the general config model (3-way merge, `key+` extension, local overrides).
 
 ## Configuration
 
@@ -195,6 +224,34 @@ repo:
 ```
 
 **Framework defaults** — The framework ships `config.defaults.yaml` with sensible defaults (e.g. built-in event definitions, clean paths). These form the base layer — project config extends or overrides them. Merge order: `config.defaults.yaml` ← `config.yaml` ← `config.local.yaml`.
+
+### Tool configuration
+
+Every tool (built-in or project-defined) owns a **top-level key** in `config.yaml` whose name matches the tool name. The entire key is passed to the tool as its config dict, after the 3-way merge.
+
+```yaml
+# config.yaml
+build:                    # ← config for the "build" tool
+  steps:
+    - "cmake --build {build_dir}"
+
+clean:                    # ← config for the "clean" tool
+  paths:
+    - "{workspace_root}/dist"
+
+agent:                    # ← config for the "agent" tool
+  backend: sdk
+```
+
+Some keys ship with **framework defaults** (defined in `config.defaults.yaml`) and are active out of the box — for example `agent.backend` defaults to `"cli"` and `clean.paths` includes `__pycache__`. Keys without a default are inert until you set them in project or local config.
+
+Use `key+` to **extend** a default list instead of replacing it:
+
+```yaml
+clean:
+  paths+:                 # append to the framework-default paths list
+    - "{workspace_root}/dist"
+```
 
 ### Config key syntax
 
@@ -274,6 +331,7 @@ CLI flags map 1:1 to `config.yaml` fields under the tool name. Precedence: tool 
 |---|---|
 | `cpp` | clang-format, clang-tidy |
 | `python` | ruff |
+| `sdk` | claude-agent-sdk, textual, rich (in-process agent backend) |
 
 ```yaml
 repo:

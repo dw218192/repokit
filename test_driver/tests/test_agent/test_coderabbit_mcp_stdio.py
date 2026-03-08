@@ -11,9 +11,9 @@ import pytest
 
 from pathlib import Path
 
-from repo_tools.agent.hooks.coderabbit_mcp_stdio import main
+from repo_tools.agent.mcp.coderabbit import main
 
-_MOD = "repo_tools.agent.hooks.coderabbit_mcp_stdio"
+_MOD = "repo_tools.agent.mcp.coderabbit"
 _CR_MOD = "repo_tools.agent.coderabbit"
 
 
@@ -393,7 +393,7 @@ def test_dispatch_exception_with_id_returns_error():
     responses = [json.loads(line) for line in output.splitlines() if line.strip()]
     assert len(responses) == 1
     assert responses[0]["error"]["code"] == -32603
-    assert responses[0]["error"]["message"] == "Internal error"
+    assert responses[0]["error"]["message"] == "Internal error: boom"
     assert "boom" in captured_stderr.getvalue()
 
 

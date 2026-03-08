@@ -1,6 +1,25 @@
 # Framework defaults — merged under project config.yaml and config.local.yaml.
 # Project config.yaml overrides these; use key+ to extend lists instead of replacing.
 
+agent:
+  backend: cli
+  events:
+    github:
+      check_failed:
+        poll:
+          - "gh run list --branch {git_branch} --status failure --limit 1 --json databaseId --jq .[0].databaseId"
+        payload:
+          - "gh run list --branch {git_branch} --status failure --limit 1 --json databaseId,name,conclusion,url --jq '.[0]'"
+        interval: 120
+        description: "CI check failed on current branch"
+      pr_review:
+        poll:
+          - "gh pr view --json reviewDecision --jq '.reviewDecision' | grep -qx CHANGES_REQUESTED"
+        payload:
+          - "gh pr view --json number,title,reviewDecision,url,reviews --jq '{number,title,reviewDecision,url,latestReviews: [.reviews[-3:][] | {author: .author.login, state: .state, body: .body}]}'"
+        interval: 300
+        description: "PR review changes requested"
+
 clean:
   paths:
     - "{workspace_root}/_agent"

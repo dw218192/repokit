@@ -16,7 +16,7 @@ from repo_tools._bootstrap import (
     write_shims,
 )
 from repo_tools.core import RepoTool, _TOOL_REGISTRY, registered_tool_deps
-from repo_tools.init import InitTool
+from repo_tools.init import InitTool, _CONFIG_TEMPLATE
 
 _FRAMEWORK_TOML = textwrap.dedent("""\
     [project]
@@ -414,6 +414,100 @@ class TestInitTool:
         tool = InitTool()
         # Should not raise even if venv/pyproject don't exist
         tool.execute(init_ctx, {"clean": True})
+
+
+# ── Config template generation ──────────────────────────────────────────────
+
+
+class TestInitConfigTemplate:
+    @pytest.fixture(autouse=True)
+    def _allow_init(self):
+        with patch("repo_tools.init._is_local_venv", return_value=True):
+            yield
+
+    @patch("repo_tools._bootstrap.subprocess.run")
+    @patch("repo_tools._bootstrap.find_uv", return_value="/bin/uv")
+    def test_generates_config_when_no_config_exists(self, _uv, mock_run, init_ctx):
+        """init writes config.yaml template when no config file exists."""
+        mock_run.return_value = MagicMock(returncode=0)
+        tool = InitTool()
+        tool.execute(init_ctx, {})
+
+        config_path = init_ctx.workspace_root / "config.yaml"
+        assert config_path.exists()
+        content = config_path.read_text(encoding="utf-8")
+        assert content == _CONFIG_TEMPLATE
+        assert "# repo:" in content
+
+    @patch("repo_tools._bootstrap.subprocess.run")
+    @patch("repo_tools._bootstrap.find_uv", return_value="/bin/uv")
+    def test_skips_when_repokit_config_exists(self, _uv, mock_run, init_ctx, capsys):
+        """init skips template generation when repokit config already exists."""
+        mock_run.return_value = MagicMock(returncode=0)
+        # Pre-create config.yaml as the repokit config
+        (init_ctx.workspace_root / "config.yaml").write_text("repo:\n  tokens: {}\n")
+
+        tool = InitTool()
+        tool.execute(init_ctx, {})
+
+        output = capsys.readouterr().out
+        assert "skipping template generation" in output
+        # File should still have original content (not overwritten)
+        content = (init_ctx.workspace_root / "config.yaml").read_text()
+        assert content == "repo:\n  tokens: {}\n"
+
+    @patch("repo_tools.init.click.prompt", return_value="repokit.yaml")
+    @patch("repo_tools._bootstrap.subprocess.run")
+    @patch("repo_tools._bootstrap.find_uv", return_value="/bin/uv")
+    def test_prompts_for_alt_name_when_foreign_config_exists(
+        self, _uv, mock_run, mock_prompt, init_ctx, fw_root,
+    ):
+        """init prompts for alt filename when foreign config.yaml exists."""
+        mock_run.return_value = MagicMock(returncode=0)
+        # Pre-create foreign config.yaml (not a repokit config)
+        (init_ctx.workspace_root / "config.yaml").write_text("some: foreign_config\n")
+
+        tool = InitTool()
+        tool.execute(init_ctx, {})
+
+        # Should have prompted the user
+        mock_prompt.assert_called_once()
+
+        # Template written to alt filename
+        alt_path = init_ctx.workspace_root / "repokit.yaml"
+        assert alt_path.exists()
+        assert alt_path.read_text(encoding="utf-8") == _CONFIG_TEMPLATE
+
+        # config_name persisted
+        config_name_path = fw_root / "_managed" / "config_name"
+        assert config_name_path.exists()
+        assert config_name_path.read_text(encoding="utf-8") == "repokit.yaml"
+
+    @patch("repo_tools._bootstrap.subprocess.run")
+    @patch("repo_tools._bootstrap.find_uv", return_value="/bin/uv")
+    def test_skips_when_override_config_exists(
+        self, _uv, mock_run, make_tool_context, tmp_path, fw_root, capsys,
+    ):
+        """init skips when the override config file already exists."""
+        mock_run.return_value = MagicMock(returncode=0)
+        ws = tmp_path / "project"
+        ws.mkdir()
+        (fw_root / "_managed").mkdir(parents=True, exist_ok=True)
+
+        # Set override at the framework root that get_config_file() checks
+        (fw_root / "_managed" / "config_name").write_text("repokit.yaml")
+        (ws / "repokit.yaml").write_text("existing: config\n")
+
+        ctx = make_tool_context(
+            workspace_root=ws,
+            tokens_override={"framework_root": str(fw_root)},
+        )
+        tool = InitTool()
+        with patch("repo_tools.core._FRAMEWORK_ROOT", fw_root):
+            tool.execute(ctx, {})
+
+        output = capsys.readouterr().out
+        assert "skipping template generation" in output
 
 
 # ── write_shims ─────────────────────────────────────────────────────────────

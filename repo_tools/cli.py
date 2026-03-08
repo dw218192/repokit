@@ -154,11 +154,16 @@ def _build_tool_context(ctx_obj: dict[str, Any], tool_name: str) -> ToolContext:
 def _make_tool_command(
     tool: RepoTool,
     dimensions: dict[str, list[str]],
-) -> click.Command:
-    """Build a click command for a tool."""
+) -> click.BaseCommand:
+    """Build a click command (or group) for a tool."""
+
+    is_group = type(tool).register_subcommands is not RepoTool.register_subcommands
 
     @click.pass_context
     def callback(ctx: click.Context, **kwargs: Any) -> None:
+        if is_group and ctx.invoked_subcommand is not None:
+            return
+
         # Extract dimension overrides from subcommand-level flags
         dim_overrides: dict[str, str] = {}
         for dim_name in dimensions:
@@ -196,12 +201,23 @@ def _make_tool_command(
 
         tool.execute(context, args)
 
-    cmd = click.Command(
-        name=tool.name,
-        help=tool.help,
-        callback=callback,
-        context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
-    )
+    ctx_settings = {"ignore_unknown_options": True, "allow_extra_args": True}
+
+    if is_group:
+        cmd: click.BaseCommand = click.Group(
+            name=tool.name,
+            help=tool.help,
+            callback=callback,
+            invoke_without_command=True,
+            context_settings=ctx_settings,
+        )
+    else:
+        cmd = click.Command(
+            name=tool.name,
+            help=tool.help,
+            callback=callback,
+            context_settings=ctx_settings,
+        )
 
     # Add dimension options so they work after the subcommand name too
     for dim_name, choices in dimensions.items():
@@ -215,6 +231,10 @@ def _make_tool_command(
 
     # Let the tool add its own options
     cmd = tool.setup(cmd)
+
+    # Let the tool register subcommands on the group
+    if is_group:
+        tool.register_subcommands(cmd)  # type: ignore[arg-type]
 
     return cmd
 
