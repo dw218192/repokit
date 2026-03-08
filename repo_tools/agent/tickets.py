@@ -1,29 +1,17 @@
-"""Stdio MCP server for ticket CRUD.
+"""Ticket CRUD logic shared by both SDK and CLI backends.
 
-Provides tools for creating/listing/reading/updating tickets — all as simple
-file operations under ``_agent/tickets/``.
-
-Invoked by Claude Code as::
-
-    python -m repo_tools.agent.ticket_mcp --project-root <path>
-
-Protocol: newline-delimited JSON-RPC 2.0 over stdin/stdout (same as
-``coderabbit_mcp_stdio``).
+Provides tool schemas, handler functions, validators, and role-based access
+constants.  The CLI MCP server lives in ``repo_tools.agent.mcp.tickets``.
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import re
-import sys
 from pathlib import Path
 
-# ── Constants ─────────────────────────────────────────────────────────────────
 
-_PROTOCOL_VERSION = "2024-11-05"
-_SERVER_NAME = "tickets"
-_SERVER_VERSION = "0.1"
+# ── Constants ─────────────────────────────────────────────────────────────────
 
 _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -70,7 +58,7 @@ _ROLE_ALLOWED_TRANSITIONS: dict[str, set[tuple[str, str]]] = {
     },
 }
 
-_TOOLS = [
+TOOL_SCHEMAS = [
     {
         "name": "list_tickets",
         "description": "List all tickets with their id and status.",
@@ -311,19 +299,11 @@ def _tickets_dir(root: Path) -> Path:
     return root / "_agent" / "tickets"
 
 
-def _load_required_criteria(root: Path) -> list[str]:
-    """Read ``agent.required_criteria`` from config.yaml."""
-    config_path = root / "config.yaml"
-    if not config_path.exists():
+def _load_required_criteria(config: dict) -> list[str]:
+    """Extract ``agent.required_criteria`` from an already-loaded config dict."""
+    if not isinstance(config, dict):
         return []
-    try:
-        import yaml
-        data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    except Exception:
-        return []
-    if not isinstance(data, dict):
-        return []
-    agent = data.get("agent")
+    agent = config.get("agent", config)
     if not isinstance(agent, dict):
         return []
     criteria = agent.get("required_criteria")
@@ -380,7 +360,7 @@ def _tool_get_ticket(root: Path, args: dict, *, role: str | None = None) -> dict
     return {"text": content}
 
 
-def _tool_create_ticket(root: Path, args: dict, *, role: str | None = None) -> dict:
+def _tool_create_ticket(root: Path, args: dict, *, role: str | None = None, config: dict | None = None) -> dict:
     tid = args.get("id", "").strip()
     if err := _validate_id(tid, "id"):
         return {"isError": True, "text": err}
@@ -398,7 +378,7 @@ def _tool_create_ticket(root: Path, args: dict, *, role: str | None = None) -> d
 
     # Merge required criteria (appended, deduplicated)
     seen = set(raw_criteria)
-    for rc in _load_required_criteria(root):
+    for rc in _load_required_criteria(config or {}):
         if rc not in seen:
             raw_criteria.append(rc)
             seen.add(rc)
@@ -478,16 +458,10 @@ def _tool_update_ticket(root: Path, args: dict, *, role: str | None = None) -> d
 
     ticket_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
-    # Worktree lifecycle: remove worktree on close (best-effort)
+    # Worktree lifecycle: remove worktree on close
     if "status" in updates and data["ticket"]["status"] == "closed":
-        try:
-            from .worktree import remove_worktree
-            remove_worktree(root, tid)
-        except Exception as exc:
-            import logging
-            logging.getLogger(__name__).warning(
-                f"Failed to remove worktree for {tid}: {exc}"
-            )
+        from .worktree import remove_worktree
+        remove_worktree(root, tid)
 
     return {"text": f"Ticket '{tid}' updated: {', '.join(updates.keys())}"}
 
@@ -562,10 +536,7 @@ def _tool_delete_ticket(root: Path, args: dict, *, role: str | None = None) -> d
     return {"text": f"Ticket '{tid}' deleted"}
 
 
-# ── JSON-RPC dispatch ─────────────────────────────────────────────────────────
-
-
-_TOOL_DISPATCH = {
+TOOL_HANDLERS = {
     "list_tickets": _tool_list_tickets,
     "get_ticket": _tool_get_ticket,
     "create_ticket": _tool_create_ticket,
@@ -574,96 +545,3 @@ _TOOL_DISPATCH = {
     "mark_criteria": _tool_mark_criteria,
     "delete_ticket": _tool_delete_ticket,
 }
-
-
-def _respond(req_id, result=None, error=None) -> str:
-    msg: dict = {"jsonrpc": "2.0", "id": req_id}
-    if error is not None:
-        msg["error"] = error
-    else:
-        msg["result"] = result
-    return json.dumps(msg)
-
-
-def _dispatch(root: Path, req: dict, *, role: str | None = None) -> str | None:
-    req_id = req.get("id")
-    method = req.get("method", "")
-
-    if req_id is None:
-        return None
-
-    if method == "initialize":
-        return _respond(req_id, {
-            "protocolVersion": _PROTOCOL_VERSION,
-            "capabilities": {"tools": {"listChanged": False}},
-            "serverInfo": {"name": _SERVER_NAME, "version": _SERVER_VERSION},
-        })
-
-    if method == "ping":
-        return _respond(req_id, {})
-
-    if method.startswith("notifications/"):
-        return None
-
-    if method == "tools/list":
-        return _respond(req_id, {"tools": _TOOLS})
-
-    if method == "tools/call":
-        params = req.get("params", {})
-        name = params.get("name", "")
-        tool_args = params.get("arguments", {})
-
-        handler = _TOOL_DISPATCH.get(name)
-        if handler is None:
-            outcome = {"isError": True, "text": f"Unknown tool: {name!r}"}
-        elif role is not None and name not in _ROLE_ALLOWED_TOOLS.get(role, set()):
-            outcome = {"isError": True, "text": f"role {role!r} cannot use tool {name!r}"}
-        else:
-            outcome = handler(root, tool_args, role=role)
-
-        result = {
-            "content": [{"type": "text", "text": outcome["text"]}],
-            **({"isError": True} if outcome.get("isError") else {}),
-        }
-        return _respond(req_id, result)
-
-    return _respond(req_id, error={"code": -32601, "message": f"Method not found: {method}"})
-
-
-# ── Main loop ─────────────────────────────────────────────────────────────────
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Ticket MCP stdio server")
-    parser.add_argument("--project-root", required=True, help="Project root directory")
-    parser.add_argument("--role", default=None, choices=["orchestrator", "worker", "reviewer"],
-                        help="Agent role for access control")
-    args = parser.parse_args()
-    root = Path(args.project_root)
-
-    for raw_line in sys.stdin:
-        line = raw_line.strip()
-        if not line:
-            continue
-        try:
-            req = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-
-        try:
-            response = _dispatch(root, req, role=args.role)
-        except Exception as exc:
-            print(f"ticket_mcp: dispatch error: {exc}", file=sys.stderr)
-            req_id = req.get("id") if isinstance(req, dict) else None
-            if req_id is not None:
-                response = _respond(req_id, error={"code": -32603, "message": "Internal error"})
-            else:
-                continue
-
-        if response is not None:
-            sys.stdout.write(response + "\n")
-            sys.stdout.flush()
-
-
-if __name__ == "__main__":
-    main()

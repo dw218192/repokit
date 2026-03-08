@@ -15,6 +15,8 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..core import logger
+
 
 # ------------------------------------------------------------------
 # Data model
@@ -163,8 +165,10 @@ def _extract_commands(command: str) -> list[str]:
         parts = bashlex.parse(command)
         return _walk_bashlex(parts, command)
     except bashlex.errors.ParsingError:
-        # Fall back to regex on any parse error
-        pass
+        logger.warning(
+            "bashlex failed to parse command, falling back to regex: %s",
+            command,
+        )
     return _extract_commands_regex(command)
 
 

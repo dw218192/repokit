@@ -1,7 +1,7 @@
 """Shared worktree helpers for agent subsystem.
 
 Used by both ``tool.py`` (worktree creation on agent dispatch) and
-``ticket_mcp.py`` (worktree cleanup on ticket close).
+``tickets.py`` (worktree cleanup on ticket close).
 """
 
 from __future__ import annotations
@@ -12,8 +12,17 @@ from pathlib import Path
 from ..core import logger
 
 
-def ensure_worktree(workspace_root: Path, ticket: str) -> Path:
-    """Create or reuse a git worktree for the given ticket under _agent/worktrees/."""
+def ensure_worktree(
+    workspace_root: Path,
+    ticket: str,
+    *,
+    base_ref: str | None = None,
+) -> Path:
+    """Create or reuse a git worktree for the given ticket under _agent/worktrees/.
+
+    *base_ref* overrides the starting point when creating a new branch
+    (defaults to ``HEAD``).
+    """
     wt_dir = workspace_root / "_agent" / "worktrees" / ticket
     branch_name = f"worktree-{ticket}"
 
@@ -38,8 +47,9 @@ def ensure_worktree(workspace_root: Path, ticket: str) -> Path:
             cwd=str(workspace_root), check=True,
         )
     else:
+        start_point = base_ref or "HEAD"
         subprocess.run(
-            ["git", "worktree", "add", "-b", branch_name, str(wt_dir), "HEAD"],
+            ["git", "worktree", "add", "-b", branch_name, str(wt_dir), start_point],
             cwd=str(workspace_root), check=True,
         )
 

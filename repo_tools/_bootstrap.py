@@ -250,6 +250,17 @@ def write_shims(
             newline="",
         )
 
+        ps1_shim = workspace_root / "repo.ps1"
+        ps1_shim.write_text(
+            f'$env:PATH = "{venv_bin};$env:PATH"\r\n'
+            f'$env:PYTHONPATH = "{framework_root}"\r\n'
+            f'& "{py}" -m repo_tools.cli '
+            f'--workspace-root "{workspace_root}" @args\r\n'
+            f"exit $LASTEXITCODE\r\n",
+            encoding="utf-8",
+            newline="",
+        )
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:

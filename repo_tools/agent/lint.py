@@ -144,6 +144,31 @@ def _detect_languages(path: Path) -> tuple[bool, bool]:
     return False, False
 
 
+TOOL_SCHEMA: dict = {
+    "name": "lint",
+    "description": (
+        "Run static analysis on a file or directory. "
+        "Automatically detects language and runs the "
+        "appropriate linter (ruff for Python, clang-tidy "
+        "for C/C++). Returns plain-text diagnostics."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": (
+                    "File or directory to lint. "
+                    "Defaults to '.'."
+                ),
+                "default": ".",
+            },
+        },
+        "required": [],
+    },
+}
+
+
 def call_lint(
     args: dict[str, Any],
     *,
