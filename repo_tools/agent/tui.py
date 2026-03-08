@@ -1389,6 +1389,7 @@ class AgentApp(App):
             panel = ChoicePanel(questions)
             await chat_log.mount(panel)
             chat_log.scroll_end(animate=False)
+            self.query_one("#prompt-input", PromptInput).focus()
 
             answer_text = await self._await_choice_future()
             answers = _parse_choice_answers(answer_text, questions)
@@ -1465,6 +1466,7 @@ class AgentApp(App):
             panel = ChoicePanel(questions)
             await chat_log.mount(panel)
             chat_log.scroll_end(animate=False)
+            self.query_one("#prompt-input", PromptInput).focus()
 
             answer_text = await self._await_choice_future()
             answers = _parse_choice_answers(answer_text, questions)
