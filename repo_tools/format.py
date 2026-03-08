@@ -15,8 +15,26 @@ from .features import require_executable
 
 _CLANG_FORMAT_EXTENSIONS = {".cpp", ".h", ".hpp", ".c", ".cc", ".cxx", ".hxx"}
 _PYTHON_EXTENSIONS = {".py"}
-_ALWAYS_EXCLUDE = {"_tools", "_managed", "ext", ".git", ".vs", "build", "_build", "_logs", "_agent", "node_modules"}
 _BATCH_SIZE = 200  # max files per clang-format invocation (Windows cmdline limit)
+
+
+def _git_tracked_files(root: Path, extensions: set[str]) -> list[Path] | None:
+    """Return tracked files matching *extensions*, or None if not a git repo."""
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+            cwd=root, capture_output=True, text=True, check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+    files = []
+    for entry in result.stdout.split("\0"):
+        if not entry:
+            continue
+        p = root / entry
+        if p.suffix in extensions:
+            files.append(p)
+    return files
 
 
 class FormatTool(RepoTool):
@@ -64,6 +82,20 @@ class FormatTool(RepoTool):
             else:
                 logger.warning(f"Unknown format backend: {backend_type}")
 
+    def _collect_files(self, root: Path, extensions: set[str]) -> list[Path]:
+        """Collect source files, respecting .gitignore when in a git repo."""
+        files = _git_tracked_files(root, extensions)
+        if files is not None:
+            return files
+        # Fallback for non-git repos: rglob with minimal exclusion
+        result = []
+        for path in root.rglob("*"):
+            if path.is_file() and path.suffix in extensions:
+                parts = path.parts
+                if not any(p.startswith(".") for p in parts):
+                    result.append(path)
+        return result
+
     def _run_clang_format(
         self,
         root: Path,
@@ -74,14 +106,6 @@ class FormatTool(RepoTool):
         if extensions is None:
             extensions = _CLANG_FORMAT_EXTENSIONS
 
-        exclude_dirs = set(_ALWAYS_EXCLUDE)
-        build_root = ctx.tokens.get("build_root")
-        logs_root = ctx.tokens.get("logs_root")
-        if build_root:
-            exclude_dirs.add(Path(build_root).name)
-        if logs_root:
-            exclude_dirs.add(Path(logs_root).name)
-
         clang_format_exe = require_executable("clang-format", feature="cpp")
 
         clang_format_file = root / ".clang-format"
@@ -89,12 +113,7 @@ class FormatTool(RepoTool):
             logger.error(f".clang-format not found at {clang_format_file}")
             sys.exit(1)
 
-        source_files = []
-        for path in root.rglob("*"):
-            if path.is_file() and path.suffix in extensions:
-                parts = path.parts
-                if not any(excluded in parts for excluded in exclude_dirs):
-                    source_files.append(path)
+        source_files = self._collect_files(root, extensions)
 
         if not source_files:
             logger.warning("No source files found to format")
