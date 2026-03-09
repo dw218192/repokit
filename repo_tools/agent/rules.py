@@ -66,11 +66,9 @@ def _compile_rule_list(entries: list, section: str, role: str | None = None) -> 
         has_patterns = "patterns" in r
         if not has_commands and not has_patterns:
             raise ValueError(f"{section}[{i}] ({name!r}): must have 'commands' and/or 'patterns'")
-        if has_patterns:
-            if isinstance(r["patterns"], str) or not isinstance(r["patterns"], (list, tuple)):
-                raise ValueError(f"{section}[{i}] ({name!r}): 'patterns' must be a list, got {type(r['patterns']).__name__}")
-        if has_commands:
-            if isinstance(r["commands"], str) or not isinstance(r["commands"], (list, tuple)):
+        if has_patterns and (isinstance(r["patterns"], str) or not isinstance(r["patterns"], (list, tuple))):
+            raise ValueError(f"{section}[{i}] ({name!r}): 'patterns' must be a list, got {type(r['patterns']).__name__}")
+        if has_commands and (isinstance(r["commands"], str) or not isinstance(r["commands"], (list, tuple))):
                 raise ValueError(f"{section}[{i}] ({name!r}): 'commands' must be a list, got {type(r['commands']).__name__}")
         rule_roles = r.get("roles")
         if rule_roles is not None and role not in rule_roles:
@@ -214,8 +212,7 @@ def check_command(
         if any(
             any(pat.search(cmd) for pat in rule.patterns)
             for cmd in commands
-        ):
-            if _check_dir_constraint(rule.dir, project_root, cwd) if rule.dir else True:
+        ) and (_check_dir_constraint(rule.dir, project_root, cwd) if rule.dir else True):
                 return False, rule.reason or rules.default_reason
 
     for cmd in commands:

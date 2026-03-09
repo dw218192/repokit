@@ -111,7 +111,7 @@ class InitTool(RepoTool):
         default_path = workspace_root / "config.yaml"
         if not default_path.exists():
             default_path.write_text(_CONFIG_TEMPLATE, encoding="utf-8")
-            print(f"Generated config template: config.yaml")
+            print("Generated config template: config.yaml")
         elif _is_repokit_config(default_path):
             print("Config file found: config.yaml, skipping template generation")
         else:

@@ -263,10 +263,7 @@ def _build_cli(
             workspace_root = str(Path.cwd())
 
         # Reuse early config if workspace hasn't changed
-        if workspace_root == ws:
-            config = early_config
-        else:
-            config = load_config(workspace_root)
+        config = early_config if workspace_root == ws else load_config(workspace_root)
 
         # Resolve dimension values from config tokens or fallback defaults
         dimensions = _get_dimension_tokens(config)

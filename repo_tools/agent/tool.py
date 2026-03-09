@@ -39,10 +39,7 @@ def _setup_file_logging(
     log_dir = workspace_root / "_agent" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    if ticket:
-        filename = f"{role}-{ticket}-{ts}.log"
-    else:
-        filename = f"interactive-{ts}.log"
+    filename = f"{role}-{ticket}-{ts}.log" if ticket else f"interactive-{ts}.log"
     handler = logging.FileHandler(log_dir / filename, encoding="utf-8")
     handler.setFormatter(logging.Formatter(
         "%(asctime)s %(name)s %(levelname)s %(message)s",

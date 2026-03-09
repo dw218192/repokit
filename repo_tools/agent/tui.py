@@ -7,6 +7,7 @@ collapsible entries in a rolling Tools side pane.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -381,9 +382,7 @@ def _summarize_tool(name: str, input_args: dict | None) -> str:
         arg = input_args.get("command", "")
     elif name in ("Read", "Edit", "Write"):
         arg = input_args.get("file_path", "")
-    elif name == "Glob":
-        arg = input_args.get("pattern", "")
-    elif name == "Grep":
+    elif name in ("Glob", "Grep"):
         arg = input_args.get("pattern", "")
     elif name == "WebFetch":
         arg = input_args.get("url", "")
@@ -602,10 +601,8 @@ class PlanApprovalBar(Static):
         elif event.key == "down":
             event.stop()
             event.prevent_default()
-            try:
+            with contextlib.suppress(Exception):
                 self.app.query_one("#prompt-input", PromptInput).focus()
-            except Exception:
-                pass
 
     def on_focus(self) -> None:
         self.add_class("plan-focused")
@@ -645,7 +642,7 @@ class PromptInput(TextArea):
         """
         if event.key == "up":
             # If plan approval bar is active, arrow-up focuses it
-            try:
+            with contextlib.suppress(Exception):
                 bar = self.app.query_one(
                     "#plan-approval", PlanApprovalBar,
                 )
@@ -654,8 +651,6 @@ class PromptInput(TextArea):
                     event.prevent_default()
                     bar.focus()
                     return
-            except Exception:
-                pass
             # On empty input, pop the queue
             if not self.text.strip():
                 event.stop()
@@ -690,10 +685,8 @@ class TUILogHandler(logging.Handler):
         self._widget = widget
 
     def emit(self, record: logging.LogRecord) -> None:
-        try:
+        with contextlib.suppress(Exception):
             self._widget.write(self.format(record))
-        except Exception:
-            pass
 
 
 # ── Chat history persistence ──────────────────────────────────────────────────
@@ -1031,10 +1024,8 @@ class AgentApp(App):
             self._todos = []
             self.query_one("#chat-log", VerticalScroll).remove_children()
             self.query_one("#tool-log", ToolLog).clear()
-            try:
+            with contextlib.suppress(Exception):
                 self.query_one("#task-panel", TaskPanel).refresh_todos([])
-            except Exception:
-                pass
             self.query_one("#status-bar", StatusBar).set_status(
                 "Ready", "ready",
             )
@@ -1517,24 +1508,18 @@ class AgentApp(App):
         for panel_id in (
             "#ticket-tree", "#task-panel", "#available-tools", "#tool-log",
         ):
-            try:
+            with contextlib.suppress(Exception):
                 panel = self.query_one(panel_id, VerticalScroll)
                 if self._side_wrap:
                     panel.remove_class("hscroll")
                 else:
                     panel.add_class("hscroll")
-            except Exception:
-                pass
-        try:
+        with contextlib.suppress(Exception):
             log_pane = self.query_one("#log-pane", RichLog)
             log_pane.wrap = self._side_wrap
-        except Exception:
-            pass
-        try:
+        with contextlib.suppress(Exception):
             toggle = self.query_one("#wrap-toggle", Static)
             toggle.update("[F3 Wrap]" if self._side_wrap else "[F3 Scroll]")
-        except Exception:
-            pass
 
     @on(events.Click, "#wrap-toggle")
     def _on_wrap_toggle_click(self) -> None:
