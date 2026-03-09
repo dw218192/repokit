@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -165,6 +166,33 @@ def _write_plugin(
     )
 
 
+def _find_claude_cli() -> str:
+    """Locate the ``claude`` CLI executable.
+
+    On Windows, ``shutil.which("claude")`` may return a ``.ps1`` PowerShell
+    wrapper that ``subprocess.run()`` cannot execute.  npm always generates
+    a ``.cmd`` wrapper alongside — prefer that.
+    """
+    if sys.platform != "win32":
+        return "claude"
+
+    found = shutil.which("claude")
+    if found is None:
+        return "claude"
+
+    if found.lower().endswith(".ps1"):
+        cmd_path = found[:-4] + ".cmd"
+        if os.path.isfile(cmd_path):
+            logger.debug("Using .cmd wrapper: %s", cmd_path)
+            return cmd_path
+        logger.warning(
+            "Found claude.ps1 but no .cmd wrapper; subprocess may fail: %s",
+            found,
+        )
+
+    return found
+
+
 class CliBackend:
     """Launch Claude Code via the ``claude`` CLI subprocess."""
 
@@ -187,7 +215,7 @@ class CliBackend:
         if role and "Bash" not in allowed:
             allowed.append("Bash")
 
-        cmd = ["claude", "--allowedTools", *allowed]
+        cmd = [_find_claude_cli(), "--allowedTools", *allowed]
 
         if config.get("debug_hooks"):
             cmd.extend(["-d", "hooks"])
