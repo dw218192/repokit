@@ -581,6 +581,7 @@ def invoke_tool(
     tool_config = config.get(name, {})
     if not isinstance(tool_config, dict):
         tool_config = {}
+    tool_config = resolve_tool_config(tool_config, tokens, config)
 
     ctx = ToolContext(
         workspace_root=Path(tokens.get("workspace_root", ".")),
@@ -858,6 +859,34 @@ def resolve_path(root: Path, template: str, tokens: dict[str, str]) -> Path:
     if not path.is_absolute():
         path = root / path
     return path
+
+
+def resolve_tool_config(
+    tool_config: dict[str, Any],
+    tokens: dict[str, str],
+    config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Recursively resolve token references in tool config values.
+
+    Walks *tool_config* and expands ``{token}`` references in string values.
+    Nested dicts and lists are recursed into. Unresolvable references
+    (e.g. JSON-like braces) are left as-is. Idempotent.
+    """
+    formatter = TokenFormatter(tokens, config)
+
+    def _resolve_value(v: Any) -> Any:
+        if isinstance(v, str) and "{" in v:
+            try:
+                return formatter.resolve(v)
+            except (KeyError, ValueError):
+                return v
+        if isinstance(v, dict):
+            return {k: _resolve_value(val) for k, val in v.items()}
+        if isinstance(v, list):
+            return [_resolve_value(item) for item in v]
+        return v
+
+    return _resolve_value(tool_config)
 
 
 # ── Path Utilities ───────────────────────────────────────────────────
