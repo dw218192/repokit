@@ -8,7 +8,7 @@ to keep this module importable without the SDK installed.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from ..rules import check_command, load_rules
 

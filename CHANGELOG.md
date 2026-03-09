@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.3
+
+- Fix linting issues
+
 ## 0.7.2
 
 - **Format tool**: Use `git ls-files` for file discovery instead of hardcoded exclusion list. Respects `.gitignore` automatically — no more scanning uv cache, build artifacts, or agent worktrees. Falls back to rglob for non-git repos.

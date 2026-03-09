@@ -13,6 +13,7 @@ Usage (from bootstrap scripts):
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import subprocess
@@ -233,10 +234,8 @@ def write_shims(
         encoding="utf-8",
         newline="\n",
     )
-    try:
+    with contextlib.suppress(OSError):
         bash_shim.chmod(0o755)
-    except OSError:
-        pass
 
     if sys.platform == "win32":
         cmd_shim = workspace_root / "repo.cmd"
@@ -284,4 +283,4 @@ if __name__ == "__main__":
         env=env,
     )
 
-    print(f"Run ./repo --help to get started.")
+    print("Run ./repo --help to get started.")

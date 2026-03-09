@@ -466,10 +466,9 @@ def _match_filter(
         # Find which dimension this value belongs to
         matched_any = False
         for dim_name, dim_val in dim_values.items():
-            if value == dim_val or value == dim_name:
+            if value in (dim_val, dim_name):
                 matched_any = True
-                if negate:
-                    if value == dim_val:
+                if negate and value == dim_val:
                         return False, 0  # Negation failed
                 break
 
