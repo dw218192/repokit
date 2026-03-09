@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from repo_tools.agent.claude._base import ClaudeBackend
-from repo_tools.agent.claude._cli import CliBackend, _write_plugin
+from repo_tools.agent.claude._cli import CliBackend, _find_claude_cli, _write_plugin
 from repo_tools.agent.claude._cli import PLUGIN_MANIFEST
 from repo_tools.agent.claude._shared import ALLOWED_TOOLS, OUTPUT_SCHEMAS
 
@@ -445,3 +445,44 @@ class TestRunInteractive:
         )
         call_kwargs = mock_run.call_args
         assert call_kwargs.kwargs["cwd"] == str(tmp_path / "workdir")
+
+
+# ── _find_claude_cli tests ───────────────────────────────────────
+
+
+class TestFindClaudeCli:
+    @patch("repo_tools.agent.claude._cli.sys")
+    def test_non_windows_returns_claude(self, mock_sys):
+        """On non-Windows platforms, returns plain 'claude'."""
+        mock_sys.platform = "linux"
+        assert _find_claude_cli() == "claude"
+
+    @patch("repo_tools.agent.claude._cli.shutil.which", return_value=None)
+    @patch("repo_tools.agent.claude._cli.sys")
+    def test_windows_no_which_returns_claude(self, mock_sys, mock_which):
+        """On Windows when shutil.which returns None, returns plain 'claude'."""
+        mock_sys.platform = "win32"
+        assert _find_claude_cli() == "claude"
+
+    @patch("repo_tools.agent.claude._cli.sys")
+    def test_windows_ps1_prefers_cmd(self, mock_sys, tmp_path):
+        """On Windows, .ps1 result is swapped for .cmd when it exists."""
+        mock_sys.platform = "win32"
+        ps1 = tmp_path / "claude.ps1"
+        cmd = tmp_path / "claude.cmd"
+        ps1.write_text("# ps1 stub", encoding="utf-8")
+        cmd.write_text("@rem cmd stub", encoding="utf-8")
+
+        with patch(
+            "repo_tools.agent.claude._cli.shutil.which",
+            return_value=str(ps1),
+        ):
+            result = _find_claude_cli()
+        assert result == str(cmd)
+
+    @patch("repo_tools.agent.claude._cli.shutil.which", return_value=r"C:\bin\claude.exe")
+    @patch("repo_tools.agent.claude._cli.sys")
+    def test_windows_exe_returned_as_is(self, mock_sys, mock_which):
+        """On Windows, a .exe path is returned unchanged."""
+        mock_sys.platform = "win32"
+        assert _find_claude_cli() == r"C:\bin\claude.exe"
