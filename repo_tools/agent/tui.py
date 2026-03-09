@@ -517,7 +517,7 @@ class ToolLog(VerticalScroll):
     ) -> None:
         """Register a new tool call as a collapsed collapsible entry."""
         summary = _summarize_tool(name, input_args)
-        output_widget = Static("", classes="tool-log-output")
+        output_widget = Static("", classes="tool-log-output", markup=False)
         output_widget.display = False
         entry = Collapsible(
             Static(_format_tool_body(name, input_args), classes="tool-log-body"),

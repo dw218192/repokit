@@ -1058,6 +1058,33 @@ class TestToolLog:
 
         _run(_test)
 
+    def test_markup_like_output_does_not_crash(self):
+        """Tool output containing Rich-markup-like characters renders without error."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield ToolLog(id="tl")
+
+            app = _App()
+            async with app.run_test() as pilot:
+                tl = app.query_one("#tl", ToolLog)
+                tl.add_tool("t1", "Bash", {"command": "echo json"})
+                await pilot.pause()
+
+                # This string looks like Rich markup and would crash without markup=False
+                markup_output = '[{"name": "foo", "value=\'bar\'"}]'
+                tl.set_result("t1", markup_output)
+                await pilot.pause()
+
+                out = tl._output_widgets["t1"]
+                assert out.display
+                assert markup_output in str(out.render())
+
+        _run(_test)
+
 
 # ── _summarize_tool tests ──────────────────────────────────────────────────
 
