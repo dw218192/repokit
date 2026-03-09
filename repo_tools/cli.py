@@ -19,6 +19,7 @@ from .core import (
     logger,
     register_tool,
     resolve_filters,
+    resolve_tool_config,
     resolve_tokens,
 )
 
@@ -141,6 +142,7 @@ def _build_tool_context(ctx_obj: dict[str, Any], tool_name: str) -> ToolContext:
     tool_config = config.get(tool_name, {})
     if not isinstance(tool_config, dict):
         tool_config = {}
+    tool_config = resolve_tool_config(tool_config, ctx_obj["tokens"], config)
     return ToolContext(
         workspace_root=Path(ctx_obj["workspace_root"]),
         tokens=ctx_obj["tokens"],

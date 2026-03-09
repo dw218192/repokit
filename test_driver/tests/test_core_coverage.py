@@ -21,6 +21,7 @@ from repo_tools.core import (
     register_tool,
     remove_tree_with_retries,
     resolve_path,
+    resolve_tool_config,
     resolve_tokens,
     RepoTool,
     ToolContext,
@@ -366,3 +367,47 @@ class TestCommandGroupEnv:
         with CommandGroup("test") as g:
             g.run(["echo", "hi"])
         assert MockSC.call_args[1]["env"] is None
+
+
+# ── resolve_tool_config ──────────────────────────────────────────────
+
+
+class TestResolveToolConfig:
+    def test_resolves_simple_token(self):
+        tc = {"log_dir": "{workspace_root}/_log"}
+        tokens = {"workspace_root": "/home/user/project"}
+        result = resolve_tool_config(tc, tokens)
+        assert result["log_dir"] == "/home/user/project/_log"
+
+    def test_leaves_non_string_values(self):
+        tc = {"max_turns": 25, "dry_run": False, "nothing": None}
+        result = resolve_tool_config(tc, {})
+        assert result == tc
+
+    def test_recurse_nested_dicts(self):
+        tc = {"sub": {"path": "{workspace_root}/sub"}}
+        tokens = {"workspace_root": "/root"}
+        result = resolve_tool_config(tc, tokens)
+        assert result["sub"]["path"] == "/root/sub"
+
+    def test_resolves_list_elements(self):
+        tc = {"paths": ["{workspace_root}/a", "{workspace_root}/b"]}
+        tokens = {"workspace_root": "/root"}
+        result = resolve_tool_config(tc, tokens)
+        assert result["paths"] == ["/root/a", "/root/b"]
+
+    def test_unresolvable_left_as_is(self):
+        tc = {"val": "{unknown_token}/foo"}
+        result = resolve_tool_config(tc, {})
+        assert result["val"] == "{unknown_token}/foo"
+
+    def test_idempotent(self):
+        tc = {"log_dir": "/root/_log"}
+        tokens = {"workspace_root": "/root"}
+        result = resolve_tool_config(tc, tokens)
+        assert result["log_dir"] == "/root/_log"
+
+    def test_json_like_braces_not_broken(self):
+        tc = {"schema": '{"type": "object"}'}
+        result = resolve_tool_config(tc, {})
+        assert result["schema"] == '{"type": "object"}'
