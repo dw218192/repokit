@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.5
+
+- **Init**: Generate GitHub Actions CI template (`.github/workflows/ci.yml`) on first `repo init`, skipped on subsequent runs
+
 ## 0.7.4
 
 - **CLI backend**: Fix `FileNotFoundError` on Windows when Claude is installed via npm (`.ps1` wrapper → prefer `.cmd`)

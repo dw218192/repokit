@@ -16,7 +16,7 @@ from repo_tools._bootstrap import (
     write_shims,
 )
 from repo_tools.core import RepoTool, _TOOL_REGISTRY, registered_tool_deps
-from repo_tools.init import InitTool, _CONFIG_TEMPLATE
+from repo_tools.init import InitTool, _CONFIG_TEMPLATE, _CI_TEMPLATE
 
 _FRAMEWORK_TOML = textwrap.dedent("""\
     [project]
@@ -630,3 +630,44 @@ class TestManagedDirPaths:
         env = mock_run.call_args.kwargs.get("env", {})
         assert "_managed" in env["UV_PROJECT_ENVIRONMENT"]
         assert "venv" in env["UV_PROJECT_ENVIRONMENT"]
+
+
+# ── CI template generation ──────────────────────────────────────────────────
+
+
+class TestInitCITemplate:
+    @pytest.fixture(autouse=True)
+    def _allow_init(self):
+        with patch("repo_tools.init._is_local_venv", return_value=True):
+            yield
+
+    @patch("repo_tools._bootstrap.subprocess.run")
+    @patch("repo_tools._bootstrap.find_uv", return_value="/bin/uv")
+    def test_generates_ci_when_no_workflow_exists(self, _uv, mock_run, init_ctx):
+        mock_run.return_value = MagicMock(returncode=0)
+        tool = InitTool()
+        tool.execute(init_ctx, {})
+
+        ci_path = init_ctx.workspace_root / ".github" / "workflows" / "ci.yml"
+        assert ci_path.exists()
+        content = ci_path.read_text(encoding="utf-8")
+        assert content == _CI_TEMPLATE
+
+    @patch("repo_tools._bootstrap.subprocess.run")
+    @patch("repo_tools._bootstrap.find_uv", return_value="/bin/uv")
+    def test_skips_ci_when_workflow_exists(self, _uv, mock_run, init_ctx, capsys):
+        mock_run.return_value = MagicMock(returncode=0)
+        # Pre-create the CI workflow file
+        ci_dir = init_ctx.workspace_root / ".github" / "workflows"
+        ci_dir.mkdir(parents=True, exist_ok=True)
+        (ci_dir / "ci.yml").write_text("existing: content\n")
+
+        tool = InitTool()
+        tool.execute(init_ctx, {})
+
+        # File should still have original content (not overwritten)
+        content = (ci_dir / "ci.yml").read_text()
+        assert content == "existing: content\n"
+        # Should report skipping
+        output = capsys.readouterr().out
+        assert "skipping template generation" in output
