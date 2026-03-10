@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.4
+
+- **CLI backend**: Fix `FileNotFoundError` on Windows when Claude is installed via npm (`.ps1` wrapper → prefer `.cmd`)
+- **TUI**: Fix crash when tool results contain markup-like characters (brackets, quotes, equals signs)
+- **Token resolution**: Auto-resolve `{token}` references in tool config values — tools no longer need manual `resolve_path()` calls
+
 ## 0.7.3
 
 - Fix linting issues
