@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.10
+
+- **CI**: Fix publish step failing due to dirty working tree — `repo init` generates `CLAUDE.md` during bootstrap, `git restore .` before publish
+
+## 0.7.9
+
+- **Agent**: Fix dispatch MCP server not registered in CLI backend — `_write_plugin()` checked `role is None` but `run_interactive()` passes `role="orchestrator"`, so the dispatch tool was never added to `.mcp.json`
+
+## 0.7.8
+
+- **Init**: Skip CI template generation if any workflow already exists in `.github/workflows/`, not just `ci.yml`
+
+## 0.7.7
+
+- **Init**: Generate `CLAUDE.md` with repokit section on `repo init` — creates the file if absent, appends if it exists without a `## Repo tooling` section, skips if already present
+
 ## 0.7.6
 
 - **TUI**: Fix space key not working on Windows — Kitty keyboard protocol encodes space as CSI u sequence with no character, causing TextArea to silently drop it
