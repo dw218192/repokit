@@ -594,7 +594,7 @@ class PlanApprovalBar(Static):
         pass
 
     async def _on_key(self, event: events.Key) -> None:
-        if event.key == "enter":
+        if event.key in ("enter", "space"):
             event.stop()
             event.prevent_default()
             self.post_message(self.Accepted())
@@ -674,6 +674,13 @@ class PromptInput(TextArea):
                 self.clear()
                 self.post_message(self.Submitted(submitted))
             return
+        # Workaround: Kitty keyboard protocol encodes space as a CSI u
+        # sequence (\x1b[32u), which the XTermParser decodes with
+        # character=None.  TextArea skips insertion when is_printable is
+        # False, so space silently vanishes.  Inject the character so the
+        # base class handles it normally.
+        if event.key == "space" and event.character is None:
+            event.character = " "
         await super()._on_key(event)
 
 

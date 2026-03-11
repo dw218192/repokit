@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.6
+
+- **TUI**: Fix space key not working on Windows — Kitty keyboard protocol encodes space as CSI u sequence with no character, causing TextArea to silently drop it
+- **TUI**: PlanApprovalBar now accepts space key in addition to Enter for plan approval
+
 ## 0.7.5
 
 - **Init**: Generate GitHub Actions CI template (`.github/workflows/ci.yml`) on first `repo init`, skipped on subsequent runs

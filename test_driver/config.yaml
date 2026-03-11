@@ -30,5 +30,5 @@ agent:
     - "All existing tests pass (run via `repo_test`)"
     - "No coverage regression (run via `repo_test-cov`)"
     - "New features must have tests; tests must cover meaningful behavior, not trivial plumbing"
-    - "Stay true to the principles specified in @repo_tools/agent/prompts/common.txt"
+    - "No coding-standard violations per @repo_tools/agent/prompts/coding-standards.md: no defensive fallbacks (try-except around imports, getattr with defaults for required attrs, None guards on non-optional values), no error hiding (bare except, broad catch-and-swallow), no unnecessary abstractions for one-off operations"
     - "Dogfooding as much as possible: use the repo tool's core features to implement a new feature. DRY."

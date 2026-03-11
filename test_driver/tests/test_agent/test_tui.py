@@ -361,6 +361,60 @@ class TestPromptInput:
 
         _run(_test)
 
+    def test_kitty_encoded_space_inserts_character(self):
+        """Space from Kitty keyboard protocol (character=None) is inserted."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+            from textual.events import Key
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield PromptInput(id="pi")
+
+            app = _App()
+            async with app.run_test() as pilot:
+                pi = app.query_one("#pi", PromptInput)
+                pi.focus()
+                for ch in "hello":
+                    await pilot.press(ch)
+                # Simulate Kitty-encoded space (character=None)
+                await pi._on_key(Key("space", None))
+                await pilot.pause()
+                for ch in "world":
+                    await pilot.press(ch)
+                await pilot.pause()
+                assert pi.text == "hello world"
+
+        _run(_test)
+
+    def test_plan_approval_bar_accepts_on_space(self):
+        """PlanApprovalBar responds to space key like enter."""
+
+        async def _test():
+            from textual.app import App, ComposeResult
+
+            accepted = []
+
+            class _App(App):
+                def compose(self) -> ComposeResult:
+                    yield PlanApprovalBar("Accept", id="bar")
+                    yield PromptInput(id="pi")
+
+                def on_plan_approval_bar_accepted(self, event):
+                    accepted.append(True)
+
+            app = _App()
+            async with app.run_test() as pilot:
+                bar = app.query_one("#bar", PlanApprovalBar)
+                bar.add_class("plan-active")
+                bar.focus()
+                await pilot.press("space")
+                await pilot.pause()
+                assert accepted == [True]
+
+        _run(_test)
+
 
 # ── AgentApp queue integration tests ─────────────────────────────────────────
 
