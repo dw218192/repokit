@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.10
+
+- **CI**: Fix publish step failing due to dirty working tree — `repo init` generates `CLAUDE.md` during bootstrap, `git restore .` before publish
+
 ## 0.7.9
 
 - **Agent**: Fix dispatch MCP server not registered in CLI backend — `_write_plugin()` checked `role is None` but `run_interactive()` passes `role="orchestrator"`, so the dispatch tool was never added to `.mcp.json`
