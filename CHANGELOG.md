@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.7
+
+- **Init**: Generate `CLAUDE.md` with repokit section on `repo init` — creates the file if absent, appends if it exists without a `## Repo tooling` section, skips if already present
+
 ## 0.7.6
 
 - **TUI**: Fix space key not working on Windows — Kitty keyboard protocol encodes space as CSI u sequence with no character, causing TextArea to silently drop it

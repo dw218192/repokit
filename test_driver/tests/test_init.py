@@ -16,7 +16,7 @@ from repo_tools._bootstrap import (
     write_shims,
 )
 from repo_tools.core import RepoTool, _TOOL_REGISTRY, registered_tool_deps
-from repo_tools.init import InitTool, _CONFIG_TEMPLATE, _CI_TEMPLATE
+from repo_tools.init import InitTool, _CONFIG_TEMPLATE, _CI_TEMPLATE, _CLAUDE_TEMPLATE
 
 _FRAMEWORK_TOML = textwrap.dedent("""\
     [project]
@@ -671,3 +671,65 @@ class TestInitCITemplate:
         # Should report skipping
         output = capsys.readouterr().out
         assert "skipping template generation" in output
+
+
+class TestInitClaudeTemplate:
+    @pytest.fixture(autouse=True)
+    def _allow_init(self):
+        with patch("repo_tools.init._is_local_venv", return_value=True):
+            yield
+
+    @patch("repo_tools._bootstrap.subprocess.run")
+    @patch("repo_tools._bootstrap.find_uv", return_value="/bin/uv")
+    def test_generates_claude_md_when_absent(self, _uv, mock_run, init_ctx):
+        mock_run.return_value = MagicMock(returncode=0)
+        tool = InitTool()
+        tool.execute(init_ctx, {})
+
+        claude_path = init_ctx.workspace_root / "CLAUDE.md"
+        assert claude_path.exists()
+        content = claude_path.read_text(encoding="utf-8")
+        assert "## Repo tooling" in content
+        assert "./repo" in content
+
+    @patch("repo_tools._bootstrap.subprocess.run")
+    @patch("repo_tools._bootstrap.find_uv", return_value="/bin/uv")
+    def test_appends_to_existing_claude_md(self, _uv, mock_run, init_ctx):
+        mock_run.return_value = MagicMock(returncode=0)
+        claude_path = init_ctx.workspace_root / "CLAUDE.md"
+        claude_path.write_text("# My Project\n\nCustom instructions.\n")
+
+        tool = InitTool()
+        tool.execute(init_ctx, {})
+
+        content = claude_path.read_text(encoding="utf-8")
+        assert content.startswith("# My Project\n")
+        assert "Custom instructions." in content
+        assert "## Repo tooling" in content
+
+    @patch("repo_tools._bootstrap.subprocess.run")
+    @patch("repo_tools._bootstrap.find_uv", return_value="/bin/uv")
+    def test_skips_when_section_present(self, _uv, mock_run, init_ctx, capsys):
+        mock_run.return_value = MagicMock(returncode=0)
+        claude_path = init_ctx.workspace_root / "CLAUDE.md"
+        claude_path.write_text("## Repo tooling\n\nAlready here.\n")
+
+        tool = InitTool()
+        tool.execute(init_ctx, {})
+
+        content = claude_path.read_text(encoding="utf-8")
+        assert content == "## Repo tooling\n\nAlready here.\n"
+        output = capsys.readouterr().out
+        assert "skipping" in output
+
+    @patch("repo_tools._bootstrap.subprocess.run")
+    @patch("repo_tools._bootstrap.find_uv", return_value="/bin/uv")
+    def test_uses_relative_framework_path(self, _uv, mock_run, init_ctx):
+        mock_run.return_value = MagicMock(returncode=0)
+        tool = InitTool()
+        tool.execute(init_ctx, {})
+
+        content = (init_ctx.workspace_root / "CLAUDE.md").read_text(encoding="utf-8")
+        # fw_root is tmp_path/framework, ws is tmp_path/project → ../framework
+        assert "../framework" in content
+        assert "\\" not in content

@@ -93,6 +93,7 @@ class InitTool(RepoTool):
 
         self._generate_config_template(ctx.workspace_root, framework_root)
         self._generate_ci_template(ctx.workspace_root)
+        self._generate_claude_template(ctx.workspace_root, framework_root)
 
     @staticmethod
     def _generate_config_template(workspace_root: Path, framework_root: Path) -> None:
@@ -137,6 +138,28 @@ class InitTool(RepoTool):
         ci_path.parent.mkdir(parents=True, exist_ok=True)
         ci_path.write_text(_CI_TEMPLATE, encoding="utf-8")
         print("Generated CI template: .github/workflows/ci.yml")
+
+    @staticmethod
+    def _generate_claude_template(workspace_root: Path, framework_root: Path) -> None:
+        claude_path = workspace_root / "CLAUDE.md"
+        framework_rel = os.path.relpath(
+            str(framework_root), str(workspace_root),
+        ).replace("\\", "/")
+        section = _CLAUDE_TEMPLATE.format(framework_rel=framework_rel)
+
+        if not claude_path.exists():
+            claude_path.write_text(section, encoding="utf-8")
+            print("Generated CLAUDE.md with repokit section")
+            return
+
+        existing = claude_path.read_text(encoding="utf-8")
+        if "## Repo tooling" in existing:
+            print("CLAUDE.md already has repokit section, skipping")
+            return
+
+        separator = "" if existing.endswith("\n") else "\n"
+        claude_path.write_text(existing + separator + "\n" + section, encoding="utf-8")
+        print("Appended repokit section to CLAUDE.md")
 
     @staticmethod
     def _clean(framework_root: Path) -> None:
@@ -206,4 +229,29 @@ jobs:
 
       - name: Test
         run: ./repo test
+"""
+
+_CLAUDE_TEMPLATE = """\
+## Repo tooling
+
+This project uses [repokit]({framework_rel}/README.md) for general project tooling (e.g. build, test, format).
+
+- **CLI**: `./repo <command>` (or `repo.cmd` on Windows). Run `./repo --help` to discover commands.
+- **Config**: `config.yaml` at the project root.
+- **Framework path**: `{framework_rel}/`
+
+### Contributing to the framework
+1. `cd {framework_rel} && git fetch origin && git switch main && git pull --ff-only origin main`
+2. Make changes, bump the version in `pyproject.toml`, add a `CHANGELOG.md` entry
+3. Commit, push, and wait for CI to pass
+4. Back in this project: `cd {framework_rel} && git checkout v<new-version>`
+5. Commit the submodule pointer update
+
+### Do not edit
+
+These paths are generated or managed by the framework:
+
+- `{framework_rel}/` — contribute upstream instead
+- `{framework_rel}/_managed/` — generated venv, lockfile, pyproject
+- `repo`, `repo.cmd`, `repo.ps1` — generated CLI shims
 """
