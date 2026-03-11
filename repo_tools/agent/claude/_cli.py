@@ -150,8 +150,8 @@ def _write_plugin(
             "args": repo_cmd_args,
         }
 
-    # Dispatch tool — orchestrator only (role is None for interactive sessions)
-    if role is None:
+    # Dispatch tool — orchestrator only
+    if role in (None, "orchestrator"):
         mcp_config["mcpServers"]["dispatch"] = {
             "type": "stdio",
             "command": posix_path(sys.executable),

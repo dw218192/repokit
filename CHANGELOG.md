@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.9
+
+- **Agent**: Fix dispatch MCP server not registered in CLI backend — `_write_plugin()` checked `role is None` but `run_interactive()` passes `role="orchestrator"`, so the dispatch tool was never added to `.mcp.json`
+
 ## 0.7.8
 
 - **Init**: Skip CI template generation if any workflow already exists in `.github/workflows/`, not just `ci.yml`

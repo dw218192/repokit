@@ -312,6 +312,31 @@ class TestWritePlugin:
         pre_tool = hooks["hooks"]["PreToolUse"]
         assert len(pre_tool) == 1  # Only the Bash hook
 
+    def test_dispatch_in_orchestrator_mcp_config(self, tmp_path):
+        """Dispatch server is included for orchestrator role."""
+        plugin_dir = tmp_path / "plugin"
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        _write_plugin(plugin_dir, rules, tmp_path, role="orchestrator")
+
+        mcp = json.loads((plugin_dir / ".mcp.json").read_text())
+        assert "dispatch" in mcp["mcpServers"]
+        dispatch_args = mcp["mcpServers"]["dispatch"]["args"]
+        assert "-m" in dispatch_args
+        assert "repo_tools.agent.mcp.dispatch" in dispatch_args
+
+    def test_dispatch_not_in_worker_mcp_config(self, tmp_path):
+        """Dispatch server is NOT included for worker role."""
+        plugin_dir = tmp_path / "plugin"
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        _write_plugin(plugin_dir, rules, tmp_path, role="worker")
+
+        mcp = json.loads((plugin_dir / ".mcp.json").read_text())
+        assert "dispatch" not in mcp["mcpServers"]
+
     def test_registered_tools_in_mcp_config(self, tmp_path):
         """Registered RepoTool subclasses appear in .mcp.json repo_cmd server."""
         plugin_dir = tmp_path / "plugin"
