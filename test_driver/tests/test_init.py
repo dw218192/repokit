@@ -655,22 +655,20 @@ class TestInitCITemplate:
 
     @patch("repo_tools._bootstrap.subprocess.run")
     @patch("repo_tools._bootstrap.find_uv", return_value="/bin/uv")
-    def test_skips_ci_when_workflow_exists(self, _uv, mock_run, init_ctx, capsys):
+    def test_skips_ci_when_any_workflow_exists(self, _uv, mock_run, init_ctx, capsys):
         mock_run.return_value = MagicMock(returncode=0)
-        # Pre-create the CI workflow file
+        # Pre-create a different workflow file
         ci_dir = init_ctx.workspace_root / ".github" / "workflows"
         ci_dir.mkdir(parents=True, exist_ok=True)
-        (ci_dir / "ci.yml").write_text("existing: content\n")
+        (ci_dir / "build.yml").write_text("name: Build\n")
 
         tool = InitTool()
         tool.execute(init_ctx, {})
 
-        # File should still have original content (not overwritten)
-        content = (ci_dir / "ci.yml").read_text()
-        assert content == "existing: content\n"
-        # Should report skipping
+        # ci.yml should not be created
+        assert not (ci_dir / "ci.yml").exists()
         output = capsys.readouterr().out
-        assert "skipping template generation" in output
+        assert "skipping CI template" in output
 
 
 class TestInitClaudeTemplate:

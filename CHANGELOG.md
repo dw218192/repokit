@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.8
+
+- **Init**: Skip CI template generation if any workflow already exists in `.github/workflows/`, not just `ci.yml`
+
 ## 0.7.7
 
 - **Init**: Generate `CLAUDE.md` with repokit section on `repo init` — creates the file if absent, appends if it exists without a `## Repo tooling` section, skips if already present

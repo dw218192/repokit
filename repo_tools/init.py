@@ -131,10 +131,11 @@ class InitTool(RepoTool):
 
     @staticmethod
     def _generate_ci_template(workspace_root: Path) -> None:
-        ci_path = workspace_root / ".github" / "workflows" / "ci.yml"
-        if ci_path.exists():
-            print("CI workflow found: .github/workflows/ci.yml, skipping template generation")
+        workflows_dir = workspace_root / ".github" / "workflows"
+        if workflows_dir.is_dir() and any(workflows_dir.iterdir()):
+            print("GitHub workflows found, skipping CI template generation")
             return
+        ci_path = workflows_dir / "ci.yml"
         ci_path.parent.mkdir(parents=True, exist_ok=True)
         ci_path.write_text(_CI_TEMPLATE, encoding="utf-8")
         print("Generated CI template: .github/workflows/ci.yml")
