@@ -11,7 +11,7 @@ default_reason = "try another approach"
 
 [[deny]]
 name = "agent_dir"
-patterns = ["\\b_agent[/\\\\]"]
+patterns = ["\\b_agent[/\\\\](?!worktrees[/\\\\])"]
 roles = ["worker", "reviewer"]
 reason = "subagents cannot modify _agent/ — relay updates to the orchestrator via the send_message MCP tool"
 

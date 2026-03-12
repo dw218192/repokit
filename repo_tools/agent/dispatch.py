@@ -44,6 +44,13 @@ TOOL_SCHEMA: dict[str, Any] = {
                     "Allows dispatching into a different project directory."
                 ),
             },
+            "timeout": {
+                "type": "number",
+                "description": (
+                    "Timeout in seconds for the agent subprocess. "
+                    "Defaults to no timeout (agent runs until completion)."
+                ),
+            },
         },
         "required": ["ticket_id", "role"],
     },
@@ -64,6 +71,9 @@ def call_dispatch(
     ticket_id = (args.get("ticket_id") or "").strip()
     branch = (args.get("branch") or "").strip() or None
     project_dir = (args.get("project_dir") or "").strip() or None
+    timeout = args.get("timeout")
+    if timeout is not None:
+        timeout = float(timeout)
 
     if role not in ("worker", "reviewer"):
         return {"isError": True, "text": f"Invalid role: {role!r}. Must be 'worker' or 'reviewer'."}
@@ -81,7 +91,12 @@ def call_dispatch(
         cmd.extend(["--branch", branch])
 
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True)
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True,
+            stdin=subprocess.DEVNULL, timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return {"isError": True, "text": f"Agent timed out after {timeout}s."}
     except OSError as exc:
         return {"isError": True, "text": f"Failed to launch agent: {exc}"}
 

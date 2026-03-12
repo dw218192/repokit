@@ -68,7 +68,8 @@ def _call_ruff_check(
 
     try:
         proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=120,
+            cmd, capture_output=True, text=True,
+            stdin=subprocess.DEVNULL, timeout=120,
         )
     except subprocess.TimeoutExpired:
         return {"isError": True, "text": "ruff check timed out."}
@@ -113,7 +114,8 @@ def _call_clang_tidy(path: str) -> dict[str, Any]:
 
     try:
         proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=120,
+            cmd, capture_output=True, text=True,
+            stdin=subprocess.DEVNULL, timeout=120,
         )
     except subprocess.TimeoutExpired:
         return {"isError": True, "text": "clang-tidy timed out."}

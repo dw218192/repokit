@@ -43,6 +43,7 @@ def check_installed() -> bool:
                 ["wsl", "bash", "-lc", "command -v coderabbit"],
                 capture_output=True,
                 text=True,
+                stdin=subprocess.DEVNULL,
                 timeout=10,
             )
             return result.returncode == 0
@@ -129,6 +130,7 @@ def call_review(args: dict[str, Any], *, logger: Any = None) -> dict[str, Any]:
             coderabbit_cmd("auth", "status"),
             capture_output=True,
             text=True,
+            stdin=subprocess.DEVNULL,
             timeout=10,
         )
     except (OSError, subprocess.SubprocessError) as exc:
@@ -145,6 +147,7 @@ def call_review(args: dict[str, Any], *, logger: Any = None) -> dict[str, Any]:
             coderabbit_cmd("review", "--plain", "--type", review_type),
             capture_output=True,
             text=True,
+            stdin=subprocess.DEVNULL,
             cwd=worktree_path,
             timeout=120,
         )

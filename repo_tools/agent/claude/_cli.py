@@ -274,6 +274,7 @@ class CliBackend:
         env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
         proc = subprocess.run(
             cmd, capture_output=True, text=True,
+            stdin=subprocess.DEVNULL,
             cwd=str(cwd) if cwd else None,
             env=env,
         )

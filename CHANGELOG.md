@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.11
+
+- **Agent**: Fix allowlist deny rule blocking workers from their own worktrees — `_agent/worktrees/` paths are now exempted via negative lookahead
+- **Agent**: Add `stdin=subprocess.DEVNULL` to all subprocess calls in MCP handlers and CLI backend to prevent stdin inheritance from corrupting the MCP protocol stream
+- **Agent**: Add optional `timeout` parameter to `dispatch_agent` MCP tool (defaults to no timeout)
+
 ## 0.7.10
 
 - **CI**: Fix publish step failing due to dirty working tree — `repo init` generates `CLAUDE.md` during bootstrap, `git restore .` before publish
