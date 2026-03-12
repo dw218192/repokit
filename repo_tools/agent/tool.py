@@ -109,7 +109,7 @@ def _has_reviewable_changes(workspace_root: Path) -> bool:
     # Check uncommitted changes (staged + unstaged)
     diff = subprocess.run(
         ["git", "diff", "HEAD", "--quiet"],
-        cwd=cwd, capture_output=True,
+        cwd=cwd, capture_output=True, stdin=subprocess.DEVNULL,
     )
     if diff.returncode != 0:
         return True
@@ -117,7 +117,7 @@ def _has_reviewable_changes(workspace_root: Path) -> bool:
     # Check untracked files
     untracked = subprocess.run(
         ["git", "ls-files", "--others", "--exclude-standard"],
-        cwd=cwd, capture_output=True, text=True,
+        cwd=cwd, capture_output=True, text=True, stdin=subprocess.DEVNULL,
     )
     if untracked.stdout.strip():
         return True
@@ -126,7 +126,7 @@ def _has_reviewable_changes(workspace_root: Path) -> bool:
     for base in ("main", "master"):
         log = subprocess.run(
             ["git", "log", f"{base}..HEAD", "--oneline", "-1"],
-            cwd=cwd, capture_output=True, text=True,
+            cwd=cwd, capture_output=True, text=True, stdin=subprocess.DEVNULL,
         )
         if log.returncode == 0 and log.stdout.strip():
             return True

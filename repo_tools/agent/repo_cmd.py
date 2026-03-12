@@ -74,6 +74,7 @@ def call_repo_run(
     try:
         proc = subprocess.run(
             cmd, capture_output=True, text=True,
+            stdin=subprocess.DEVNULL,
             timeout=300, cwd=str(workspace_root),
         )
     except subprocess.TimeoutExpired:
