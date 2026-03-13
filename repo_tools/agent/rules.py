@@ -87,17 +87,36 @@ def _compile_rule_list(entries: list, section: str, role: str | None = None) -> 
     return rules
 
 
-def load_rules(path: Path, role: str | None = None) -> RuleSet:
+def load_rules(
+    path: Path,
+    role: str | None = None,
+    extra_paths: list[Path] | None = None,
+) -> RuleSet:
     """Parse a TOML rules file into a :class:`RuleSet`.
 
     When *role* is given, rules with a ``roles`` restriction that excludes
     *role* are omitted from the returned :class:`RuleSet`.
+
+    When *extra_paths* is given, each file is loaded and its ``[[allow]]``
+    and ``[[deny]]`` sections are appended to the base rule set.  This
+    lets projects extend the default allowlist without replacing it.
     """
     data = tomllib.loads(path.read_text(encoding="utf-8"))
+    deny_entries = list(data.get("deny", []))
+    allow_entries = list(data.get("allow", []))
+
+    for extra in extra_paths or []:
+        if not extra.exists():
+            logger.warning("Extra rules file not found, skipping: %s", extra)
+            continue
+        extra_data = tomllib.loads(extra.read_text(encoding="utf-8"))
+        deny_entries.extend(extra_data.get("deny", []))
+        allow_entries.extend(extra_data.get("allow", []))
+
     return RuleSet(
         default_reason=data.get("default_reason", "try another approach"),
-        deny=_compile_rule_list(data.get("deny", []), "deny", role=role),
-        allow=_compile_rule_list(data.get("allow", []), "allow", role=role),
+        deny=_compile_rule_list(deny_entries, "deny", role=role),
+        allow=_compile_rule_list(allow_entries, "allow", role=role),
     )
 
 

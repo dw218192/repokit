@@ -29,6 +29,7 @@ def _write_plugin(
     tool_config: dict | None = None,
     project_config: dict | None = None,
     agent_cwd: Path | None = None,
+    extra_rules_paths: list[Path] | None = None,
 ) -> None:
     """Write a Claude Code plugin directory with hooks and MCP config.
 
@@ -60,6 +61,8 @@ def _write_plugin(
         "--rules", rules_path.as_posix(),
         "--project-root", effective_cwd.as_posix(),
     ]
+    for extra in (extra_rules_paths or []):
+        check_bash_args.extend(["--extra-rules", extra.as_posix()])
     if role:
         check_bash_args.extend(["--role", role])
     check_bash_args.extend(["--debug-log", debug_log.as_posix()])
@@ -219,6 +222,7 @@ class CliBackend:
         role: str | None = None,
         role_prompt: str | None = None,
         rules_path: Path | None = None,
+        extra_rules_paths: list[Path] | None = None,
         project_root: Path | None = None,
         tool_config: dict | None = None,
         project_config: dict | None = None,
@@ -253,6 +257,7 @@ class CliBackend:
                 role=role, tool_config=config,
                 project_config=project_config,
                 agent_cwd=agent_cwd,
+                extra_rules_paths=extra_rules_paths,
             )
             cmd.extend(["--plugin-dir", str(plugin_dir)])
         else:
@@ -277,6 +282,7 @@ class CliBackend:
         role: str,
         role_prompt: str | None = None,
         rules_path: Path | None = None,
+        extra_rules_paths: list[Path] | None = None,
         project_root: Path | None = None,
         tool_config: dict | None = None,
         project_config: dict | None = None,
@@ -285,7 +291,8 @@ class CliBackend:
         """Run a headless agent session. Returns (stdout, returncode)."""
         cmd = self._build_command(
             prompt=prompt, role=role, role_prompt=role_prompt,
-            rules_path=rules_path, project_root=project_root,
+            rules_path=rules_path, extra_rules_paths=extra_rules_paths,
+            project_root=project_root,
             tool_config=tool_config, project_config=project_config,
             agent_cwd=Path(cwd) if cwd else None,
         )
@@ -306,6 +313,7 @@ class CliBackend:
         *,
         role_prompt: str | None = None,
         rules_path: Path | None = None,
+        extra_rules_paths: list[Path] | None = None,
         project_root: Path | None = None,
         tool_config: dict | None = None,
         project_config: dict | None = None,
@@ -316,7 +324,8 @@ class CliBackend:
         """Run an interactive agent session. Returns (exit_code, session_id)."""
         cmd = self._build_command(
             role="orchestrator", role_prompt=role_prompt,
-            rules_path=rules_path, project_root=project_root,
+            rules_path=rules_path, extra_rules_paths=extra_rules_paths,
+            project_root=project_root,
             tool_config=tool_config, project_config=project_config,
             agent_cwd=Path(cwd) if cwd else None,
         )

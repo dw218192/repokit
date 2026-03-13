@@ -62,6 +62,7 @@ def _check_file_path(file_path_str: str, project_root: Path, tool_name_hint: str
 def main() -> None:
     parser = argparse.ArgumentParser(description="Check Bash commands against agent rules.")
     parser.add_argument("--rules", required=False, default=None, help="Path to rules.toml")
+    parser.add_argument("--extra-rules", action="append", default=[], help="Extra rules files to merge (may be repeated)")
     parser.add_argument("--project-root", default=None, help="Project root for dir constraints")
     parser.add_argument("--debug-log", default=None, help="Append hook decisions to this file")
     parser.add_argument("--role", default=None, help="Agent role for role-specific rule filtering")
@@ -90,7 +91,8 @@ def main() -> None:
                 sys.exit(2)
             command = event.get("tool_input", {}).get("command", "")
             cwd = Path(event.get("cwd", "."))
-            rules = load_rules(rules_path, role=args.role)
+            extra = [Path(p) for p in args.extra_rules]
+            rules = load_rules(rules_path, role=args.role, extra_paths=extra)
             allowed, reason = check_command(command, rules, project_root=project_root, cwd=cwd)
     except Exception as exc:
         print(f"check_bash error: {exc}", file=sys.stderr)

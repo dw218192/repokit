@@ -17,7 +17,10 @@ if TYPE_CHECKING:
 
 
 def _make_check_bash_hook(
-    rules_path: Path, project_root: Path, role: str | None,
+    rules_path: Path,
+    project_root: Path,
+    role: str | None,
+    extra_rules_paths: list[Path] | None = None,
 ):
     """Create a PreToolUse hook that checks Bash commands against the rules file."""
 
@@ -27,7 +30,7 @@ def _make_check_bash_hook(
         command = input_data.get("tool_input", {}).get("command", "")
         cwd = Path(input_data.get("cwd", "."))
 
-        rules = load_rules(rules_path, role=role)
+        rules = load_rules(rules_path, role=role, extra_paths=extra_rules_paths)
         allowed, reason = check_command(
             command, rules, project_root=project_root, cwd=cwd,
         )

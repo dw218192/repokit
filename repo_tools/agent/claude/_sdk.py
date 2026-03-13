@@ -253,6 +253,7 @@ class SdkBackend:
         role: str | None = None,
         role_prompt: str | None = None,
         rules_path: Path | None = None,
+        extra_rules_paths: list[Path] | None = None,
         project_root: Path | None = None,
         tool_config: dict | None = None,
         project_config: dict | None = None,
@@ -310,7 +311,7 @@ class SdkBackend:
                     HookMatcher(
                         matcher="Bash",
                         hooks=[
-                            _make_check_bash_hook(rules_path, project_root, role),
+                            _make_check_bash_hook(rules_path, project_root, role, extra_rules_paths),
                         ],
                     ),
                 ],
@@ -375,6 +376,7 @@ class SdkBackend:
         role: str,
         role_prompt: str | None = None,
         rules_path: Path | None = None,
+        extra_rules_paths: list[Path] | None = None,
         project_root: Path | None = None,
         tool_config: dict | None = None,
         project_config: dict | None = None,
@@ -383,7 +385,8 @@ class SdkBackend:
         """Run a headless agent session. Returns (stdout_json, returncode)."""
         options, _meta = self._build_options(
             role=role, role_prompt=role_prompt,
-            rules_path=rules_path, project_root=project_root,
+            rules_path=rules_path, extra_rules_paths=extra_rules_paths,
+            project_root=project_root,
             tool_config=tool_config, project_config=project_config,
             cwd=cwd, headless=True,
         )
@@ -398,6 +401,7 @@ class SdkBackend:
         *,
         role_prompt: str | None = None,
         rules_path: Path | None = None,
+        extra_rules_paths: list[Path] | None = None,
         project_root: Path | None = None,
         tool_config: dict | None = None,
         project_config: dict | None = None,
@@ -408,7 +412,8 @@ class SdkBackend:
         """Run an interactive agent session. Returns (exit_code, session_id)."""
         options, tools_meta = self._build_options(
             role="orchestrator", role_prompt=role_prompt,
-            rules_path=rules_path, project_root=project_root,
+            rules_path=rules_path, extra_rules_paths=extra_rules_paths,
+            project_root=project_root,
             tool_config=tool_config, project_config=project_config,
             cwd=cwd, headless=False,
         )

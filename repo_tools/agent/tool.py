@@ -76,6 +76,18 @@ def _find_rules_file(workspace_root: Path, configured: str | None = None) -> Pat
     return Path(__file__).parent / "allowlist_default.toml"
 
 
+def _find_extra_rules(workspace_root: Path, config: dict) -> list[Path]:
+    """Find project-level allowlist extensions from ``agent.allowlist_extra``."""
+    extra_file = config.get("agent", {}).get("allowlist_extra")
+    if not extra_file:
+        return []
+    candidate = workspace_root / extra_file
+    if candidate.exists():
+        return [candidate]
+    logger.warning("Extra allowlist file not found: %s", candidate)
+    return []
+
+
 def _render_role_prompt(role: str, **kwargs: str) -> str:
     """Load prompt template for a role and format placeholders.
 
@@ -363,6 +375,7 @@ def _agent_run(tool_ctx: ToolContext, args: dict[str, Any]) -> str | None:
         tool_ctx.workspace_root,
         configured=args.get("allowlist"),
     )
+    extra_rules_paths = _find_extra_rules(tool_ctx.workspace_root, tool_ctx.config)
 
     # Headless roles (worker/reviewer) always use CLI backend — the SDK
     # backend launches an in-process Claude Code session which cannot run
@@ -385,6 +398,7 @@ def _agent_run(tool_ctx: ToolContext, args: dict[str, Any]) -> str | None:
         interactive_kwargs = dict(
             role_prompt=role_prompt,
             rules_path=rules_path,
+            extra_rules_paths=extra_rules_paths,
             project_root=tool_ctx.workspace_root,
             tool_config=args,
             project_config=tool_ctx.config,
@@ -427,6 +441,7 @@ def _agent_run(tool_ctx: ToolContext, args: dict[str, Any]) -> str | None:
         role=role,
         role_prompt=role_prompt,
         rules_path=rules_path,
+        extra_rules_paths=extra_rules_paths,
         project_root=tool_ctx.workspace_root,
         tool_config=args,
         project_config=tool_ctx.config,
