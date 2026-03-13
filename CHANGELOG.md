@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.13
+
+- **Agent**: Support project-level allowlist extensions via `agent.allowlist_extra` in `config.yaml` — extra TOML files are merged with the framework default allowlist, allowing projects to add allow/deny rules without replacing the base set
+- **Agent**: Add `--extra-rules` flag to `check_bash` hook for passing additional rule files
+
 ## 0.7.12
 
 - **Agent**: Confine Write/Edit tools to worktree root via `check_bash` hook -- workers dispatched into worktrees are blocked from writing to the main repo or other paths outside their worktree (temp dir still allowed)
