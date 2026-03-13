@@ -28,6 +28,7 @@ def _write_plugin(
     role: str | None = None,
     tool_config: dict | None = None,
     project_config: dict | None = None,
+    agent_cwd: Path | None = None,
 ) -> None:
     """Write a Claude Code plugin directory with hooks and MCP config.
 
@@ -50,13 +51,14 @@ def _write_plugin(
 
     # -- hooks --
     config = tool_config or {}
+    effective_cwd = agent_cwd or project_root
     debug_log = project_root / "_agent" / "hooks.log"
     base_cmd = [posix_path(sys.executable), "-m", "repo_tools.agent.hooks"]
 
     check_bash_args = [
         *base_cmd, "check_bash",
         "--rules", rules_path.as_posix(),
-        "--project-root", project_root.as_posix(),
+        "--project-root", effective_cwd.as_posix(),
     ]
     if role:
         check_bash_args.extend(["--role", role])
@@ -80,6 +82,20 @@ def _write_plugin(
             }
         ],
     }
+
+    # Confine Write/Edit to the worktree when agent_cwd differs from project_root
+    if agent_cwd is not None and agent_cwd.resolve() != project_root.resolve():
+        check_write_args = [
+            *base_cmd, "check_bash",
+            "--project-root", effective_cwd.as_posix(),
+            "--debug-log", debug_log.as_posix(),
+        ]
+        check_write_cmd = shlex.join(check_write_args)
+        for tool in ("Write", "Edit"):
+            hook_events["PreToolUse"].append({
+                "matcher": tool,
+                "hooks": [{"type": "command", "command": check_write_cmd}],
+            })
 
     # Human ticket review hook
     if bool(config.get("agent", config).get("human_ticket_review")):
@@ -206,6 +222,7 @@ class CliBackend:
         project_root: Path | None = None,
         tool_config: dict | None = None,
         project_config: dict | None = None,
+        agent_cwd: Path | None = None,
     ) -> list[str]:
         """Build a ``claude`` CLI command list."""
         config = tool_config or {}
@@ -235,6 +252,7 @@ class CliBackend:
                 plugin_dir, rules_path, project_root,
                 role=role, tool_config=config,
                 project_config=project_config,
+                agent_cwd=agent_cwd,
             )
             cmd.extend(["--plugin-dir", str(plugin_dir)])
         else:
@@ -269,6 +287,7 @@ class CliBackend:
             prompt=prompt, role=role, role_prompt=role_prompt,
             rules_path=rules_path, project_root=project_root,
             tool_config=tool_config, project_config=project_config,
+            agent_cwd=Path(cwd) if cwd else None,
         )
         logger.info(f"CLI headless: {cmd[0]} (role={role})")
         env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
@@ -299,6 +318,7 @@ class CliBackend:
             role="orchestrator", role_prompt=role_prompt,
             rules_path=rules_path, project_root=project_root,
             tool_config=tool_config, project_config=project_config,
+            agent_cwd=Path(cwd) if cwd else None,
         )
         if resume:
             cmd.extend(["--resume", resume])

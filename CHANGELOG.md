@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.12
+
+- **Agent**: Confine Write/Edit tools to worktree root via `check_bash` hook -- workers dispatched into worktrees are blocked from writing to the main repo or other paths outside their worktree (temp dir still allowed)
+- **Agent**: Thread `agent_cwd` through CLI backend so `--project-root` for hooks points to the worktree, not the main repo
+
 ## 0.7.11
 
 - **Agent**: Fix allowlist deny rule blocking workers from their own worktrees — `_agent/worktrees/` paths are now exempted via negative lookahead
