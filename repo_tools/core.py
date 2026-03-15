@@ -781,12 +781,19 @@ class ShellCommand:
             if not script.suffix:
                 script = script.with_suffix(".bat" if is_windows() else ".sh")
             self._env_script = script
+            # Auto-sanitize when sourcing an env script — the script sets
+            # up the correct PATH for external tools, so strip the venv's
+            # Python contamination to avoid DLL/PATH conflicts.
+            sanitized = sanitized_subprocess_env()
+            if env:
+                sanitized.update(env)
+            self._env = {**os.environ, **sanitized}
             if is_windows():
                 cmd_str = subprocess.list2cmdline(cmd)
-                self._cmd = f'call "{script}" >nul 2>&1 && {cmd_str}'
+                self._cmd = f'call "{script}" >nul && {cmd_str}'
             else:
                 cmd_str = shlex.join(cmd)
-                self._cmd = f'. "{script}" >/dev/null 2>&1 && {cmd_str}'
+                self._cmd = f'. "{script}" >/dev/null && {cmd_str}'
             self._shell = True
 
     def run(self, **kwargs: Any) -> subprocess.CompletedProcess:
