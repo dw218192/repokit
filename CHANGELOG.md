@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.14
+
+- **ShellCommand**: Auto-sanitize subprocess environment when an `env_script` is provided — `sanitized_subprocess_env()` is applied automatically to strip venv PATH/PYTHONPATH/PYTHONHOME contamination from external tool invocations. Previously each caller had to remember to pass `env=sanitized_subprocess_env()`, and forgetting caused silent crashes (e.g. slangc exit 255). Only applied when `env_script` is set (external tools), not for internal Python subprocess calls.
+- **ShellCommand**: Stop silencing env script stderr — changed `>nul 2>&1` to `>nul` (Windows) and `>/dev/null 2>&1` to `>/dev/null` (Unix) so that errors from `vcvarsall.bat` or other env scripts are visible instead of silently swallowed.
+
 ## 0.7.13
 
 - **Agent**: Support project-level allowlist extensions via `agent.allowlist_extra` in `config.yaml` — extra TOML files are merged with the framework default allowlist, allowing projects to add allow/deny rules without replacing the base set
