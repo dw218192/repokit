@@ -15,6 +15,7 @@ import click
 from .core import (
     RepoTool,
     ToolContext,
+    _resolve_cfg_reference,
     load_config,
     logger,
     register_tool,
@@ -140,6 +141,8 @@ def _build_tool_context(ctx_obj: dict[str, Any], tool_name: str) -> ToolContext:
     """Build a ToolContext from the click context obj dict."""
     config = ctx_obj["config"]
     tool_config = config.get(tool_name, {})
+    if isinstance(tool_config, str):
+        tool_config = _resolve_cfg_reference(tool_config, config)
     if not isinstance(tool_config, dict):
         tool_config = {}
     tool_config = resolve_tool_config(tool_config, ctx_obj["tokens"], config)

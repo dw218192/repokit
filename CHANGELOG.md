@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.16
+
+- **Core**: Add `_resolve_cfg_reference()` — tool config sections can now be `{cfg:dotted.path}` strings that resolve to another config dict. Enables prebuild tools to alias their config (e.g. `slangc: "{cfg:build.prebuild.slangc}"`).
+- **Clean**: Add named groups — config `groups:` dict maps group names to path lists. `./repo clean <group>` cleans only that group; no args cleans all.
+- **Clean**: Add `re:` prefix for regex patterns — entries starting with `re:` are matched as regex against relative paths (walked via `os.walk`), while plain entries use glob. Enables precise exclusion without a separate `exclude` config.
+- **Clean**: Protect `_agent` directory — added to `PROTECTED` set alongside `.git` to prevent accidental deletion of worktrees, tickets, and session data.
+
 ## 0.7.15
 
 - **Agent**: Add `merged` ticket state between `verify` and `closed` — reviewer transitions `verify → merged` which auto-merges the worktree branch into the base branch, removes the worktree, and deletes the branch. Orchestrator then confirms integration (`merged → closed`) or reopens (`merged → todo`).

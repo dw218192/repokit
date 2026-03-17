@@ -566,6 +566,20 @@ def registered_tool_deps() -> list[str]:
     return sorted(seen)
 
 
+def _resolve_cfg_reference(value: str, config: dict[str, Any]) -> Any:
+    """If *value* is a ``{cfg:dotted.path}`` reference, walk *config* and return the leaf."""
+    stripped = value.strip()
+    if not (stripped.startswith("{cfg:") and stripped.endswith("}")):
+        return value
+    path = stripped[5:-1]
+    current: Any = config
+    for part in path.split("."):
+        if not isinstance(current, dict) or part not in current:
+            return {}
+        current = current[part]
+    return current
+
+
 def invoke_tool(
     name: str,
     tokens: dict[str, str],
@@ -579,6 +593,8 @@ def invoke_tool(
         raise KeyError(f"Tool '{name}' is not registered.")
 
     tool_config = config.get(name, {})
+    if isinstance(tool_config, str):
+        tool_config = _resolve_cfg_reference(tool_config, config)
     if not isinstance(tool_config, dict):
         tool_config = {}
     tool_config = resolve_tool_config(tool_config, tokens, config)
