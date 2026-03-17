@@ -143,7 +143,7 @@ class TestLifecycleGating:
         with patch("repo_tools.agent.tool._backend") as mock_backend:
             mock_backend.run_headless.return_value = (
                 _claude_envelope({
-                    "ticket_id": "G1_1", "status": "closed",
+                    "ticket_id": "G1_1", "status": "merged",
                     "result": "pass", "feedback": "All good",
                 }),
                 0,
@@ -299,7 +299,7 @@ class TestAgentRunHeadless:
 
         mock_backend.run_headless.return_value = (
             _claude_envelope({
-                "ticket_id": "G1_1", "status": "closed",
+                "ticket_id": "G1_1", "status": "merged",
                 "result": "pass", "feedback": "All tests passing",
                 "criteria": [True, True],
             }),
@@ -311,7 +311,7 @@ class TestAgentRunHeadless:
         data = json.loads(
             (tool_ctx.workspace_root / "_agent" / "tickets" / "G1_1.json").read_text()
         )
-        assert data["ticket"]["status"] == "closed"
+        assert data["ticket"]["status"] == "merged"
         assert data["review"]["result"] == "pass"
         assert data["review"]["feedback"] == "All tests passing"
         assert all(c["met"] for c in data["criteria"])
@@ -351,7 +351,7 @@ class TestAgentRunHeadless:
 
         mock_backend.run_headless.return_value = (
             _claude_envelope({
-                "ticket_id": "G1_1", "status": "closed",
+                "ticket_id": "G1_1", "status": "merged",
                 "result": "fail", "feedback": "contradictory",
                 "criteria": [],
             }),
