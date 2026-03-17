@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.15
+
+- **Agent**: Add `merged` ticket state between `verify` and `closed` — reviewer transitions `verify → merged` which auto-merges the worktree branch into the base branch, removes the worktree, and deletes the branch. Orchestrator then confirms integration (`merged → closed`) or reopens (`merged → todo`).
+- **Agent**: Enforce clean worktree before verify — workers must commit all changes before transitioning to `verify`; the transition is rejected if the worktree has uncommitted changes.
+- **Agent**: Block manual worktree merges — `git merge worktree-*` is denied in the allowlist; worktree branches can only be merged via the ticket state machine.
+- **Agent**: Updated orchestrator, worker, and reviewer prompts to reflect the new lifecycle. Orchestrator prompt clarifies that small direct edits are allowed without tickets.
+
 ## 0.7.14
 
 - **ShellCommand**: Auto-sanitize subprocess environment when an `env_script` is provided — `sanitized_subprocess_env()` is applied automatically to strip venv PATH/PYTHONPATH/PYTHONHOME contamination from external tool invocations. Previously each caller had to remember to pass `env=sanitized_subprocess_env()`, and forgetting caused silent crashes (e.g. slangc exit 255). Only applied when `env_script` is set (external tools), not for internal Python subprocess calls.

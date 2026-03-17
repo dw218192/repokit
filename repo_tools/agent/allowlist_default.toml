@@ -32,6 +32,11 @@ commands = ["sudo", "su", "runas"]
 reason = "elevated privilege commands are not permitted"
 
 [[deny]]
+name = "worktree_merge"
+patterns = ['^git\s+merge\s+worktree-']
+reason = "worktree branches are merged automatically by the ticket lifecycle — use update_ticket to transition verify → merged"
+
+[[deny]]
 name = "git_rewrite"
 patterns = [
     'git\s+push\s.*--force',
