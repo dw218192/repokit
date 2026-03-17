@@ -26,7 +26,7 @@ OUTPUT_SCHEMAS: dict[str, dict] = {
         "type": "object",
         "properties": {
             "ticket_id": {"type": "string"},
-            "status": {"type": "string", "enum": ["closed", "todo"]},
+            "status": {"type": "string", "enum": ["merged", "todo"]},
             "result": {"type": "string", "enum": ["pass", "fail"]},
             "feedback": {"type": "string"},
             "criteria": {"type": "array", "items": {"type": "boolean"}},

@@ -175,8 +175,10 @@ class TestStatusTransitions:
         ("todo", "in_progress", "", True, "worker"),
         ("todo", "verify", "", True, "worker"),
         ("in_progress", "verify", "", True, "worker"),
-        ("verify", "closed", "pass", True, "reviewer"),
+        ("verify", "merged", "pass", True, "reviewer"),
         ("verify", "todo", "fail", True, "reviewer"),
+        ("merged", "closed", "pass", True, "orchestrator"),
+        ("merged", "todo", "pass", True, "orchestrator"),
     ])
     def test_valid_transitions(self, current, target, result, met, role):
         data = self._make_data(status=current, result=result, criteria_met=met)
@@ -184,8 +186,10 @@ class TestStatusTransitions:
 
     @pytest.mark.parametrize("current,target", [
         ("todo", "closed"),
+        ("todo", "merged"),
         ("in_progress", "todo"),
         ("in_progress", "closed"),
+        ("in_progress", "merged"),
         ("closed", "todo"),
         ("closed", "in_progress"),
         ("closed", "verify"),
@@ -196,15 +200,15 @@ class TestStatusTransitions:
         assert err is not None
         assert "invalid transition" in err
 
-    def test_close_requires_pass(self):
+    def test_merge_requires_pass(self):
         data = self._make_data(status="verify", result="fail", criteria_met=True)
-        err = _validate_transition("verify", "closed", data)
+        err = _validate_transition("verify", "merged", data)
         assert err is not None
         assert "review.result must be 'pass'" in err
 
-    def test_close_requires_criteria_met(self):
+    def test_merge_requires_criteria_met(self):
         data = self._make_data(status="verify", result="pass", criteria_met=False)
-        err = _validate_transition("verify", "closed", data)
+        err = _validate_transition("verify", "merged", data)
         assert err is not None
         assert "unmet criteria" in err
 
@@ -218,9 +222,9 @@ class TestStatusTransitions:
         _tool_create_ticket(project, {
             "id": "G1_1", "title": "t", "description": "d",
         })
-        # todo -> closed is not allowed
+        # todo -> merged is not allowed
         result = _tool_update_ticket(project, {
-            "ticket_id": "G1_1", "status": "closed",
+            "ticket_id": "G1_1", "status": "merged",
         })
         assert result.get("isError")
         assert "invalid transition" in result["text"]
@@ -242,15 +246,19 @@ class TestStatusTransitions:
             "criteria": ["c1"],
         })
         _advance_ticket(project, "G1_1", "verify")
-        # Mark criteria met and close via review pass
+        # Mark criteria met and merge via review pass
         path = project / "_agent" / "tickets" / "G1_1.json"
         data = json.loads(path.read_text(encoding="utf-8"))
         data["criteria"][0]["met"] = True
         path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
         _tool_update_ticket(project, {
-            "ticket_id": "G1_1", "status": "closed", "result": "pass",
+            "ticket_id": "G1_1", "status": "merged", "result": "pass",
         }, role="reviewer")
+        # Orchestrator closes
+        _tool_update_ticket(project, {
+            "ticket_id": "G1_1", "status": "closed",
+        }, role="orchestrator")
         # Now try to reopen — should fail
         result = _tool_update_ticket(project, {
             "ticket_id": "G1_1", "status": "todo",
@@ -258,27 +266,27 @@ class TestStatusTransitions:
         assert result.get("isError")
         assert "invalid transition" in result["text"]
 
-    def test_close_with_unmet_criteria_rejected(self, project):
-        """Cannot close a ticket when criteria are not met."""
+    def test_merge_with_unmet_criteria_rejected(self, project):
+        """Cannot merge a ticket when criteria are not met."""
         _tool_create_ticket(project, {
             "id": "G1_1", "title": "t", "description": "d",
             "criteria": ["c1"],
         })
         _advance_ticket(project, "G1_1", "verify")
         result = _tool_update_ticket(project, {
-            "ticket_id": "G1_1", "status": "closed", "result": "pass",
+            "ticket_id": "G1_1", "status": "merged", "result": "pass",
         })
         assert result.get("isError")
         assert "unmet criteria" in result["text"]
 
-    def test_close_without_pass_rejected(self, project):
-        """Cannot close a ticket without review.result == 'pass'."""
+    def test_merge_without_pass_rejected(self, project):
+        """Cannot merge a ticket without review.result == 'pass'."""
         _tool_create_ticket(project, {
             "id": "G1_1", "title": "t", "description": "d",
         })
         _advance_ticket(project, "G1_1", "verify")
         result = _tool_update_ticket(project, {
-            "ticket_id": "G1_1", "status": "closed",
+            "ticket_id": "G1_1", "status": "merged",
         })
         assert result.get("isError")
         assert "review.result must be 'pass'" in result["text"]
@@ -441,12 +449,12 @@ class TestUpdateTicket:
 
         result = _tool_update_ticket(project, {
             "ticket_id": "G1_1",
-            "status": "closed", "result": "pass", "feedback": "Looks good",
+            "status": "merged", "result": "pass", "feedback": "Looks good",
         }, role="reviewer")
         assert not result.get("isError")
 
         data = json.loads(path.read_text(encoding="utf-8"))
-        assert data["ticket"]["status"] == "closed"
+        assert data["ticket"]["status"] == "merged"
         assert data["review"]["result"] == "pass"
         assert data["review"]["feedback"] == "Looks good"
 
@@ -908,12 +916,12 @@ class TestRoleEnforcement:
 
     # ── Transition access ────────────────────────────────────────
 
-    def test_orchestrator_cannot_close(self, project):
+    def test_orchestrator_cannot_merge(self, project):
         _tool_create_ticket(project, {"id": "T1", "title": "t", "description": "d"})
         _advance_ticket(project, "T1", "verify")
         self._make_review_ready(project, "T1")
         result = _tool_update_ticket(project, {
-            "ticket_id": "T1", "status": "closed",
+            "ticket_id": "T1", "status": "merged",
         }, role="orchestrator")
         assert result.get("isError")
         assert "cannot transition" in result["text"]
@@ -930,11 +938,11 @@ class TestRoleEnforcement:
         }, role="orchestrator")
         assert not result.get("isError")
 
-    def test_worker_cannot_close(self, project):
+    def test_worker_cannot_merge(self, project):
         _tool_create_ticket(project, {"id": "T1", "title": "t", "description": "d"})
         _advance_ticket(project, "T1", "verify")
         result = _tool_update_ticket(project, {
-            "ticket_id": "T1", "status": "closed",
+            "ticket_id": "T1", "status": "merged",
         }, role="worker")
         assert result.get("isError")
         assert "cannot transition" in result["text"]
@@ -952,11 +960,11 @@ class TestRoleEnforcement:
         assert result.get("isError")
         assert "cannot transition" in result["text"]
 
-    def test_reviewer_can_close(self, project):
+    def test_reviewer_can_merge(self, project):
         _tool_create_ticket(project, {"id": "T1", "title": "t", "description": "d"})
         _advance_ticket(project, "T1", "verify")
         result = _tool_update_ticket(project, {
-            "ticket_id": "T1", "status": "closed", "result": "pass",
+            "ticket_id": "T1", "status": "merged", "result": "pass",
         }, role="reviewer")
         assert not result.get("isError")
 
@@ -965,7 +973,7 @@ class TestRoleEnforcement:
         _tool_create_ticket(project, {"id": "T1", "title": "t", "description": "d"})
         _advance_ticket(project, "T1", "verify")
         result = _tool_update_ticket(project, {
-            "ticket_id": "T1", "status": "closed", "result": "pass",
+            "ticket_id": "T1", "status": "merged", "result": "pass",
         })
         assert not result.get("isError")
 

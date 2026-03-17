@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from pathlib import Path
 
 
@@ -15,13 +16,14 @@ from pathlib import Path
 
 _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
-_VALID_STATUSES = {"todo", "in_progress", "verify", "closed"}
+_VALID_STATUSES = {"todo", "in_progress", "verify", "merged", "closed"}
 _VALID_RESULTS = {"", "pass", "fail"}
 
 _ALLOWED_TRANSITIONS = {
     "todo":        {"in_progress", "verify"},
     "in_progress": {"verify"},
-    "verify":      {"closed", "todo"},
+    "verify":      {"merged", "todo"},
+    "merged":      {"closed", "todo"},
     "closed":      set(),
 }
 
@@ -46,6 +48,8 @@ _ROLE_ALLOWED_TRANSITIONS: dict[str, set[tuple[str, str]]] = {
         ("todo", "verify"),
         ("in_progress", "verify"),
         ("verify", "todo"),
+        ("merged", "closed"),
+        ("merged", "todo"),
     },
     "worker": {
         ("todo", "in_progress"),
@@ -53,7 +57,7 @@ _ROLE_ALLOWED_TRANSITIONS: dict[str, set[tuple[str, str]]] = {
         ("in_progress", "verify"),
     },
     "reviewer": {
-        ("verify", "closed"),
+        ("verify", "merged"),
         ("verify", "todo"),
     },
 }
@@ -122,7 +126,7 @@ TOOL_SCHEMAS = [
                 },
                 "status": {
                     "type": "string",
-                    "enum": ["todo", "in_progress", "verify", "closed"],
+                    "enum": ["todo", "in_progress", "verify", "merged", "closed"],
                     "description": "New ticket status.",
                 },
                 "notes": {
@@ -257,13 +261,15 @@ def _validate_ticket(data: dict) -> str | None:
 
 
 def _validate_transition(
-    current: str, target: str, data: dict, *, role: str | None = None,
+    current: str, target: str, data: dict, *,
+    role: str | None = None, root: Path | None = None,
 ) -> str | None:
     """Return error if current->target is not an allowed status transition.
 
     Also enforces cross-field constraints:
-    - verify -> closed requires review.result == "pass" and all criteria met
+    - verify -> merged requires review.result == "pass" and all criteria met
     - verify -> todo requires review.result == "fail"
+    - * -> verify requires no uncommitted changes in worktree
     """
     allowed = _ALLOWED_TRANSITIONS.get(current, set())
     if target not in allowed:
@@ -277,20 +283,32 @@ def _validate_transition(
         if (current, target) not in role_allowed:
             return f"role {role!r} cannot transition {current!r} -> {target!r}"
 
-    if target == "closed":
+    if target == "merged":
         review_result = data.get("review", {}).get("result", "")
         if review_result != "pass":
-            return "cannot close ticket: review.result must be 'pass'"
+            return "cannot merge ticket: review.result must be 'pass'"
         criteria = data.get("criteria")
         if criteria:
             unmet = [c["criterion"] for c in criteria if not c.get("met")]
             if unmet:
-                return f"cannot close ticket: unmet criteria: {unmet}"
+                return f"cannot merge ticket: unmet criteria: {unmet}"
 
-    if current == "verify" and target == "todo":
+    if current in ("verify", "merged") and target == "todo":
         review_result = data.get("review", {}).get("result", "")
-        if review_result != "fail":
+        if current == "verify" and review_result != "fail":
             return "cannot reopen from verify: review.result must be 'fail'"
+
+    # Enforce clean worktree before verify
+    if target == "verify" and root is not None:
+        tid = data.get("ticket", {}).get("id", "")
+        wt_dir = root / "_agent" / "worktrees" / tid
+        if wt_dir.exists():
+            result = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=str(wt_dir), capture_output=True, text=True,
+            )
+            if result.stdout.strip():
+                return "cannot verify: worktree has uncommitted changes — commit first"
 
     return None
 
@@ -310,6 +328,43 @@ def _load_required_criteria(config: dict) -> list[str]:
     if not isinstance(criteria, list):
         return []
     return [str(c) for c in criteria]
+
+
+# ── Worktree merge ───────────────────────────────────────────────────────────
+
+
+def _auto_merge_worktree(root: Path, ticket_id: str, branch: str) -> str | None:
+    """Merge a worktree branch into the current branch.
+
+    Returns an error message on failure, or ``None`` on success.
+    If the branch does not exist (e.g. already merged), logs a warning
+    and returns ``None``.
+    """
+    from ..core import logger
+
+    check = subprocess.run(
+        ["git", "rev-parse", "--verify", branch],
+        cwd=str(root), capture_output=True,
+    )
+    if check.returncode != 0:
+        logger.warning(
+            "Branch %s not found for ticket %s — skipping merge", branch, ticket_id,
+        )
+        return None
+
+    result = subprocess.run(
+        ["git", "merge", branch, "--no-edit"],
+        cwd=str(root), capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        subprocess.run(
+            ["git", "merge", "--abort"],
+            cwd=str(root), capture_output=True,
+        )
+        return f"merge conflict:\n{result.stdout}\n{result.stderr}".strip()
+
+    logger.info("Auto-merged branch %s for ticket %s", branch, ticket_id)
+    return None
 
 
 # ── Tool implementations ─────────────────────────────────────────────────────
@@ -442,7 +497,9 @@ def _tool_update_ticket(root: Path, args: dict, *, role: str | None = None) -> d
         target_status = updates["status"]
         args["_old_status"] = current_status
         if current_status != target_status:
-            if err := _validate_transition(current_status, target_status, data, role=role):
+            if err := _validate_transition(
+                current_status, target_status, data, role=role, root=root,
+            ):
                 return {"isError": True, "text": err}
             data["ticket"]["status"] = target_status
 
@@ -458,10 +515,28 @@ def _tool_update_ticket(root: Path, args: dict, *, role: str | None = None) -> d
 
     ticket_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
-    # Worktree lifecycle: remove worktree on close
-    if "status" in updates and data["ticket"]["status"] == "closed":
-        from .worktree import remove_worktree
-        remove_worktree(root, tid)
+    # Worktree lifecycle: auto-merge and cleanup on merged
+    if "status" in updates and data["ticket"]["status"] == "merged":
+        branch = data["ticket"].get("worktree_branch")
+        if branch:
+            merge_err = _auto_merge_worktree(root, tid, branch)
+            if merge_err:
+                # Rollback: revert to previous status
+                data["ticket"]["status"] = args.get("_old_status", "verify")
+                ticket_path.write_text(
+                    json.dumps(data, indent=2) + "\n", encoding="utf-8",
+                )
+                return {
+                    "isError": True,
+                    "text": f"Auto-merge failed for '{tid}': {merge_err}",
+                }
+            from .worktree import remove_worktree
+            remove_worktree(root, tid)
+            # Delete the worktree branch
+            subprocess.run(
+                ["git", "branch", "-D", branch],
+                cwd=str(root), capture_output=True,
+            )
 
     return {"text": f"Ticket '{tid}' updated: {', '.join(updates.keys())}"}
 

@@ -31,3 +31,5 @@ feedback before submitting again.
 - Stay focused on your assigned ticket only.
 - Do not modify files outside the scope of your ticket.
 - Always build and test before reporting verify.
+- You MUST commit all changes before reporting verify. The transition will
+  be rejected if the worktree has uncommitted changes.

@@ -26,7 +26,8 @@ You are a REVIEWER agent reviewing ticket "{ticket_id}".
 When your review is finished, report the outcome using the ticket tools:
 
 - **Pass:** Mark all acceptance criteria as met via `mark_criteria`,
-  set `result: "pass"`, then set `status: "closed"`.
+  set `result: "pass"`, then set `status: "merged"`. This automatically
+  merges the worktree branch into the base branch and cleans up the worktree.
 - **Fail:** Mark criteria that are met (if any), set `result: "fail"`,
   provide `feedback` with actionable details, then set `status: "todo"`.
 
