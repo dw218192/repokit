@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.18
+
+- **Agent**: Replace `{repo_cmd}` CLI references in prompt templates with MCP tool names (`repo_build`, `repo_test`, `repo_format`). Workers/reviewers in worktrees were shown a hardcoded CLI path pointing at the main workspace; the MCP tools were already worktree-aware but prompts didn't reference them. Removes `{repo_cmd}` and `{framework_root}` template variables from all role prompts.
+
 ## 0.7.17
 
 - **Agent**: Fix `repo_cmd` MCP server using main workspace root instead of worktree — workers in worktrees were building/testing the main workspace, not their own changes. Now uses `effective_cwd` (worktree path when dispatched, project root otherwise).

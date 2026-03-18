@@ -215,14 +215,11 @@ def _prepare_ticket_session(
         )
         sys.exit(1)
 
-    repo_cmd = tool_ctx.tokens.get("repo", "./repo")
     role_prompt = _render_role_prompt(
         role,
         ticket_id=ticket,
         ticket_path=str(ticket_path),
         project_root=str(tool_ctx.workspace_root),
-        repo_cmd=repo_cmd,
-        framework_root=tool_ctx.tokens.get("framework_root", ""),
     )
 
     prompt = (
@@ -362,12 +359,7 @@ def _agent_run(tool_ctx: ToolContext, args: dict[str, Any]) -> str | None:
     else:
         prompt = None
         role = "orchestrator"
-        repo_cmd = tool_ctx.tokens.get("repo", "./repo")
-        role_prompt = _render_role_prompt(
-            role,
-            repo_cmd=repo_cmd,
-            framework_root=tool_ctx.tokens.get("framework_root", ""),
-        )
+        role_prompt = _render_role_prompt(role)
         role_prompt = _augment_role_prompt(role_prompt, tool_ctx.config, "orchestrator")
 
     # Resolve rules file
