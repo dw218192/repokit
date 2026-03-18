@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.20
+
+- **Agent**: Bootstrap `./repo` shims in worktrees — `ensure_worktree()` now calls `write_shims()` after creating a new worktree, so `./repo build`/`./repo test` work correctly with `--workspace-root` pointing at the worktree. Softened MCP-only language in common prompt now that CLI works in worktrees too.
+
 ## 0.7.19
 
 - **Agent**: Strengthen MCP tool guidance in common prompt — explicitly tell agents not to use `./repo` or `python -m repo_tools.cli` via Bash, overriding any conflicting CLAUDE.md instructions. Agents in worktrees were following CLAUDE.md's `./repo` guidance instead of using the worktree-aware MCP tools.
