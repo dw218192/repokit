@@ -1,16 +1,10 @@
 # Changelog
 
-## 0.7.20
-
-- **Agent**: Bootstrap `./repo` shims in worktrees — `ensure_worktree()` now calls `write_shims()` after creating a new worktree, so `./repo build`/`./repo test` work correctly with `--workspace-root` pointing at the worktree. Softened MCP-only language in common prompt now that CLI works in worktrees too.
-
 ## 0.7.19
 
-- **Agent**: Strengthen MCP tool guidance in common prompt — explicitly tell agents not to use `./repo` or `python -m repo_tools.cli` via Bash, overriding any conflicting CLAUDE.md instructions. Agents in worktrees were following CLAUDE.md's `./repo` guidance instead of using the worktree-aware MCP tools.
-
-## 0.7.18
-
+- **Agent**: Bootstrap `./repo` shims in worktrees — `ensure_worktree()` now calls `write_shims()` after creating a new worktree, so `./repo build`/`./repo test` work correctly with `--workspace-root` pointing at the worktree. Bootstrap failure aborts dispatch rather than silently continuing without tooling.
 - **Agent**: Replace `{repo_cmd}` CLI references in prompt templates with MCP tool names (`repo_build`, `repo_test`, `repo_format`). Workers/reviewers in worktrees were shown a hardcoded CLI path pointing at the main workspace; the MCP tools were already worktree-aware but prompts didn't reference them. Removes `{repo_cmd}` and `{framework_root}` template variables from all role prompts.
+- **Tests**: Add `test_worktree.py` — 23 tests covering worktree bootstrap, lifecycle (`ensure`/`remove`), prompt template validation (no stale placeholders, MCP tool references), and `_render_role_prompt` without legacy kwargs.
 
 ## 0.7.17
 
