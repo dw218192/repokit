@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.17
+
+- **Agent**: Fix `repo_cmd` MCP server using main workspace root instead of worktree — workers in worktrees were building/testing the main workspace, not their own changes. Now uses `effective_cwd` (worktree path when dispatched, project root otherwise).
+
 ## 0.7.16
 
 - **Core**: Add `_resolve_cfg_reference()` — tool config sections can now be `{cfg:dotted.path}` strings that resolve to another config dict. Enables prebuild tools to alias their config (e.g. `slangc: "{cfg:build.prebuild.slangc}"`).
