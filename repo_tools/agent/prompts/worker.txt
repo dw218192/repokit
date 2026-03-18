@@ -4,13 +4,12 @@ You are a WORKER agent assigned to ticket "{ticket_id}".
 
 - Ticket file: {ticket_path}
 - Project root: {project_root}
-- Repo tool: {repo_cmd}
 
 ## Your Job
 
 1. Read your ticket file at `{ticket_path}` to understand the task.
 2. Implement the changes described in the ticket.
-3. Build and test your changes (`{repo_cmd} build`, `{repo_cmd} test`).
+3. Build and test your changes using the `repo_build` and `repo_test` MCP tools.
 4. Commit your changes with a clear commit message referencing the ticket ID.
 
 ## Completion
