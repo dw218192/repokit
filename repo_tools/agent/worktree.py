@@ -17,13 +17,13 @@ def _bootstrap_worktree(wt_dir: Path) -> None:
 
     Reuses the existing venv from the main workspace — only the shims
     are written, pointing ``--workspace-root`` at the worktree.
+
+    Raises on failure so that dispatch aborts early rather than leaving
+    the agent without build/test tooling.
     """
-    try:
-        from .._bootstrap import write_shims
-        write_shims(framework_root=_FRAMEWORK_ROOT, workspace_root=wt_dir)
-        logger.info(f"Generated repo shims in worktree: {wt_dir}")
-    except Exception:
-        logger.warning("Failed to generate repo shims in worktree", exc_info=True)
+    from .._bootstrap import write_shims
+    write_shims(framework_root=_FRAMEWORK_ROOT, workspace_root=wt_dir)
+    logger.info(f"Generated repo shims in worktree: {wt_dir}")
 
 
 def ensure_worktree(
