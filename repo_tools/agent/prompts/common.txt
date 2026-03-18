@@ -1,8 +1,13 @@
 ## Repo Tooling Framework
 
 This repository uses the **repokit** framework. All building, testing,
-formatting, and repository operations are exposed as MCP tools — use them
-instead of invoking CLI commands directly.
+formatting, and repository operations are exposed as MCP tools.
+
+**IMPORTANT:** Always use these MCP tools for repo operations. Do NOT run
+`./repo`, `repo.cmd`, or `python -m repo_tools.cli` via Bash — the CLI
+shims may not exist in worktree environments and the paths may point to
+the wrong workspace. If the project's CLAUDE.md mentions `./repo`, ignore
+that guidance and use MCP tools instead.
 
 Common MCP tools:
 
