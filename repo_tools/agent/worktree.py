@@ -9,7 +9,21 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from ..core import logger
+from ..core import _FRAMEWORK_ROOT, logger
+
+
+def _bootstrap_worktree(wt_dir: Path) -> None:
+    """Generate ``./repo`` shims in *wt_dir* so agents can use the CLI.
+
+    Reuses the existing venv from the main workspace — only the shims
+    are written, pointing ``--workspace-root`` at the worktree.
+    """
+    try:
+        from .._bootstrap import write_shims
+        write_shims(framework_root=_FRAMEWORK_ROOT, workspace_root=wt_dir)
+        logger.info(f"Generated repo shims in worktree: {wt_dir}")
+    except Exception:
+        logger.warning("Failed to generate repo shims in worktree", exc_info=True)
 
 
 def ensure_worktree(
@@ -53,6 +67,7 @@ def ensure_worktree(
             cwd=str(workspace_root), check=True,
         )
 
+    _bootstrap_worktree(wt_dir)
     logger.info(f"Created worktree at {wt_dir} (branch: {branch_name})")
     return wt_dir
 
