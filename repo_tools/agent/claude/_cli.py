@@ -154,12 +154,14 @@ def _write_plugin(
     }
 
     # Repo command tools — all from the tool registry
+    # Use effective_cwd so that workers in worktrees build/test their own
+    # changes, not the main workspace.
     from ..repo_cmd import _discover_registered_tools
     registered = _discover_registered_tools()
     if registered:
         repo_cmd_args = [
             "-m", "repo_tools.agent.mcp.repo_cmd",
-            "--project-root", project_root.as_posix(),
+            "--project-root", effective_cwd.as_posix(),
             "--config", "{}",
             "--extra-tools", json.dumps(registered),
         ]
