@@ -990,7 +990,7 @@ class AgentApp(App):
                             await self._show_error(str(exc))
                         finally:
                             self._query_active = False
-                            self._drain_queue()
+                            await self._drain_queue()
                 except asyncio.CancelledError:
                     pass
         except asyncio.CancelledError:
@@ -1053,12 +1053,20 @@ class AgentApp(App):
         await self._send_input(text)
 
     async def _send_input(self, text: str) -> None:
-        """Display a user message in chat and put it on the input queue."""
-        chat_log = self.query_one("#chat-log", VerticalScroll)
-        msg_widget = UserMessage(f"> {text}")
-        await chat_log.mount(msg_widget)
-        msg_widget.scroll_visible()
-        self._chat_history.append("user", text)
+        """Display a user message in chat and put it on the input queue.
+
+        The ``put_nowait`` call is unconditional — even if widget mounting
+        or history persistence fails, the message still reaches the SDK
+        so no user input is silently lost.
+        """
+        try:
+            chat_log = self.query_one("#chat-log", VerticalScroll)
+            msg_widget = UserMessage(f"> {text}")
+            await chat_log.mount(msg_widget)
+            msg_widget.scroll_visible()
+            self._chat_history.append("user", text)
+        except Exception:
+            logger.warning("Failed to display user message", exc_info=True)
         self._input_queue.put_nowait(text)
 
     def on_prompt_input_pop_queue(
@@ -1080,12 +1088,11 @@ class AgentApp(App):
         chat_log.scroll_end(animate=False)
         self.query_one("#status-bar", StatusBar).set_status("Error", "error")
 
-    def _drain_queue(self) -> None:
+    async def _drain_queue(self) -> None:
         """Send the next queued input, if any."""
         if self._queued_input:
             text = self._queued_input.pop(0)
-            # Schedule _send_input so the message appears in chat when sent
-            asyncio.ensure_future(self._send_input(text))
+            await self._send_input(text)
         self._refresh_queue_bar()
 
     def _refresh_queue_bar(self) -> None:
