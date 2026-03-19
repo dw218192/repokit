@@ -7,3 +7,8 @@ dist/
 build/
 .mypy_cache/
 _managed/
+
+# Worktree shim scripts (bootstrapped by repokit)
+/repo
+/repo.cmd
+/repo.ps1

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.21
+
+- **Tests**: Update `test_worktree.py` to check for `repo_run` instead of `repo_build`/`repo_test`/`repo_format` — aligned with the `repo_run` consolidation from 0.7.19.
+
+## 0.7.20
+
+- **Agent TUI**: Fix `_drain_queue` to be properly awaited — was called with `self._drain_queue()` (missing `await`) after becoming a coroutine. Guard `_send_input` display logic so user input always reaches the SDK even if widget mounting fails.
+
 ## 0.7.19
 
 - **Agent**: Bootstrap `./repo` shims in worktrees — `ensure_worktree()` now calls `write_shims()` after creating a new worktree, so `./repo build`/`./repo test` work correctly with `--workspace-root` pointing at the worktree. Bootstrap failure aborts dispatch rather than silently continuing without tooling.

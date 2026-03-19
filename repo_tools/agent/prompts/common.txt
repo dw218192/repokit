@@ -7,9 +7,7 @@ these over Bash — they automatically target the correct working directory
 
 Common MCP tools:
 
-- `repo_build` — build the project
-- `repo_test` — run the test suite
-- `repo_format` — format source code
+- `repo_run` — run a repo command: `repo_run(command="build")`, `repo_run(command="test")`, `repo_run(command="format")`
 
 ## General Coding Principles
 

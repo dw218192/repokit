@@ -11,7 +11,7 @@ import argparse
 import json
 from pathlib import Path
 
-from ..repo_cmd import build_tool_handlers, build_tool_schemas
+from ..repo_cmd import build_repo_run_handler, build_repo_run_schema
 from ._jsonrpc import make_dispatch, serve_stdio
 
 
@@ -29,14 +29,14 @@ def main() -> None:
     config = json.loads(args.config)
     extra = json.loads(args.extra_tools) if args.extra_tools else None
 
-    schemas = build_tool_schemas(config, extra=extra)
-    handlers = build_tool_handlers(config, root, extra=extra)
+    schema = build_repo_run_schema(config, extra=extra)
+    name, handler = build_repo_run_handler(config, root, extra=extra)
 
     dispatch = make_dispatch(
         server_name="repo_cmd",
         version="0.1",
-        tools=schemas,
-        handlers=handlers,
+        tools=[schema],
+        handlers={name: handler},
     )
     serve_stdio(dispatch, label="repo_cmd_mcp")
 
