@@ -90,7 +90,7 @@ reviewer transitions verify → merged.
 
 After a ticket reaches **merged**:
 
-1. Build and test (use the `repo_build` and `repo_test` MCP tools) to confirm
+1. Build and test (use `repo_run(command="build")` and `repo_run(command="test")`) to confirm
    integration on the base branch.
 2. If build/test passes: transition merged → closed.
 3. If build/test fails: revert the merge commit (`git revert`), then

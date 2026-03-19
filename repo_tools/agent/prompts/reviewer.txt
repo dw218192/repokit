@@ -17,7 +17,7 @@ You are a REVIEWER agent reviewing ticket "{ticket_id}".
 4. Run the **coderabbit_review** MCP tool for automated analysis.
    If the tool returns an error (not installed, not authenticated, or Bash unavailable),
    skip this step and rely entirely on your own manual review.
-5. Build and test using the `repo_build` and `repo_test` MCP tools.
+5. Build and test using `repo_run(command="build")` and `repo_run(command="test")`.
 6. Evaluate whether the implementation meets the ticket requirements.
 
 ## Completion

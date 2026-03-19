@@ -85,49 +85,51 @@ def call_repo_run(
     return {"text": output.strip() or f"repo {subcommand} completed."}
 
 
-def build_tool_schemas(
+def build_repo_run_schema(
     config: dict[str, Any],
     extra: list[dict[str, str]] | None = None,
-) -> list[dict[str, Any]]:
-    """Build MCP tool schemas for all discovered repo commands."""
+) -> dict[str, Any]:
+    """Build a single ``repo_run`` MCP tool schema with a ``command`` enum."""
     all_cmds = _merge_commands(_discover_repo_commands(config), extra)
-    schemas: list[dict[str, Any]] = []
-    for cmd in all_cmds:
-        schemas.append({
-            "name": f"repo_{cmd['name']}",
-            "description": cmd["description"],
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "extra_args": {
-                        "type": "string",
-                        "description": "Additional CLI arguments",
-                        "default": "",
-                    },
+    cmd_lines = "\n".join(f"- {c['name']}: {c['description']}" for c in all_cmds)
+    return {
+        "name": "repo_run",
+        "description": f"Run a repo command.\n\nAvailable commands:\n{cmd_lines}",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "enum": [c["name"] for c in all_cmds],
+                    "description": "Command to run",
+                },
+                "extra_args": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Additional CLI arguments",
                 },
             },
-        })
-    return schemas
+            "required": ["command"],
+        },
+    }
 
 
-def build_tool_handlers(
+def build_repo_run_handler(
     config: dict[str, Any],
     workspace_root: Path,
     extra: list[dict[str, str]] | None = None,
-) -> dict[str, Any]:
-    """Build MCP tool handlers for all discovered repo commands."""
+) -> tuple[str, Any]:
+    """Build a single ``repo_run`` handler that dispatches by command name."""
     all_cmds = _merge_commands(_discover_repo_commands(config), extra)
-    handlers: dict[str, Any] = {}
-    for cmd in all_cmds:
-        name = f"repo_{cmd['name']}"
+    known = {c["name"] for c in all_cmds}
 
-        def _mk(cmd_name: str):
-            def handler(args: dict[str, Any]) -> dict[str, Any]:
-                return call_repo_run(cmd_name, args, workspace_root=workspace_root)
-            return handler
+    def handler(args: dict[str, Any]) -> dict[str, Any]:
+        command = args.get("command", "")
+        if command not in known:
+            return {"isError": True, "text": f"Unknown command: {command!r}"}
+        return call_repo_run(command, args, workspace_root=workspace_root)
 
-        handlers[name] = _mk(cmd["name"])
-    return handlers
+    return ("repo_run", handler)
 
 
 def _merge_commands(

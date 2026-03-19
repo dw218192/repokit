@@ -91,44 +91,53 @@ def _make_ticket_tools(workspace_root: Path, role: str | None, config: dict | No
     return tools
 
 
-def _make_repo_tools(workspace_root: Path):
-    """Create one MCP tool per registered repo command."""
+def _make_repo_run_tool(workspace_root: Path):
+    """Create a single ``repo_run`` MCP tool for all registered repo commands."""
     from claude_agent_sdk import tool
 
     from ..repo_cmd import _discover_registered_tools, call_repo_run
 
     all_cmds = _discover_registered_tools()
+    if not all_cmds:
+        return None
 
+    known = {c["name"] for c in all_cmds}
+    cmd_lines = "\n".join(f"- {c['name']}: {c['description']}" for c in all_cmds)
+    description = f"Run a repo command.\n\nAvailable commands:\n{cmd_lines}"
     input_schema = {
         "type": "object",
         "properties": {
+            "command": {
+                "type": "string",
+                "enum": sorted(known),
+                "description": "Command to run",
+            },
             "extra_args": {
                 "type": "string",
-                "description": "Additional CLI arguments",
                 "default": "",
+                "description": "Additional CLI arguments",
             },
         },
+        "required": ["command"],
     }
 
-    tools = []
-    for cmd_info in all_cmds:
-        cmd_name = cmd_info["name"]
-        cmd_desc = cmd_info["description"]
+    @tool("repo_run", description, input_schema)
+    async def repo_run_tool(args: dict[str, Any]) -> dict[str, Any]:
+        command = args.get("command", "")
+        if command not in known:
+            return {
+                "content": [{"type": "text", "text": f"Unknown command: {command!r}"}],
+                "is_error": True,
+            }
+        result = await asyncio.to_thread(
+            call_repo_run, command, args, workspace_root=workspace_root,
+        )
+        return {
+            "content": [{"type": "text", "text": result.get("text", "")}],
+            **({"is_error": True} if result.get("isError") else {}),
+        }
 
-        def _mk(name: str, desc: str):
-            @tool(f"repo_{name}", desc, input_schema)
-            async def repo_tool(args: dict[str, Any]) -> dict[str, Any]:
-                result = await asyncio.to_thread(
-                    call_repo_run, name, args, workspace_root=workspace_root,
-                )
-                return {
-                    "content": [{"type": "text", "text": result.get("text", "")}],
-                    **({"is_error": True} if result.get("isError") else {}),
-                }
-            return repo_tool
-
-        tools.append(_mk(cmd_name, cmd_desc))
-    return tools
+    return repo_run_tool
 
 
 def _make_dispatch_tool(workspace_root: Path):
@@ -285,7 +294,9 @@ class SdkBackend:
             )
             mcp_tools.append(_make_coderabbit_tool())
             mcp_tools.extend(_make_ticket_tools(project_root, role, config=config))
-            mcp_tools.extend(_make_repo_tools(project_root))
+            repo_tool = _make_repo_run_tool(project_root)
+            if repo_tool is not None:
+                mcp_tools.append(repo_tool)
 
             # Orchestrator-only tools (interactive sessions)
             if not headless:

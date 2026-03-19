@@ -122,7 +122,7 @@ class TestBuildOptions:
         assert any("list_tickets" in n for n in mcp_names)
 
     def test_registered_tools_in_allowed(self, tmp_path, rules_file):
-        """Registered RepoTool subclasses appear as MCP tools."""
+        """Registered RepoTool subclasses appear as single repo_run MCP tool."""
         from repo_tools.agent.claude import Claude
 
         fake_registered = [
@@ -138,16 +138,14 @@ class TestBuildOptions:
                 cwd=tmp_path,
             )
         mcp_names = [t for t in opts.allowed_tools if t.startswith("mcp__")]
-        assert any("repo_clean" in n for n in mcp_names)
-        assert any("repo_format" in n for n in mcp_names)
+        assert any("repo_run" in n for n in mcp_names)
 
         mcp_meta = [t for t in meta if t["group"] == "MCP"]
         repo_names = {t["name"] for t in mcp_meta if t["name"].startswith("repo_")}
-        assert "repo_clean" in repo_names
-        assert "repo_format" in repo_names
+        assert "repo_run" in repo_names
 
     def test_all_repo_tools_from_registry(self, tmp_path, rules_file):
-        """All repo tools come from the tool registry (config + built-in)."""
+        """All repo commands consolidate into single repo_run tool."""
         from repo_tools.agent.claude import Claude
 
         fake_registered = [
@@ -164,15 +162,14 @@ class TestBuildOptions:
                 cwd=tmp_path,
             )
         mcp_names = [t for t in opts.allowed_tools if t.startswith("mcp__")]
-        assert any("repo_test" == n.split("__")[-1] for n in mcp_names)
-        assert any("repo_test-cov" in n for n in mcp_names)
-        assert any("repo_clean" in n for n in mcp_names)
+        assert any("repo_run" in n for n in mcp_names)
+        # Only one repo tool, not N separate ones
+        repo_mcp = [n for n in mcp_names if "repo_run" in n]
+        assert len(repo_mcp) == 1
 
         mcp_meta = [t for t in meta if t["group"] == "MCP"]
         repo_names = {t["name"] for t in mcp_meta if t["name"].startswith("repo_")}
-        assert "repo_test" in repo_names
-        assert "repo_test-cov" in repo_names
-        assert "repo_clean" in repo_names
+        assert repo_names == {"repo_run"}
 
     def test_system_prompt_from_role_prompt(self, tmp_path, rules_file):
         """role_prompt is set as an appended system prompt preset."""

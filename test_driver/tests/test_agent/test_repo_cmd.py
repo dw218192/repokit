@@ -12,8 +12,8 @@ from repo_tools.agent.repo_cmd import (
     _discover_registered_tools,
     _discover_repo_commands,
     _merge_commands,
-    build_tool_handlers,
-    build_tool_schemas,
+    build_repo_run_handler,
+    build_repo_run_schema,
     call_repo_run,
 )
 
@@ -165,21 +165,21 @@ def test_call_repo_run_empty_output_failure(tmp_path):
 # ── Schema/handler builders ──────────────────────────────────────────────────
 
 
-def test_build_tool_schemas():
+def test_build_repo_run_schema():
     config = {"test": {"steps": ["pytest"]}, "build": {"steps": ["make"]}}
-    schemas = build_tool_schemas(config)
-    names = [s["name"] for s in schemas]
-    assert "repo_test" in names
-    assert "repo_build" in names
-    for s in schemas:
-        assert "inputSchema" in s
-        assert "extra_args" in s["inputSchema"]["properties"]
+    schema = build_repo_run_schema(config)
+    assert schema["name"] == "repo_run"
+    enum = schema["inputSchema"]["properties"]["command"]["enum"]
+    assert "test" in enum
+    assert "build" in enum
+    assert "extra_args" in schema["inputSchema"]["properties"]
+    assert "command" in schema["inputSchema"]["required"]
 
 
-def test_build_tool_handlers(tmp_path):
+def test_build_repo_run_handler(tmp_path):
     config = {"test": {"steps": ["pytest"]}}
-    handlers = build_tool_handlers(config, tmp_path)
-    assert "repo_test" in handlers
+    name, handler = build_repo_run_handler(config, tmp_path)
+    assert name == "repo_run"
 
     mock_proc = MagicMock()
     mock_proc.stdout = "ok"
@@ -187,9 +187,18 @@ def test_build_tool_handlers(tmp_path):
     mock_proc.returncode = 0
 
     with patch("subprocess.run", return_value=mock_proc):
-        result = handlers["repo_test"]({"extra_args": ""})
+        result = handler({"command": "test", "extra_args": ""})
 
     assert result["text"] == "ok"
+
+
+def test_build_repo_run_handler_unknown_command(tmp_path):
+    config = {"test": {"steps": ["pytest"]}}
+    _name, handler = build_repo_run_handler(config, tmp_path)
+
+    result = handler({"command": "nonexistent"})
+    assert result["isError"] is True
+    assert "Unknown command" in result["text"]
 
 
 # ── MCP stdio server ────────────────────────────────────────────────────────
@@ -237,9 +246,11 @@ def test_mcp_tools_list():
         config=config,
     )
     tools = responses[0]["result"]["tools"]
-    names = [t["name"] for t in tools]
-    assert "repo_test" in names
-    assert "repo_build" in names
+    assert len(tools) == 1
+    assert tools[0]["name"] == "repo_run"
+    enum = tools[0]["inputSchema"]["properties"]["command"]["enum"]
+    assert "test" in enum
+    assert "build" in enum
 
 
 def test_mcp_tool_call(tmp_path):
@@ -252,7 +263,7 @@ def test_mcp_tool_call(tmp_path):
         responses = _call_mcp(
             {
                 "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                "params": {"name": "repo_test", "arguments": {}},
+                "params": {"name": "repo_run", "arguments": {"command": "test"}},
             },
             project_root=str(tmp_path),
         )
@@ -325,24 +336,31 @@ def test_merge_commands_no_extra():
     assert _merge_commands(cmds, []) is cmds
 
 
-# ── Schemas/handlers with extra tools ─────────────────────────────────────────
+# ── Schema/handler with extra tools ───────────────────────────────────────────
 
 
-def test_build_tool_schemas_with_extra():
+def test_build_repo_run_schema_with_extra():
     config = {"test": {"steps": ["pytest"]}}
     extra = [{"name": "clean", "description": "Clean up"}]
-    schemas = build_tool_schemas(config, extra=extra)
-    names = [s["name"] for s in schemas]
-    assert "repo_test" in names
-    assert "repo_clean" in names
+    schema = build_repo_run_schema(config, extra=extra)
+    enum = schema["inputSchema"]["properties"]["command"]["enum"]
+    assert "test" in enum
+    assert "clean" in enum
 
 
-def test_build_tool_handlers_with_extra(tmp_path):
+def test_build_repo_run_handler_with_extra(tmp_path):
     config = {"test": {"steps": ["pytest"]}}
     extra = [{"name": "clean", "description": "Clean up"}]
-    handlers = build_tool_handlers(config, tmp_path, extra=extra)
-    assert "repo_test" in handlers
-    assert "repo_clean" in handlers
+    _name, handler = build_repo_run_handler(config, tmp_path, extra=extra)
+
+    mock_proc = MagicMock()
+    mock_proc.stdout = "cleaned"
+    mock_proc.stderr = ""
+    mock_proc.returncode = 0
+
+    with patch("subprocess.run", return_value=mock_proc):
+        result = handler({"command": "clean"})
+    assert result["text"] == "cleaned"
 
 
 # ── MCP stdio server with --extra-tools ───────────────────────────────────────
@@ -386,8 +404,10 @@ def test_mcp_extra_tools_in_list():
         extra_tools=extra,
     )
     tools = responses[0]["result"]["tools"]
-    names = [t["name"] for t in tools]
-    assert "repo_clean" in names
+    assert len(tools) == 1
+    assert tools[0]["name"] == "repo_run"
+    enum = tools[0]["inputSchema"]["properties"]["command"]["enum"]
+    assert "clean" in enum
 
 
 def test_mcp_extra_tools_callable(tmp_path):
@@ -401,7 +421,7 @@ def test_mcp_extra_tools_callable(tmp_path):
         responses = _call_mcp_with_extra(
             {
                 "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                "params": {"name": "repo_clean", "arguments": {}},
+                "params": {"name": "repo_run", "arguments": {"command": "clean"}},
             },
             project_root=str(tmp_path),
             extra_tools=extra,
