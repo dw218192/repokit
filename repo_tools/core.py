@@ -6,6 +6,7 @@ import contextlib
 import dataclasses
 import functools
 import glob
+import json
 import logging
 import os
 import platform
@@ -44,10 +45,18 @@ class ToolFormatter(logging.Formatter):
         return f"{color}[{record.levelname.lower()}]{Style.RESET_ALL} {message}"
 
 
+class JsonLogFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        return json.dumps({"level": record.levelname.lower(), "message": record.getMessage()})
+
+
 logger = logging.getLogger("repo_tools")
 if not logger.handlers:
     handler = logging.StreamHandler()
-    handler.setFormatter(ToolFormatter())
+    if os.environ.get("REPOKIT_LOG_JSON"):
+        handler.setFormatter(JsonLogFormatter())
+    else:
+        handler.setFormatter(ToolFormatter())
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
     logger.propagate = False
@@ -542,11 +551,14 @@ class RepoTool:
         """Execute the tool with context and tool-specific args."""
         raise NotImplementedError
 
-    def format_mcp_output(self, stdout: str, stderr: str, returncode: int) -> str | None:
-        """Filter subprocess output for MCP tool responses.
+    def format_mcp_output(self, records: list[dict[str, str]], returncode: int) -> str | None:
+        """Filter MCP tool output.
 
-        Return a string to override the default output, or ``None`` to use
-        raw stdout+stderr.  Only called on successful runs (returncode 0).
+        *records* is a list of ``{"level": ..., "message": ...}`` dicts.
+        Levels: debug, info, warning, error, critical (from logging),
+        output (stdout lines from subprocess execution).
+
+        Return a string to override the default output, or ``None`` for raw.
         """
         return None
 

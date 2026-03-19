@@ -7,6 +7,8 @@ issues).
 
 from __future__ import annotations
 
+import json
+import os
 import shlex
 import subprocess
 import sys
@@ -71,11 +73,13 @@ def call_repo_run(
     ]
     if extra:
         cmd.extend(shlex.split(extra))
+    env = {**os.environ, "REPOKIT_LOG_JSON": "1"}
     try:
         proc = subprocess.run(
             cmd, capture_output=True, text=True,
             stdin=subprocess.DEVNULL,
             timeout=300, cwd=str(workspace_root),
+            env=env,
         )
     except subprocess.TimeoutExpired:
         return {
@@ -84,8 +88,10 @@ def call_repo_run(
             "stdout": "",
             "stderr": "",
             "returncode": -1,
+            "records": [],
         }
     output = (proc.stdout or "") + (proc.stderr or "")
+    records = _parse_records(proc.stdout or "", proc.stderr or "")
     if proc.returncode != 0:
         return {
             "isError": True,
@@ -93,13 +99,39 @@ def call_repo_run(
             "stdout": proc.stdout or "",
             "stderr": proc.stderr or "",
             "returncode": proc.returncode,
+            "records": records,
         }
     return {
         "text": output.strip() or f"repo {subcommand} completed.",
         "stdout": proc.stdout or "",
         "stderr": proc.stderr or "",
         "returncode": proc.returncode,
+        "records": records,
     }
+
+
+def _parse_records(stdout: str, stderr: str) -> list[dict[str, str]]:
+    """Parse subprocess output into structured log records."""
+    records: list[dict[str, str]] = []
+    # stderr contains JSON log records (one per line)
+    for line in stderr.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+            if isinstance(rec, dict) and "level" in rec and "message" in rec:
+                records.append(rec)
+                continue
+        except (json.JSONDecodeError, ValueError):
+            pass
+        records.append({"level": "raw", "message": line})
+    # stdout contains subprocess/command output
+    for line in stdout.splitlines():
+        stripped = line.rstrip()
+        if stripped:
+            records.append({"level": "output", "message": stripped})
+    return records
 
 
 def _apply_output_filter(subcommand: str, result: dict[str, Any]) -> dict[str, Any]:
@@ -111,11 +143,7 @@ def _apply_output_filter(subcommand: str, result: dict[str, Any]) -> dict[str, A
     tool = get_tool(subcommand)
     if tool is None:
         return result
-    filtered = tool.format_mcp_output(
-        result["stdout"],
-        result["stderr"],
-        result["returncode"],
-    )
+    filtered = tool.format_mcp_output(result.get("records", []), result["returncode"])
     if filtered is not None:
         return {**result, "text": filtered}
     return result

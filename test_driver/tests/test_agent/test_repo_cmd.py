@@ -13,6 +13,7 @@ from repo_tools.agent.repo_cmd import (
     _discover_registered_tools,
     _discover_repo_commands,
     _merge_commands,
+    _parse_records,
     build_repo_run_handler,
     build_repo_run_schema,
     call_repo_run,
@@ -98,9 +99,13 @@ def test_call_repo_run_success(tmp_path):
     assert result["stdout"] == "All tests passed.\n"
     assert result["stderr"] == ""
     assert result["returncode"] == 0
+    assert "records" in result
     cmd = mock_run.call_args[0][0]
     assert "repo_tools.cli" in " ".join(cmd)
     assert "test" in cmd
+    # Verify REPOKIT_LOG_JSON is set in subprocess env
+    env = mock_run.call_args[1]["env"]
+    assert env["REPOKIT_LOG_JSON"] == "1"
 
 
 def test_call_repo_run_with_extra_args(tmp_path):
@@ -131,6 +136,7 @@ def test_call_repo_run_failure(tmp_path):
     assert result["stdout"] == ""
     assert result["stderr"] == "Error: build failed\n"
     assert result["returncode"] == 1
+    assert "records" in result
 
 
 def test_call_repo_run_timeout(tmp_path):
@@ -145,6 +151,7 @@ def test_call_repo_run_timeout(tmp_path):
     assert result["stdout"] == ""
     assert result["stderr"] == ""
     assert result["returncode"] == -1
+    assert result["records"] == []
 
 
 def test_call_repo_run_empty_output_success(tmp_path):
@@ -455,12 +462,13 @@ def test_format_mcp_output_default_returns_none():
         name = "stub"
         def execute(self, ctx, args): pass
 
-    assert _Stub().format_mcp_output("out", "err", 0) is None
+    records = [{"level": "output", "message": "out"}]
+    assert _Stub().format_mcp_output(records, 0) is None
 
 
 def test_apply_output_filter_no_tool_in_registry():
     """When no tool is registered for the subcommand, result passes through."""
-    result = {"text": "hello", "stdout": "hello", "stderr": "", "returncode": 0}
+    result = {"text": "hello", "stdout": "hello", "stderr": "", "returncode": 0, "records": []}
     assert _apply_output_filter("nonexistent_cmd", result) is result
 
 
@@ -471,13 +479,14 @@ def test_apply_output_filter_with_custom_filter():
     class _Filtered(RepoTool):
         name = "filtered"
         def execute(self, ctx, args): pass
-        def format_mcp_output(self, stdout, stderr, returncode):
+        def format_mcp_output(self, records, returncode):
             return "FILTERED"
 
     saved = dict(_TOOL_REGISTRY)
     try:
         _TOOL_REGISTRY["filtered"] = _Filtered()
-        result = {"text": "raw", "stdout": "raw", "stderr": "", "returncode": 0}
+        records = [{"level": "output", "message": "raw"}]
+        result = {"text": "raw", "stdout": "raw", "stderr": "", "returncode": 0, "records": records}
         out = _apply_output_filter("filtered", result)
         assert out["text"] == "FILTERED"
         assert out["stdout"] == "raw"
@@ -497,7 +506,7 @@ def test_apply_output_filter_returns_none_uses_raw():
     saved = dict(_TOOL_REGISTRY)
     try:
         _TOOL_REGISTRY["defaultfmt"] = _Default()
-        result = {"text": "raw", "stdout": "raw", "stderr": "", "returncode": 0}
+        result = {"text": "raw", "stdout": "raw", "stderr": "", "returncode": 0, "records": []}
         assert _apply_output_filter("defaultfmt", result) is result
     finally:
         _TOOL_REGISTRY.clear()
@@ -511,13 +520,13 @@ def test_apply_output_filter_skips_errors():
     class _Filtered(RepoTool):
         name = "errskip"
         def execute(self, ctx, args): pass
-        def format_mcp_output(self, stdout, stderr, returncode):
+        def format_mcp_output(self, records, returncode):
             return "SHOULD NOT APPEAR"
 
     saved = dict(_TOOL_REGISTRY)
     try:
         _TOOL_REGISTRY["errskip"] = _Filtered()
-        result = {"isError": True, "text": "error", "stdout": "", "stderr": "err", "returncode": 1}
+        result = {"isError": True, "text": "error", "stdout": "", "stderr": "err", "returncode": 1, "records": []}
         assert _apply_output_filter("errskip", result) is result
     finally:
         _TOOL_REGISTRY.clear()
@@ -538,3 +547,70 @@ def test_call_repo_run_returns_stdout_stderr_returncode(tmp_path):
     assert result["stderr"] == "warn\n"
     assert result["returncode"] == 0
     assert "isError" not in result
+    assert "records" in result
+
+
+# ── _parse_records ────────────────────────────────────────────────────────────
+
+
+def test_parse_records_json_lines():
+    """Valid JSON log lines are parsed as structured records."""
+    stderr = '{"level": "info", "message": "Running tests..."}\n{"level": "error", "message": "Failed"}\n'
+    records = _parse_records("", stderr)
+    assert len(records) == 2
+    assert records[0] == {"level": "info", "message": "Running tests..."}
+    assert records[1] == {"level": "error", "message": "Failed"}
+
+
+def test_parse_records_non_json_fallback():
+    """Non-JSON stderr lines become raw records."""
+    stderr = "plain text warning\n"
+    records = _parse_records("", stderr)
+    assert len(records) == 1
+    assert records[0] == {"level": "raw", "message": "plain text warning"}
+
+
+def test_parse_records_stdout_as_output():
+    """stdout lines become output records."""
+    stdout = "test line 1\ntest line 2\n"
+    records = _parse_records(stdout, "")
+    assert len(records) == 2
+    assert records[0] == {"level": "output", "message": "test line 1"}
+    assert records[1] == {"level": "output", "message": "test line 2"}
+
+
+def test_parse_records_mixed():
+    """stderr JSON + non-JSON + stdout lines are all parsed correctly."""
+    stderr = '{"level": "info", "message": "starting"}\nnot json\n'
+    stdout = "output line\n"
+    records = _parse_records(stdout, stderr)
+    assert records[0] == {"level": "info", "message": "starting"}
+    assert records[1] == {"level": "raw", "message": "not json"}
+    assert records[2] == {"level": "output", "message": "output line"}
+
+
+def test_parse_records_skips_blank_lines():
+    """Blank lines in stderr and stdout are skipped."""
+    records = _parse_records("\n  \n", "\n\n")
+    assert records == []
+
+
+def test_parse_records_invalid_json_structure():
+    """JSON that parses but lacks level/message keys becomes raw."""
+    stderr = '{"foo": "bar"}\n'
+    records = _parse_records("", stderr)
+    assert records[0] == {"level": "raw", "message": '{"foo": "bar"}'}
+
+
+def test_call_repo_run_returns_records(tmp_path):
+    """call_repo_run includes parsed records in result."""
+    mock_proc = MagicMock()
+    mock_proc.stdout = "test output\n"
+    mock_proc.stderr = '{"level": "info", "message": "hello"}\n'
+    mock_proc.returncode = 0
+
+    with patch("subprocess.run", return_value=mock_proc):
+        result = call_repo_run("test", {}, workspace_root=tmp_path)
+
+    assert result["records"][0] == {"level": "info", "message": "hello"}
+    assert result["records"][1] == {"level": "output", "message": "test output"}
