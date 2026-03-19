@@ -13,6 +13,7 @@ import platform
 import re
 import shlex
 import shutil
+from typing import NamedTuple
 import string
 import subprocess
 import sys
@@ -515,6 +516,14 @@ class ToolContext:
 # ── RepoTool Base ────────────────────────────────────────────────────
 
 
+class McpLogRecord(NamedTuple):
+    """Structured log record for MCP tool output filtering."""
+
+    level: str
+    """debug, info, warning, error, critical, output, or raw."""
+    message: str
+
+
 class RepoTool:
     """Base class for all repo tools.
 
@@ -551,10 +560,10 @@ class RepoTool:
         """Execute the tool with context and tool-specific args."""
         raise NotImplementedError
 
-    def format_mcp_output(self, records: list[dict[str, str]], returncode: int) -> str | None:
+    def format_mcp_output(self, records: list[McpLogRecord], returncode: int) -> str | None:
         """Filter MCP tool output.
 
-        *records* is a list of ``{"level": ..., "message": ...}`` dicts.
+        *records* is a list of :class:`McpLogRecord` named tuples.
         Levels: debug, info, warning, error, critical (from logging),
         output (stdout lines from subprocess execution).
 

@@ -110,9 +110,11 @@ def call_repo_run(
     }
 
 
-def _parse_records(stdout: str, stderr: str) -> list[dict[str, str]]:
-    """Parse subprocess output into structured log records."""
-    records: list[dict[str, str]] = []
+def _parse_records(stdout: str, stderr: str) -> list:
+    """Parse subprocess output into :class:`~repo_tools.core.McpLogRecord` list."""
+    from ..core import McpLogRecord
+
+    records: list[McpLogRecord] = []
     # stderr contains JSON log records (one per line)
     for line in stderr.splitlines():
         line = line.strip()
@@ -121,16 +123,16 @@ def _parse_records(stdout: str, stderr: str) -> list[dict[str, str]]:
         try:
             rec = json.loads(line)
             if isinstance(rec, dict) and "level" in rec and "message" in rec:
-                records.append(rec)
+                records.append(McpLogRecord(rec["level"], rec["message"]))
                 continue
         except (json.JSONDecodeError, ValueError):
             pass
-        records.append({"level": "raw", "message": line})
+        records.append(McpLogRecord("raw", line))
     # stdout contains subprocess/command output
     for line in stdout.splitlines():
         stripped = line.rstrip()
         if stripped:
-            records.append({"level": "output", "message": stripped})
+            records.append(McpLogRecord("output", stripped))
     return records
 
 

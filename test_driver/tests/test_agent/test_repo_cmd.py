@@ -18,6 +18,7 @@ from repo_tools.agent.repo_cmd import (
     build_repo_run_schema,
     call_repo_run,
 )
+from repo_tools.core import McpLogRecord
 
 
 # ── Discovery ────────────────────────────────────────────────────────────────
@@ -462,7 +463,7 @@ def test_format_mcp_output_default_returns_none():
         name = "stub"
         def execute(self, ctx, args): pass
 
-    records = [{"level": "output", "message": "out"}]
+    records = [McpLogRecord("output", "out")]
     assert _Stub().format_mcp_output(records, 0) is None
 
 
@@ -485,7 +486,7 @@ def test_apply_output_filter_with_custom_filter():
     saved = dict(_TOOL_REGISTRY)
     try:
         _TOOL_REGISTRY["filtered"] = _Filtered()
-        records = [{"level": "output", "message": "raw"}]
+        records = [McpLogRecord("output", "raw")]
         result = {"text": "raw", "stdout": "raw", "stderr": "", "returncode": 0, "records": records}
         out = _apply_output_filter("filtered", result)
         assert out["text"] == "FILTERED"
@@ -558,8 +559,8 @@ def test_parse_records_json_lines():
     stderr = '{"level": "info", "message": "Running tests..."}\n{"level": "error", "message": "Failed"}\n'
     records = _parse_records("", stderr)
     assert len(records) == 2
-    assert records[0] == {"level": "info", "message": "Running tests..."}
-    assert records[1] == {"level": "error", "message": "Failed"}
+    assert records[0] == McpLogRecord("info", "Running tests...")
+    assert records[1] == McpLogRecord("error", "Failed")
 
 
 def test_parse_records_non_json_fallback():
@@ -567,7 +568,7 @@ def test_parse_records_non_json_fallback():
     stderr = "plain text warning\n"
     records = _parse_records("", stderr)
     assert len(records) == 1
-    assert records[0] == {"level": "raw", "message": "plain text warning"}
+    assert records[0] == McpLogRecord("raw", "plain text warning")
 
 
 def test_parse_records_stdout_as_output():
@@ -575,8 +576,8 @@ def test_parse_records_stdout_as_output():
     stdout = "test line 1\ntest line 2\n"
     records = _parse_records(stdout, "")
     assert len(records) == 2
-    assert records[0] == {"level": "output", "message": "test line 1"}
-    assert records[1] == {"level": "output", "message": "test line 2"}
+    assert records[0] == McpLogRecord("output", "test line 1")
+    assert records[1] == McpLogRecord("output", "test line 2")
 
 
 def test_parse_records_mixed():
@@ -584,9 +585,9 @@ def test_parse_records_mixed():
     stderr = '{"level": "info", "message": "starting"}\nnot json\n'
     stdout = "output line\n"
     records = _parse_records(stdout, stderr)
-    assert records[0] == {"level": "info", "message": "starting"}
-    assert records[1] == {"level": "raw", "message": "not json"}
-    assert records[2] == {"level": "output", "message": "output line"}
+    assert records[0] == McpLogRecord("info", "starting")
+    assert records[1] == McpLogRecord("raw", "not json")
+    assert records[2] == McpLogRecord("output", "output line")
 
 
 def test_parse_records_skips_blank_lines():
@@ -599,7 +600,7 @@ def test_parse_records_invalid_json_structure():
     """JSON that parses but lacks level/message keys becomes raw."""
     stderr = '{"foo": "bar"}\n'
     records = _parse_records("", stderr)
-    assert records[0] == {"level": "raw", "message": '{"foo": "bar"}'}
+    assert records[0] == McpLogRecord("raw", '{"foo": "bar"}')
 
 
 def test_call_repo_run_returns_records(tmp_path):
@@ -612,5 +613,5 @@ def test_call_repo_run_returns_records(tmp_path):
     with patch("subprocess.run", return_value=mock_proc):
         result = call_repo_run("test", {}, workspace_root=tmp_path)
 
-    assert result["records"][0] == {"level": "info", "message": "hello"}
-    assert result["records"][1] == {"level": "output", "message": "test output"}
+    assert result["records"][0] == McpLogRecord("info", "hello")
+    assert result["records"][1] == McpLogRecord("output", "test output")
