@@ -129,9 +129,12 @@ def _make_repo_run_tool(workspace_root: Path):
                 "content": [{"type": "text", "text": f"Unknown command: {command!r}"}],
                 "is_error": True,
             }
+        from ..repo_cmd import _apply_output_filter
+
         result = await asyncio.to_thread(
             call_repo_run, command, args, workspace_root=workspace_root,
         )
+        result = _apply_output_filter(command, result)
         return {
             "content": [{"type": "text", "text": result.get("text", "")}],
             **({"is_error": True} if result.get("isError") else {}),

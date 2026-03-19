@@ -542,6 +542,14 @@ class RepoTool:
         """Execute the tool with context and tool-specific args."""
         raise NotImplementedError
 
+    def format_mcp_output(self, stdout: str, stderr: str, returncode: int) -> str | None:
+        """Filter subprocess output for MCP tool responses.
+
+        Return a string to override the default output, or ``None`` to use
+        raw stdout+stderr.  Only called on successful runs (returncode 0).
+        """
+        return None
+
 
 # ── Tool Registry ────────────────────────────────────────────────────
 

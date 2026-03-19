@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from repo_tools.agent.repo_cmd import (
+    _apply_output_filter,
     _discover_registered_tools,
     _discover_repo_commands,
     _merge_commands,
@@ -94,6 +95,9 @@ def test_call_repo_run_success(tmp_path):
 
     assert result["text"] == "All tests passed."
     assert "isError" not in result
+    assert result["stdout"] == "All tests passed.\n"
+    assert result["stderr"] == ""
+    assert result["returncode"] == 0
     cmd = mock_run.call_args[0][0]
     assert "repo_tools.cli" in " ".join(cmd)
     assert "test" in cmd
@@ -124,6 +128,9 @@ def test_call_repo_run_failure(tmp_path):
 
     assert result["isError"] is True
     assert "build failed" in result["text"]
+    assert result["stdout"] == ""
+    assert result["stderr"] == "Error: build failed\n"
+    assert result["returncode"] == 1
 
 
 def test_call_repo_run_timeout(tmp_path):
@@ -135,6 +142,9 @@ def test_call_repo_run_timeout(tmp_path):
 
     assert result["isError"] is True
     assert "timed out" in result["text"]
+    assert result["stdout"] == ""
+    assert result["stderr"] == ""
+    assert result["returncode"] == -1
 
 
 def test_call_repo_run_empty_output_success(tmp_path):
@@ -147,6 +157,9 @@ def test_call_repo_run_empty_output_success(tmp_path):
         result = call_repo_run("format", {}, workspace_root=tmp_path)
 
     assert result["text"] == "repo format completed."
+    assert result["stdout"] == ""
+    assert result["stderr"] == ""
+    assert result["returncode"] == 0
 
 
 def test_call_repo_run_empty_output_failure(tmp_path):
@@ -160,6 +173,7 @@ def test_call_repo_run_empty_output_failure(tmp_path):
 
     assert result["isError"] is True
     assert "exit code 2" in result["text"]
+    assert result["returncode"] == 2
 
 
 # ── Schema/handler builders ──────────────────────────────────────────────────
@@ -428,3 +442,99 @@ def test_mcp_extra_tools_callable(tmp_path):
         )
     result = responses[0]["result"]
     assert "cleaned" in result["content"][0]["text"]
+
+
+# ── format_mcp_output / _apply_output_filter ─────────────────────────────────
+
+
+def test_format_mcp_output_default_returns_none():
+    """Base RepoTool.format_mcp_output returns None (no filtering)."""
+    from repo_tools.core import RepoTool
+
+    class _Stub(RepoTool):
+        name = "stub"
+        def execute(self, ctx, args): pass
+
+    assert _Stub().format_mcp_output("out", "err", 0) is None
+
+
+def test_apply_output_filter_no_tool_in_registry():
+    """When no tool is registered for the subcommand, result passes through."""
+    result = {"text": "hello", "stdout": "hello", "stderr": "", "returncode": 0}
+    assert _apply_output_filter("nonexistent_cmd", result) is result
+
+
+def test_apply_output_filter_with_custom_filter():
+    """A tool with a custom filter replaces the text field."""
+    from repo_tools.core import RepoTool, _TOOL_REGISTRY
+
+    class _Filtered(RepoTool):
+        name = "filtered"
+        def execute(self, ctx, args): pass
+        def format_mcp_output(self, stdout, stderr, returncode):
+            return "FILTERED"
+
+    saved = dict(_TOOL_REGISTRY)
+    try:
+        _TOOL_REGISTRY["filtered"] = _Filtered()
+        result = {"text": "raw", "stdout": "raw", "stderr": "", "returncode": 0}
+        out = _apply_output_filter("filtered", result)
+        assert out["text"] == "FILTERED"
+        assert out["stdout"] == "raw"
+    finally:
+        _TOOL_REGISTRY.clear()
+        _TOOL_REGISTRY.update(saved)
+
+
+def test_apply_output_filter_returns_none_uses_raw():
+    """A tool with default format_mcp_output (returns None) leaves result unchanged."""
+    from repo_tools.core import RepoTool, _TOOL_REGISTRY
+
+    class _Default(RepoTool):
+        name = "defaultfmt"
+        def execute(self, ctx, args): pass
+
+    saved = dict(_TOOL_REGISTRY)
+    try:
+        _TOOL_REGISTRY["defaultfmt"] = _Default()
+        result = {"text": "raw", "stdout": "raw", "stderr": "", "returncode": 0}
+        assert _apply_output_filter("defaultfmt", result) is result
+    finally:
+        _TOOL_REGISTRY.clear()
+        _TOOL_REGISTRY.update(saved)
+
+
+def test_apply_output_filter_skips_errors():
+    """Error results pass through unfiltered even if a tool is registered."""
+    from repo_tools.core import RepoTool, _TOOL_REGISTRY
+
+    class _Filtered(RepoTool):
+        name = "errskip"
+        def execute(self, ctx, args): pass
+        def format_mcp_output(self, stdout, stderr, returncode):
+            return "SHOULD NOT APPEAR"
+
+    saved = dict(_TOOL_REGISTRY)
+    try:
+        _TOOL_REGISTRY["errskip"] = _Filtered()
+        result = {"isError": True, "text": "error", "stdout": "", "stderr": "err", "returncode": 1}
+        assert _apply_output_filter("errskip", result) is result
+    finally:
+        _TOOL_REGISTRY.clear()
+        _TOOL_REGISTRY.update(saved)
+
+
+def test_call_repo_run_returns_stdout_stderr_returncode(tmp_path):
+    """Verify new keys are present on success."""
+    mock_proc = MagicMock()
+    mock_proc.stdout = "output\n"
+    mock_proc.stderr = "warn\n"
+    mock_proc.returncode = 0
+
+    with patch("subprocess.run", return_value=mock_proc):
+        result = call_repo_run("test", {}, workspace_root=tmp_path)
+
+    assert result["stdout"] == "output\n"
+    assert result["stderr"] == "warn\n"
+    assert result["returncode"] == 0
+    assert "isError" not in result

@@ -78,11 +78,47 @@ def call_repo_run(
             timeout=300, cwd=str(workspace_root),
         )
     except subprocess.TimeoutExpired:
-        return {"isError": True, "text": f"repo {subcommand}: timed out after 300s"}
+        return {
+            "isError": True,
+            "text": f"repo {subcommand}: timed out after 300s",
+            "stdout": "",
+            "stderr": "",
+            "returncode": -1,
+        }
     output = (proc.stdout or "") + (proc.stderr or "")
     if proc.returncode != 0:
-        return {"isError": True, "text": output.strip() or f"exit code {proc.returncode}"}
-    return {"text": output.strip() or f"repo {subcommand} completed."}
+        return {
+            "isError": True,
+            "text": output.strip() or f"exit code {proc.returncode}",
+            "stdout": proc.stdout or "",
+            "stderr": proc.stderr or "",
+            "returncode": proc.returncode,
+        }
+    return {
+        "text": output.strip() or f"repo {subcommand} completed.",
+        "stdout": proc.stdout or "",
+        "stderr": proc.stderr or "",
+        "returncode": proc.returncode,
+    }
+
+
+def _apply_output_filter(subcommand: str, result: dict[str, Any]) -> dict[str, Any]:
+    """Apply RepoTool.format_mcp_output if the tool is in the registry."""
+    if result.get("isError"):
+        return result
+    from ..core import get_tool
+
+    tool = get_tool(subcommand)
+    if tool is None:
+        return result
+    filtered = tool.format_mcp_output(
+        result["stdout"],
+        result["stderr"],
+        result["returncode"],
+    )
+    if filtered is not None:
+        return {**result, "text": filtered}
+    return result
 
 
 def build_repo_run_schema(
@@ -127,7 +163,8 @@ def build_repo_run_handler(
         command = args.get("command", "")
         if command not in known:
             return {"isError": True, "text": f"Unknown command: {command!r}"}
-        return call_repo_run(command, args, workspace_root=workspace_root)
+        result = call_repo_run(command, args, workspace_root=workspace_root)
+        return _apply_output_filter(command, result)
 
     return ("repo_run", handler)
 
