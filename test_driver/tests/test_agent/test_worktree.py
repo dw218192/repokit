@@ -163,23 +163,19 @@ class TestPromptTemplates:
         assert "{framework_root}" not in content
 
     def test_worker_references_mcp_tools(self, prompts_dir):
-        """Worker prompt should reference repo_build and repo_test MCP tools."""
+        """Worker prompt should reference repo_run MCP tool."""
         content = (prompts_dir / "worker.txt").read_text(encoding="utf-8")
-        assert "repo_build" in content
-        assert "repo_test" in content
+        assert "repo_run" in content
 
     def test_reviewer_references_mcp_tools(self, prompts_dir):
-        """Reviewer prompt should reference repo_build and repo_test MCP tools."""
+        """Reviewer prompt should reference repo_run MCP tool."""
         content = (prompts_dir / "reviewer.txt").read_text(encoding="utf-8")
-        assert "repo_build" in content
-        assert "repo_test" in content
+        assert "repo_run" in content
 
     def test_common_references_mcp_tools(self, prompts_dir):
-        """Common prompt should list available MCP tools."""
+        """Common prompt should list repo_run MCP tool."""
         content = (prompts_dir / "common.txt").read_text(encoding="utf-8")
-        assert "repo_build" in content
-        assert "repo_test" in content
-        assert "repo_format" in content
+        assert "repo_run" in content
 
 
 # ── _render_role_prompt (no {repo_cmd}) ──────────────────────────
@@ -198,7 +194,7 @@ class TestRenderRolePrompt:
             project_root="/tmp/project",
         )
         assert "test-1" in result
-        assert "repo_build" in result
+        assert "repo_run" in result
 
     def test_reviewer_renders_without_repo_cmd(self):
         from repo_tools.agent.tool import _render_role_prompt
@@ -210,10 +206,10 @@ class TestRenderRolePrompt:
             project_root="/tmp/project",
         )
         assert "test-1" in result
-        assert "repo_build" in result
+        assert "repo_run" in result
 
     def test_orchestrator_renders_without_kwargs(self):
         from repo_tools.agent.tool import _render_role_prompt
 
         result = _render_role_prompt("orchestrator")
-        assert "repo_build" in result
+        assert "repo_run" in result
