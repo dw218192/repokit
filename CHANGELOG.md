@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.22
+
+- **MCP**: Auto-log full command output to `_build/logs/mcp/<command>.log` before applying output filters — every MCP `repo_run` invocation gets a persistent log file.
+- **MCP**: Bootstrap tool registration in MCP server process via `_ensure_tools_registered()` so `format_mcp_output` overrides on project tools are discovered and applied.
+
 ## 0.7.21
 
 - **Tests**: Update `test_worktree.py` to check for `repo_run` instead of `repo_build`/`repo_test`/`repo_format` — aligned with the `repo_run` consolidation from 0.7.19.
