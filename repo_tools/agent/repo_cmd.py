@@ -146,17 +146,29 @@ def _parse_records(stdout: str, stderr: str) -> list:
 
 
 def _apply_output_filter(subcommand: str, result: dict[str, Any]) -> dict[str, Any]:
-    """Apply RepoTool.format_mcp_output if the tool is in the registry."""
+    """Apply RepoTool.format_mcp_output by importing the tool module directly."""
     if result.get("isError"):
         return result
-    from ..core import get_tool
+    try:
+        import importlib
 
-    tool = get_tool(subcommand)
-    if tool is None:
-        return result
-    filtered = tool.format_mcp_output(result.get("records", []), result["returncode"])
-    if filtered is not None:
-        return {**result, "text": filtered}
+        from ..core import RepoTool
+
+        mod = importlib.import_module(f"repo_tools.{subcommand}")
+        for attr in vars(mod).values():
+            if (
+                isinstance(attr, type)
+                and issubclass(attr, RepoTool)
+                and attr is not RepoTool
+            ):
+                filtered = attr().format_mcp_output(
+                    result.get("records", []), result["returncode"]
+                )
+                if filtered is not None:
+                    return {**result, "text": filtered}
+                break
+    except Exception:
+        pass
     return result
 
 
@@ -189,57 +201,12 @@ def build_repo_run_schema(
     }
 
 
-_tools_registered = False
-
-
-def _ensure_tools_registered() -> None:
-    """Bootstrap tool registration in the MCP process for output filtering.
-
-    Uses the same namespace-package discovery as the CLI so that project
-    tools with ``format_mcp_output`` overrides are found automatically.
-    """
-    global _tools_registered
-    if _tools_registered:
-        return
-    _tools_registered = True
-    try:
-        import importlib
-        import pkgutil
-
-        from ..core import RepoTool, register_tool
-
-        import repo_tools as rt_pkg
-
-        for mod_info in pkgutil.iter_modules(rt_pkg.__path__):
-            name = mod_info.name
-            if name.startswith("_") or name in ("cli", "core", "command_runner"):
-                continue
-            try:
-                mod = importlib.import_module(f"repo_tools.{name}")
-            except Exception:
-                continue
-            for attr in vars(mod).values():
-                if (
-                    isinstance(attr, type)
-                    and issubclass(attr, RepoTool)
-                    and attr is not RepoTool
-                    and hasattr(attr, "name")
-                ):
-                    try:
-                        register_tool(attr())
-                    except Exception:
-                        pass
-    except Exception:
-        pass  # non-critical: output filtering degrades to raw
-
-
 def build_repo_run_handler(
     config: dict[str, Any],
     workspace_root: Path,
     extra: list[dict[str, str]] | None = None,
 ) -> tuple[str, Any]:
     """Build a single ``repo_run`` handler that dispatches by command name."""
-    _ensure_tools_registered()
     all_cmds = _merge_commands(_discover_repo_commands(config), extra)
     known = {c["name"] for c in all_cmds}
 

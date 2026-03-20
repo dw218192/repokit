@@ -1,9 +1,12 @@
 # Changelog
 
+## 0.7.23
+
+- **MCP**: Simplify output filter lookup — `_apply_output_filter` imports the tool module directly by name instead of bootstrapping the full tool registry. Removes `_ensure_tools_registered()`.
+
 ## 0.7.22
 
-- **MCP**: Auto-log full command output to `_build/logs/mcp/<command>.log` before applying output filters — every MCP `repo_run` invocation gets a persistent log file.
-- **MCP**: Bootstrap tool registration in MCP server process via `_ensure_tools_registered()` so `format_mcp_output` overrides on project tools are discovered and applied.
+- **MCP**: Auto-log full command output to `_build/logs/mcp/<command>.log` before applying output filters.
 
 ## 0.7.21
 
