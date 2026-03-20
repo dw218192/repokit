@@ -8,11 +8,11 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from repo_tools.cli import (
-    _auto_register_config_tools,
     _build_cli,
     _build_tool_context,
     _get_dimension_tokens,
 )
+from repo_tools.core import auto_register_config_tools as _auto_register_config_tools
 
 
 class TestGetDimensionTokens:

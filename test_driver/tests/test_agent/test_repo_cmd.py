@@ -479,6 +479,62 @@ def test_apply_output_filter_skips_errors():
     assert _apply_output_filter("errskip", result) is result
 
 
+def test_apply_output_filter_uses_registry():
+    """When a tool is registered, _apply_output_filter calls format_mcp_output."""
+    from repo_tools.core import RepoTool, register_tool
+
+    class _FilterTool(RepoTool):
+        name = "myfilter"
+        def execute(self, ctx, args): pass
+        def format_mcp_output(self, records, returncode):
+            return "filtered output"
+
+    register_tool(_FilterTool())
+    result = {
+        "text": "raw output", "stdout": "raw output", "stderr": "",
+        "returncode": 0, "records": [McpLogRecord("output", "raw output")],
+    }
+    filtered = _apply_output_filter("myfilter", result)
+    assert filtered["text"] == "filtered output"
+    assert filtered["stdout"] == "raw output"
+
+
+def test_apply_output_filter_none_means_passthrough():
+    """When format_mcp_output returns None, result passes through unchanged."""
+    from repo_tools.core import RepoTool, register_tool
+
+    class _NoFilterTool(RepoTool):
+        name = "nofilter"
+        def execute(self, ctx, args): pass
+
+    register_tool(_NoFilterTool())
+    result = {
+        "text": "original", "stdout": "original", "stderr": "",
+        "returncode": 0, "records": [],
+    }
+    assert _apply_output_filter("nofilter", result) is result
+
+
+def test_apply_output_filter_propagates_errors():
+    """If format_mcp_output raises, the error propagates (not swallowed)."""
+    import pytest as _pytest
+    from repo_tools.core import RepoTool, register_tool
+
+    class _BrokenTool(RepoTool):
+        name = "broken"
+        def execute(self, ctx, args): pass
+        def format_mcp_output(self, records, returncode):
+            raise ValueError("filter bug")
+
+    register_tool(_BrokenTool())
+    result = {
+        "text": "ok", "stdout": "ok", "stderr": "",
+        "returncode": 0, "records": [],
+    }
+    with _pytest.raises(ValueError, match="filter bug"):
+        _apply_output_filter("broken", result)
+
+
 def test_call_repo_run_returns_stdout_stderr_returncode(tmp_path):
     """Verify new keys are present on success."""
     mock_proc = MagicMock()

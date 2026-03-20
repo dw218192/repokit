@@ -1,6 +1,6 @@
 [project]
 name = "repokit"
-version = "0.7.23"
+version = "0.7.24"
 requires-python = ">=3.11"
 dependencies = [
     "click>=8.0",

@@ -15,8 +15,12 @@ from repo_tools.core import (
     detect_platform_identifier,
     find_venv_executable,
     _map_platform_identifier,
+    _TOOL_REGISTRY,
+    auto_register_config_tools,
+    discover_tools,
     invoke_tool,
     log_section,
+    populate_registry,
     print_subprocess_line,
     register_tool,
     remove_tree_with_retries,
@@ -411,3 +415,67 @@ class TestResolveToolConfig:
         tc = {"schema": '{"type": "object"}'}
         result = resolve_tool_config(tc, {})
         assert result["schema"] == '{"type": "object"}'
+
+
+# ── discover_tools / populate_registry ────────────────────────────
+
+
+class TestDiscoverTools:
+    def test_finds_framework_tools(self):
+        tools = discover_tools()
+        names = {t.name for t in tools}
+        assert "clean" in names
+        assert "format" in names
+        assert "context" in names
+
+    def test_skips_cli_core_command_runner(self):
+        tools = discover_tools()
+        modules = {t.__class__.__module__ for t in tools}
+        assert not any(m.endswith((".cli", ".core", ".command_runner")) for m in modules)
+
+
+class TestAutoRegisterConfigTools:
+    def test_creates_tools_from_config(self):
+        config = {"mytest": {"steps": ["echo hello"]}, "mybuild": {"steps": ["make"]}}
+        tools = auto_register_config_tools(config, set())
+        names = {t.name for t in tools}
+        assert "mytest" in names
+        assert "mybuild" in names
+
+    def test_skips_registered_names(self):
+        config = {"clean": {"steps": ["rm -rf"]}, "test": {"steps": ["pytest"]}}
+        tools = auto_register_config_tools(config, {"clean"})
+        names = {t.name for t in tools}
+        assert "clean" not in names
+        assert "test" in names
+
+    def test_skips_tokens_and_repo(self):
+        config = {"tokens": {"steps": ["x"]}, "repo": {"steps": ["y"]}, "real": {"steps": ["z"]}}
+        tools = auto_register_config_tools(config, set())
+        names = {t.name for t in tools}
+        assert "tokens" not in names
+        assert "repo" not in names
+        assert "real" in names
+
+
+class TestPopulateRegistry:
+    def test_populates(self):
+        assert len(_TOOL_REGISTRY) == 0
+        populate_registry()
+        assert len(_TOOL_REGISTRY) > 0
+        assert "clean" in _TOOL_REGISTRY
+
+    def test_with_config_tools(self):
+        config = {"mytest": {"steps": ["echo hello"]}}
+        populate_registry(config)
+        assert "mytest" in _TOOL_REGISTRY
+
+    def test_is_idempotent(self):
+        class _Sentinel(RepoTool):
+            name = "sentinel"
+            def execute(self, ctx, args): pass
+
+        register_tool(_Sentinel())
+        count_before = len(_TOOL_REGISTRY)
+        populate_registry()
+        assert len(_TOOL_REGISTRY) == count_before
