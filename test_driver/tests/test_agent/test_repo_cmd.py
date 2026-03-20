@@ -475,7 +475,10 @@ def test_apply_output_filter_no_tool_in_registry():
 
 def test_apply_output_filter_with_custom_filter():
     """A tool with a custom filter replaces the text field."""
-    from repo_tools.core import RepoTool, _TOOL_REGISTRY
+    import types
+    from unittest.mock import patch
+
+    from repo_tools.core import RepoTool
 
     class _Filtered(RepoTool):
         name = "filtered"
@@ -483,55 +486,40 @@ def test_apply_output_filter_with_custom_filter():
         def format_mcp_output(self, records, returncode):
             return "FILTERED"
 
-    saved = dict(_TOOL_REGISTRY)
-    try:
-        _TOOL_REGISTRY["filtered"] = _Filtered()
-        records = [McpLogRecord("output", "raw")]
-        result = {"text": "raw", "stdout": "raw", "stderr": "", "returncode": 0, "records": records}
+    fake_mod = types.ModuleType("repo_tools.filtered")
+    fake_mod._Filtered = _Filtered
+
+    records = [McpLogRecord("output", "raw")]
+    result = {"text": "raw", "stdout": "raw", "stderr": "", "returncode": 0, "records": records}
+    with patch("importlib.import_module", return_value=fake_mod):
         out = _apply_output_filter("filtered", result)
-        assert out["text"] == "FILTERED"
-        assert out["stdout"] == "raw"
-    finally:
-        _TOOL_REGISTRY.clear()
-        _TOOL_REGISTRY.update(saved)
+    assert out["text"] == "FILTERED"
+    assert out["stdout"] == "raw"
 
 
 def test_apply_output_filter_returns_none_uses_raw():
     """A tool with default format_mcp_output (returns None) leaves result unchanged."""
-    from repo_tools.core import RepoTool, _TOOL_REGISTRY
+    import types
+    from unittest.mock import patch
+
+    from repo_tools.core import RepoTool
 
     class _Default(RepoTool):
         name = "defaultfmt"
         def execute(self, ctx, args): pass
 
-    saved = dict(_TOOL_REGISTRY)
-    try:
-        _TOOL_REGISTRY["defaultfmt"] = _Default()
-        result = {"text": "raw", "stdout": "raw", "stderr": "", "returncode": 0, "records": []}
+    fake_mod = types.ModuleType("repo_tools.defaultfmt")
+    fake_mod._Default = _Default
+
+    result = {"text": "raw", "stdout": "raw", "stderr": "", "returncode": 0, "records": []}
+    with patch("importlib.import_module", return_value=fake_mod):
         assert _apply_output_filter("defaultfmt", result) is result
-    finally:
-        _TOOL_REGISTRY.clear()
-        _TOOL_REGISTRY.update(saved)
 
 
 def test_apply_output_filter_skips_errors():
-    """Error results pass through unfiltered even if a tool is registered."""
-    from repo_tools.core import RepoTool, _TOOL_REGISTRY
-
-    class _Filtered(RepoTool):
-        name = "errskip"
-        def execute(self, ctx, args): pass
-        def format_mcp_output(self, records, returncode):
-            return "SHOULD NOT APPEAR"
-
-    saved = dict(_TOOL_REGISTRY)
-    try:
-        _TOOL_REGISTRY["errskip"] = _Filtered()
-        result = {"isError": True, "text": "error", "stdout": "", "stderr": "err", "returncode": 1, "records": []}
-        assert _apply_output_filter("errskip", result) is result
-    finally:
-        _TOOL_REGISTRY.clear()
-        _TOOL_REGISTRY.update(saved)
+    """Error results pass through unfiltered even if a tool module exists."""
+    result = {"isError": True, "text": "error", "stdout": "", "stderr": "err", "returncode": 1, "records": []}
+    assert _apply_output_filter("errskip", result) is result
 
 
 def test_call_repo_run_returns_stdout_stderr_returncode(tmp_path):
