@@ -99,8 +99,8 @@ def call_repo_run(
     log_file = log_dir / f"{subcommand}.log"
     try:
         log_file.write_text(output, encoding="utf-8", errors="replace")
-    except OSError:
-        pass
+    except OSError as exc:
+        print(f"warning: could not write MCP log {log_file}: {exc}", file=sys.stderr)
     if proc.returncode != 0:
         return {
             "isError": True,
@@ -146,29 +146,21 @@ def _parse_records(stdout: str, stderr: str) -> list:
 
 
 def _apply_output_filter(subcommand: str, result: dict[str, Any]) -> dict[str, Any]:
-    """Apply RepoTool.format_mcp_output by importing the tool module directly."""
+    """Apply :meth:`RepoTool.format_mcp_output` if the tool is registered."""
     if result.get("isError"):
         return result
-    try:
-        import importlib
 
-        from ..core import RepoTool
+    from ..core import get_tool
 
-        mod = importlib.import_module(f"repo_tools.{subcommand}")
-        for attr in vars(mod).values():
-            if (
-                isinstance(attr, type)
-                and issubclass(attr, RepoTool)
-                and attr is not RepoTool
-            ):
-                filtered = attr().format_mcp_output(
-                    result.get("records", []), result["returncode"]
-                )
-                if filtered is not None:
-                    return {**result, "text": filtered}
-                break
-    except Exception:
-        pass
+    tool = get_tool(subcommand)
+    if tool is None:
+        return result
+
+    filtered = tool.format_mcp_output(
+        result.get("records", []), result["returncode"],
+    )
+    if filtered is not None:
+        return {**result, "text": filtered}
     return result
 
 

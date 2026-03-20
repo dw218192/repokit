@@ -22,8 +22,8 @@ def write_log(log_path: Path, command: str, decision: str, reason: str = "") -> 
             line += f"  # {reason}"
         with log_path.open("a", encoding="utf-8") as f:
             f.write(line + "\n")
-    except OSError:
-        pass  # Never let logging break the hook
+    except OSError as exc:
+        print(f"warning: hook log write failed: {exc}", file=sys.stderr)
 
 
 def main() -> None:

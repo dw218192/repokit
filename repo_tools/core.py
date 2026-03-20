@@ -595,6 +595,124 @@ def registered_tool_deps() -> list[str]:
     return sorted(seen)
 
 
+# ── Tool Discovery ───────────────────────────────────────────────────
+
+
+def discover_tools(
+    namespace_path: list[str] | None = None,
+    package_name: str = "repo_tools",
+) -> list[RepoTool]:
+    """Discover ``RepoTool`` subclasses from namespace package portions.
+
+    If *namespace_path* is ``None``, it is resolved from the already-imported
+    ``repo_tools`` package.  Skips private modules, ``cli``, ``core``, and
+    ``command_runner``.
+    """
+    import importlib
+    import inspect
+    import pkgutil
+
+    if namespace_path is None:
+        import repo_tools as rt_pkg
+
+        namespace_path = list(rt_pkg.__path__)
+
+    tools: list[RepoTool] = []
+    for module_info in pkgutil.iter_modules(namespace_path):
+        name = module_info.name
+        if name.startswith("_") or name in ("cli", "core", "command_runner"):
+            continue
+        try:
+            module = importlib.import_module(f"{package_name}.{name}")
+        except ImportError as exc:
+            logger.debug("Could not import %s.%s: %s", package_name, name, exc)
+            continue
+        except Exception as exc:
+            logger.warning("Failed to import %s.%s: %s", package_name, name, exc)
+            continue
+
+        for _, cls in inspect.getmembers(module, inspect.isclass):
+            if cls is RepoTool or not issubclass(cls, RepoTool):
+                continue
+            # For regular modules, class must be defined there
+            # For packages, class can be re-exported from __init__.py
+            if not module_info.ispkg and cls.__module__ != module.__name__:
+                continue
+            if module_info.ispkg and not cls.__module__.startswith(module.__name__):
+                continue
+            try:
+                tool = cls()
+            except ImportError as exc:
+                logger.debug(
+                    "Skipping tool '%s' (missing dependency): %s", cls.__name__, exc
+                )
+                continue
+            except Exception as exc:
+                logger.warning(
+                    "Skipping tool '%s' due to init error: %s", cls.__name__, exc
+                )
+                continue
+            if not tool.name:
+                logger.warning("Skipping tool '%s' with empty name", cls.__name__)
+                continue
+            tools.append(tool)
+    return tools
+
+
+def auto_register_config_tools(
+    config: dict[str, Any],
+    registered_names: set[str],
+) -> list[RepoTool]:
+    """Create ``CommandRunnerTool`` instances for config sections with ``steps`` keys.
+
+    Sections whose name is already in *registered_names* or in the
+    fixed skip-set (``tokens``, ``repo``) are ignored.
+    """
+    from .command_runner import CommandRunnerTool
+
+    _skip_sections = {"tokens", "repo"}
+    auto_tools: list[RepoTool] = []
+
+    for section_name, section_value in config.items():
+        if section_name in _skip_sections:
+            continue
+        if section_name in registered_names:
+            continue
+        if not isinstance(section_value, dict):
+            continue
+        has_steps = any(k.split("@", 1)[0] == "steps" for k in section_value)
+        if not has_steps:
+            continue
+        tool = CommandRunnerTool()
+        tool.name = section_name  # type: ignore[assignment]
+        tool.help = f"Run {section_name} (from config.yaml)"
+        auto_tools.append(tool)
+
+    return auto_tools
+
+
+def populate_registry(config: dict[str, Any] | None = None) -> None:
+    """Discover tools and populate :data:`_TOOL_REGISTRY`.
+
+    Finds all ``RepoTool`` subclasses from the ``repo_tools`` namespace
+    package, then creates ``CommandRunnerTool`` instances for any *config*
+    sections that contain ``steps`` keys.  Each discovered tool is
+    added via :func:`register_tool`.
+
+    No-op if the registry is already populated.
+    """
+    if _TOOL_REGISTRY:
+        return
+
+    for t in discover_tools():
+        register_tool(t)
+
+    if config:
+        registered_names = set(_TOOL_REGISTRY)
+        for t in auto_register_config_tools(config, registered_names):
+            register_tool(t)
+
+
 def _resolve_cfg_reference(value: str, config: dict[str, Any]) -> Any:
     """If *value* is a ``{cfg:dotted.path}`` reference, walk *config* and return the leaf."""
     stripped = value.strip()

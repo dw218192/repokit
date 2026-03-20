@@ -29,6 +29,11 @@ def main() -> None:
     config = json.loads(args.config)
     extra = json.loads(args.extra_tools) if args.extra_tools else None
 
+    # Populate the tool registry so _apply_output_filter can look up tools
+    from ...core import populate_registry
+
+    populate_registry(config)
+
     schema = build_repo_run_schema(config, extra=extra)
     name, handler = build_repo_run_handler(config, root, extra=extra)
 

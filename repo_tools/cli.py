@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import importlib
-import inspect
 import os
-import pkgutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -16,6 +14,8 @@ from .core import (
     RepoTool,
     ToolContext,
     _resolve_cfg_reference,
+    auto_register_config_tools,
+    discover_tools,
     load_config,
     logger,
     register_tool,
@@ -24,55 +24,6 @@ from .core import (
     resolve_tokens,
 )
 
-# ── Tool Discovery ───────────────────────────────────────────────────
-
-
-def _discover_tools_from_path(
-    namespace_path: list[str],
-    package_name: str,
-) -> list[RepoTool]:
-    """Discover RepoTool subclasses from namespace package portions."""
-    tools: list[RepoTool] = []
-    for module_info in pkgutil.iter_modules(namespace_path):
-        name = module_info.name
-        if name.startswith("_") or name in ("cli", "core", "command_runner"):
-            continue
-        try:
-            module = importlib.import_module(f"{package_name}.{name}")
-        except ImportError as exc:
-            logger.debug(f"Could not import {package_name}.{name}: {exc}")
-            continue
-        except Exception as exc:
-            logger.warning(f"Failed to import {package_name}.{name}: {exc}")
-            continue
-
-        for _, cls in inspect.getmembers(module, inspect.isclass):
-            if cls is RepoTool or not issubclass(cls, RepoTool):
-                continue
-            # For regular modules, class must be defined there
-            # For packages, class can be re-exported from __init__.py
-            if not module_info.ispkg and cls.__module__ != module.__name__:
-                continue
-            if module_info.ispkg and not cls.__module__.startswith(module.__name__):
-                continue
-            try:
-                tool = cls()
-            except ImportError as exc:
-                logger.debug(
-                    f"Skipping tool '{cls.__name__}' (missing dependency): {exc}"
-                )
-                continue
-            except Exception as exc:
-                logger.warning(
-                    f"Skipping tool '{cls.__name__}' due to init error: {exc}"
-                )
-                continue
-            if not tool.name:
-                logger.warning(f"Skipping tool '{cls.__name__}' with empty name")
-                continue
-            tools.append(tool)
-    return tools
-
 
 def _resolve_tools(framework_tools: list[RepoTool], project_tools: list[RepoTool]) -> list[RepoTool]:
     """Merge framework and project tools; project wins on name collision."""
@@ -80,43 +31,6 @@ def _resolve_tools(framework_tools: list[RepoTool], project_tools: list[RepoTool
     for t in project_tools:
         by_name[t.name] = t  # project wins
     return sorted(by_name.values(), key=lambda t: t.name)
-
-
-def _auto_register_config_tools(
-    config: dict[str, Any],
-    registered_names: set[str],
-) -> list[RepoTool]:
-    """Create CommandRunnerTools for eligible config sections.
-
-    A section is eligible when it contains a ``steps`` or ``steps@*`` key.
-    """
-    from .command_runner import CommandRunnerTool
-
-    _skip_sections = {"tokens", "repo"}
-    auto_tools: list[RepoTool] = []
-
-    for section_name, section_value in config.items():
-        if section_name in _skip_sections:
-            continue
-        if section_name in registered_names:
-            logger.debug(
-                f"[auto-tool] '{section_name}': skipped — a RepoTool subclass is already registered."
-            )
-            continue
-        if not isinstance(section_value, dict):
-            continue
-
-        has_steps = any(k.split("@", 1)[0] == "steps" for k in section_value)
-        if not has_steps:
-            continue
-
-        tool = CommandRunnerTool()
-        tool.name = section_name  # type: ignore[assignment]
-        tool.help = f"Run {section_name} (from config.yaml)"
-        auto_tools.append(tool)
-        logger.debug(f"[auto-tool] '{section_name}': registered from config.yaml.")
-
-    return auto_tools
 
 
 # ── Dimension Tokens → Click Options ────────────────────────────────
@@ -324,7 +238,7 @@ def _build_cli(
     import repo_tools as rt_pkg
 
     # Discover all tools from merged namespace package
-    all_tools = _discover_tools_from_path(
+    all_tools = discover_tools(
         list(rt_pkg.__path__), rt_pkg.__name__
     )
 
@@ -344,7 +258,7 @@ def _build_cli(
 
     # Config steps override framework tools but not project tools.
     project_names = {t.name for t in project_tools}
-    auto_tools = _auto_register_config_tools(early_config, project_names)
+    auto_tools = auto_register_config_tools(early_config, project_names)
     if auto_tools:
         auto_names = {t.name for t in auto_tools}
         tools = [t for t in tools if t.name not in auto_names]

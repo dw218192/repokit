@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.24
+
+- **MCP**: Fix `_apply_output_filter` — populate `_TOOL_REGISTRY` in MCP subprocess via `populate_registry()` so `get_tool()` lookup works. Replace hacky `importlib.import_module` fallback with direct registry lookup; errors now propagate instead of being silently swallowed.
+- **Core**: Extract `discover_tools()`, `auto_register_config_tools()`, `populate_registry()` from `cli.py` into `core.py` for reuse by MCP servers.
+- **Agent**: Remove silent `except OSError: pass` in MCP log writes and hook log writes — warnings now print to stderr.
+
 ## 0.7.23
 
 - **MCP**: Simplify output filter lookup — `_apply_output_filter` imports the tool module directly by name instead of bootstrapping the full tool registry. Removes `_ensure_tools_registered()`.
