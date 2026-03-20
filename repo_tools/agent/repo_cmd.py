@@ -92,6 +92,15 @@ def call_repo_run(
         }
     output = (proc.stdout or "") + (proc.stderr or "")
     records = _parse_records(proc.stdout or "", proc.stderr or "")
+
+    # Write full output to a log file so filtered MCP output can reference it
+    log_dir = workspace_root / "_build" / "logs" / "mcp"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / f"{subcommand}.log"
+    try:
+        log_file.write_text(output, encoding="utf-8", errors="replace")
+    except OSError:
+        pass
     if proc.returncode != 0:
         return {
             "isError": True,
@@ -137,17 +146,29 @@ def _parse_records(stdout: str, stderr: str) -> list:
 
 
 def _apply_output_filter(subcommand: str, result: dict[str, Any]) -> dict[str, Any]:
-    """Apply RepoTool.format_mcp_output if the tool is in the registry."""
+    """Apply RepoTool.format_mcp_output by importing the tool module directly."""
     if result.get("isError"):
         return result
-    from ..core import get_tool
+    try:
+        import importlib
 
-    tool = get_tool(subcommand)
-    if tool is None:
-        return result
-    filtered = tool.format_mcp_output(result.get("records", []), result["returncode"])
-    if filtered is not None:
-        return {**result, "text": filtered}
+        from ..core import RepoTool
+
+        mod = importlib.import_module(f"repo_tools.{subcommand}")
+        for attr in vars(mod).values():
+            if (
+                isinstance(attr, type)
+                and issubclass(attr, RepoTool)
+                and attr is not RepoTool
+            ):
+                filtered = attr().format_mcp_output(
+                    result.get("records", []), result["returncode"]
+                )
+                if filtered is not None:
+                    return {**result, "text": filtered}
+                break
+    except Exception:
+        pass
     return result
 
 
