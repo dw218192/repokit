@@ -30,6 +30,7 @@ class Rule:
     reason: str | None = None
     dir: str | None = None  # "project_root" or "!project_root"
     roles: list[str] | None = None  # if set, rule only applies to listed roles
+    override_deny: bool = False  # allow rules only: when True, overrides matching deny rules
 
 
 @dataclass
@@ -83,7 +84,7 @@ def _compile_rule_list(entries: list, section: str, role: str | None = None) -> 
                 raise ValueError(
                     f"{section}[{i}] ({name!r}): invalid regex {pat!r}: {exc}"
                 ) from exc
-        rules.append(Rule(name=name, patterns=compiled, reason=r.get("reason"), dir=r.get("dir"), roles=rule_roles))
+        rules.append(Rule(name=name, patterns=compiled, reason=r.get("reason"), dir=r.get("dir"), roles=rule_roles, override_deny=bool(r.get("override_deny", False))))
     return rules
 
 
@@ -228,11 +229,26 @@ def check_command(
         return False, rules.default_reason
 
     for rule in rules.deny:
-        if any(
-            any(pat.search(cmd) for pat in rule.patterns)
-            for cmd in commands
-        ) and (_check_dir_constraint(rule.dir, project_root, cwd) if rule.dir else True):
-                return False, rule.reason or rules.default_reason
+        denied_cmds = [
+            cmd for cmd in commands
+            if any(pat.search(cmd) for pat in rule.patterns)
+        ]
+        if not denied_cmds:
+            continue
+        if rule.dir and not _check_dir_constraint(rule.dir, project_root, cwd):
+            continue
+        # Check if every denied command is covered by an allow rule with override_deny
+        all_overridden = all(
+            any(
+                ar.override_deny
+                and any(pat.search(cmd) for pat in ar.patterns)
+                and (not ar.dir or _check_dir_constraint(ar.dir, project_root, cwd))
+                for ar in rules.allow
+            )
+            for cmd in denied_cmds
+        )
+        if not all_overridden:
+            return False, rule.reason or rules.default_reason
 
     for cmd in commands:
         matched_rule = None
