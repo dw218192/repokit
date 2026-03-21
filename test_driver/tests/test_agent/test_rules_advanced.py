@@ -214,3 +214,120 @@ class TestEnvPrefixExtraction:
     def test_bare_assignment_ignored(self):
         result = _extract_commands("FOO=bar")
         assert result == []
+
+
+# ── override_deny ────────────────────────────────────────────────
+
+
+class TestOverrideDeny:
+    """Allow rules with override_deny=True can override matching deny rules."""
+
+    def _make_rules(self, override_deny=False):
+        return RuleSet(
+            default_reason="not allowed",
+            deny=[
+                Rule(
+                    name="git_rewrite",
+                    patterns=[re.compile(r"git\s+commit\s.*--amend")],
+                    reason="history rewrite blocked",
+                ),
+            ],
+            allow=[
+                Rule(
+                    name="git",
+                    patterns=[re.compile(r"^git\b")],
+                ),
+                Rule(
+                    name="safe_rewrite",
+                    patterns=[re.compile(r"git\s+commit\s.*--amend")],
+                    override_deny=override_deny,
+                ),
+            ],
+        )
+
+    def test_deny_wins_without_override(self):
+        rules = self._make_rules(override_deny=False)
+        allowed, reason = check_command("git commit --amend -m fix", rules)
+        assert allowed is False
+        assert reason == "history rewrite blocked"
+
+    def test_allow_overrides_deny(self):
+        rules = self._make_rules(override_deny=True)
+        allowed, reason = check_command("git commit --amend -m fix", rules)
+        assert allowed is True
+
+    def test_generic_allow_does_not_override(self):
+        """A broad ^git allow without override_deny cannot override deny."""
+        rules = RuleSet(
+            default_reason="not allowed",
+            deny=[
+                Rule(
+                    name="git_rewrite",
+                    patterns=[re.compile(r"git\s+push\s.*--force")],
+                    reason="force push blocked",
+                ),
+            ],
+            allow=[
+                Rule(
+                    name="git",
+                    patterns=[re.compile(r"^git\b")],
+                    override_deny=False,
+                ),
+            ],
+        )
+        allowed, reason = check_command("git push --force", rules)
+        assert allowed is False
+
+    def test_override_respects_dir_constraint(self):
+        """override_deny allow rule with dir constraint that fails does not override."""
+        rules = RuleSet(
+            default_reason="not allowed",
+            deny=[
+                Rule(
+                    name="rm_deny",
+                    patterns=[re.compile(r"^rm\b")],
+                    reason="rm blocked",
+                ),
+            ],
+            allow=[
+                Rule(
+                    name="rm_in_project",
+                    patterns=[re.compile(r"^rm\b")],
+                    override_deny=True,
+                    dir="project_root",
+                ),
+            ],
+        )
+        # Outside project root — override should not apply
+        allowed, reason = check_command(
+            "rm -rf foo", rules,
+            project_root=Path("/proj"),
+            cwd=Path("/other"),
+        )
+        assert allowed is False
+
+    def test_override_with_compound_command(self):
+        """All denied subcommands must be overridden for the compound command to pass."""
+        rules = RuleSet(
+            default_reason="not allowed",
+            deny=[
+                Rule(
+                    name="git_rewrite",
+                    patterns=[re.compile(r"git\s+commit\s.*--amend")],
+                    reason="amend blocked",
+                ),
+            ],
+            allow=[
+                Rule(
+                    name="git",
+                    patterns=[re.compile(r"^git\b")],
+                ),
+                Rule(
+                    name="safe_amend",
+                    patterns=[re.compile(r"git\s+commit\s.*--amend")],
+                    override_deny=True,
+                ),
+            ],
+        )
+        allowed, reason = check_command("git add . && git commit --amend -m fix", rules)
+        assert allowed is True

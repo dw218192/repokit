@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.25
+
+- **Agent**: Add `override_deny` field to allow rules. When `true`, an allow rule can override a matching deny rule for the same command. Previously, deny rules always took precedence regardless of allow rules, making it impossible for extra allowlist files to carve out exceptions.
+
 ## 0.7.24
 
 - **MCP**: Fix `_apply_output_filter` — populate `_TOOL_REGISTRY` in MCP subprocess via `populate_registry()` so `get_tool()` lookup works. Replace hacky `importlib.import_module` fallback with direct registry lookup; errors now propagate instead of being silently swallowed.
