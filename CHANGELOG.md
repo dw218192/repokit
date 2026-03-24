@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.26
+
+- **Bootstrap**: Fix `repo.ps1` shim losing `--` (end-of-options separator) in PowerShell interactive and `-Command` modes. PowerShell strips `--` from `$args` before the script sees it; the shim now detects it via `$MyInvocation.Line` and re-inserts it so Python receives the full argument list.
+
 ## 0.7.25
 
 - **Agent**: Add `override_deny` field to allow rules. When `true`, an allow rule can override a matching deny rule for the same command. Previously, deny rules always took precedence regardless of allow rules, making it impossible for extra allowlist files to carve out exceptions.
