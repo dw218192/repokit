@@ -250,11 +250,24 @@ def write_shims(
         )
 
         ps1_shim = workspace_root / "repo.ps1"
+        # PowerShell strips '--' from $args in interactive / -Command mode.
+        # Detect it via $MyInvocation.Line and re-insert so Python sees the
+        # end-of-options separator.
         ps1_shim.write_text(
             f'$env:PATH = "{venv_bin};$env:PATH"\r\n'
             f'$env:PYTHONPATH = "{framework_root}"\r\n'
+            f"$a = $args\r\n"
+            f"if ($MyInvocation.Line -match '\\s--(?:\\s|$)') {{\r\n"
+            f"  $after = ($MyInvocation.Line -split '\\s--(?:\\s|$)', 2)[1].Trim()\r\n"
+            f"  $ac = if ($after) {{ @($after -split '\\s+').Count }} else {{ 0 }}\r\n"
+            f"  $bc = $args.Count - $ac\r\n"
+            f"  $a = @()\r\n"
+            f"  if ($bc -gt 0) {{ $a += $args[0..($bc-1)] }}\r\n"
+            f"  $a += '--'\r\n"
+            f"  if ($ac -gt 0) {{ $a += $args[$bc..($args.Count-1)] }}\r\n"
+            f"}}\r\n"
             f'& "{py}" -m repo_tools.cli '
-            f'--workspace-root "{workspace_root}" @args\r\n'
+            f'--workspace-root "{workspace_root}" @a\r\n'
             f"exit $LASTEXITCODE\r\n",
             encoding="utf-8",
             newline="",
