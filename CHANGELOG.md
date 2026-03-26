@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.27
+
+- **Agent**: Worktree removal: handle Windows long paths (>260 chars) and read-only/locked files. When `git worktree remove` fails, falls back to manual deletion with `\\?\` extended-length path prefix, read-only attribute clearing, and retry logic for locked files.
+
 ## 0.7.26
 
 - **Bootstrap**: Fix `repo.ps1` shim losing `--` (end-of-options separator) in PowerShell interactive and `-Command` modes. PowerShell strips `--` from `$args` before the script sees it; the shim now detects it via `$MyInvocation.Line` and re-inserts it so Python receives the full argument list.

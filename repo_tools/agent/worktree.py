@@ -6,10 +6,44 @@ Used by both ``tool.py`` (worktree creation on agent dispatch) and
 
 from __future__ import annotations
 
+import os
+import shutil
+import stat
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 from ..core import _FRAMEWORK_ROOT, logger
+
+
+def _remove_readonly(func, path, _exc_info):  # noqa: ANN001
+    """shutil.rmtree error handler: clear read-only flag and retry."""
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+
+def _force_remove_dir(path: Path, attempts: int = 5, delay: float = 1.0) -> None:
+    """Remove a directory tree, handling Windows long paths, read-only and locked files."""
+    target = Path(f"\\\\?\\{path.resolve()}") if sys.platform == "win32" else path
+    rmtree_kwargs = (
+        {"onexc": _remove_readonly}
+        if sys.version_info >= (3, 12)
+        else {"onerror": _remove_readonly}
+    )
+    for attempt in range(attempts):
+        try:
+            shutil.rmtree(target, **rmtree_kwargs)
+            return
+        except PermissionError:
+            if attempt < attempts - 1:
+                logger.warning(
+                    f"Locked files in {path.name}, "
+                    f"retrying in {delay}s ({attempt + 1}/{attempts})"
+                )
+                time.sleep(delay)
+            else:
+                raise
 
 
 def _bootstrap_worktree(wt_dir: Path) -> None:
@@ -76,10 +110,20 @@ def remove_worktree(workspace_root: Path, ticket: str) -> None:
     """Remove the git worktree for a ticket."""
     wt_dir = workspace_root / "_agent" / "worktrees" / ticket
     if wt_dir.exists():
-        subprocess.run(
+        result = subprocess.run(
             ["git", "worktree", "remove", str(wt_dir), "--force"],
-            cwd=str(workspace_root), check=True,
+            cwd=str(workspace_root), capture_output=True,
         )
+        if result.returncode != 0:
+            logger.warning(
+                f"git worktree remove failed ({result.stderr.decode().strip()}), "
+                f"falling back to manual deletion"
+            )
+            _force_remove_dir(wt_dir)
+            subprocess.run(
+                ["git", "worktree", "prune"],
+                cwd=str(workspace_root), capture_output=True,
+            )
         logger.info(f"Removed worktree: {wt_dir}")
     else:
         subprocess.run(
