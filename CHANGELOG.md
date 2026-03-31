@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.28
+
+- **Agent**: Fix allowlist false-denial on heredoc commit patterns (`<<'EOF'`). Normalize quoted heredoc delimiters before bashlex parsing, and collapse `$(...)` subshells in the regex fallback to prevent operators in commit message bodies from causing spurious command splits.
+
 ## 0.7.27
 
 - **Agent**: Worktree removal: handle Windows long paths (>260 chars) and read-only/locked files. When `git worktree remove` fails, falls back to manual deletion with `\\?\` extended-length path prefix, read-only attribute clearing, and retry logic for locked files.

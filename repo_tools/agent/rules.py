@@ -127,13 +127,53 @@ def load_rules(
 
 _OPERATOR_RE = re.compile(r"\s*(?:&&|\|\|?|;)\s*")
 _ASSIGNMENT_RE = re.compile(r"^[A-Za-z_]\w*=")
+_HEREDOC_QUOTED_DELIM_RE = re.compile(r"<<(-?)\s*(['\"])(.*?)\2")
+
+
+def _collapse_subshells(s: str) -> str:
+    """Replace ``$(…)`` command substitutions with a safe placeholder.
+
+    Prevents the regex fallback from splitting on operators that appear
+    inside subshell content (e.g. heredoc bodies in commit messages).
+    """
+    result: list[str] = []
+    i = 0
+    while i < len(s):
+        if s[i:i + 2] == "$(" :
+            depth = 1
+            j = i + 2
+            while j < len(s) and depth > 0:
+                if s[j:j + 2] == "$(":
+                    depth += 1
+                    j += 1
+                elif s[j] == ")":
+                    depth -= 1
+                j += 1
+            result.append('"_subshell_"')
+            i = j
+        else:
+            result.append(s[i])
+            i += 1
+    return "".join(result)
+
+
+def _strip_heredoc_quotes(command: str) -> str:
+    """Strip quotes around heredoc delimiters for bashlex compatibility.
+
+    ``<<'EOF'`` and ``<<"EOF"`` are valid bash (meaning "heredoc with no
+    parameter expansion").  bashlex cannot parse quoted delimiters, so we
+    strip the quotes before parsing — the quoting only affects expansion
+    inside the body, which is irrelevant for command classification.
+    """
+    return _HEREDOC_QUOTED_DELIM_RE.sub(r"<<\1\3", command)
 
 
 def _extract_commands_regex(command: str) -> list[str]:
     """Regex-based fallback for ``_extract_commands``."""
     commands: list[str] = []
     flat = " ".join(command.split())
-    for segment in _OPERATOR_RE.split(flat):
+    safe = _collapse_subshells(flat)
+    for segment in _OPERATOR_RE.split(safe):
         segment = segment.strip()
         if not segment:
             continue
@@ -176,12 +216,16 @@ def _extract_commands(command: str) -> list[str]:
     Uses ``bashlex`` AST parsing to correctly handle quoted operators,
     subshells, and process substitution.  Falls back to regex splitting
     on parse errors.
+
+    Heredoc quoted delimiters (``<<'EOF'``, ``<<"EOF"``) are normalised
+    to unquoted form before parsing because bashlex cannot handle them.
     """
     if not command or command.isspace():
         return []
+    normalized = _strip_heredoc_quotes(command)
     try:
-        parts = bashlex.parse(command)
-        return _walk_bashlex(parts, command)
+        parts = bashlex.parse(normalized)
+        return _walk_bashlex(parts, normalized)
     except bashlex.errors.ParsingError:
         logger.warning(
             "bashlex failed to parse command, falling back to regex: %s",
