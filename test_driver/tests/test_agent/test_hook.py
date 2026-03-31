@@ -175,3 +175,22 @@ class TestApproveTicketHook:
         )
         merged = output["hookSpecificOutput"]["updatedInput"]["criteria"]
         assert merged == ["A", "B"]
+
+
+class TestHookHeredoc:
+    """Heredoc commit patterns must pass the allowlist hook end-to-end."""
+
+    def test_quoted_delimiter_allowed(self):
+        cmd = "git commit -m \"$(cat <<'EOF'\nCommit message.\nEOF\n)\""
+        output = _run_hook(cmd)
+        assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
+
+    def test_operators_in_message_allowed(self):
+        cmd = "git commit -m \"$(cat <<'EOF'\nFix build && test | check; done\nEOF\n)\""
+        output = _run_hook(cmd)
+        assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
+
+    def test_multiline_message_allowed(self):
+        cmd = "git commit -m \"$(cat <<'EOF'\n## Summary\n- Fix build | pipeline\n- Tests && coverage\nEOF\n)\""
+        output = _run_hook(cmd)
+        assert output["hookSpecificOutput"]["permissionDecision"] == "allow"

@@ -10,8 +10,10 @@ from repo_tools.agent.rules import (
     Rule,
     RuleSet,
     _check_dir_constraint,
+    _collapse_subshells,
     _extract_commands,
     _extract_commands_regex,
+    _strip_heredoc_quotes,
     check_command,
     load_rules,
 )
@@ -330,4 +332,131 @@ class TestOverrideDeny:
             ],
         )
         allowed, reason = check_command("git add . && git commit --amend -m fix", rules)
+        assert allowed is True
+
+
+# ── heredoc helpers ──────────────────────────────────────────────
+
+
+class TestStripHeredocQuotes:
+    def test_single_quoted(self):
+        assert _strip_heredoc_quotes("<<'EOF'") == "<<EOF"
+
+    def test_double_quoted(self):
+        assert _strip_heredoc_quotes('<<"EOF"') == "<<EOF"
+
+    def test_dash_variant(self):
+        assert _strip_heredoc_quotes("<<-'EOF'") == "<<-EOF"
+
+    def test_unquoted_unchanged(self):
+        assert _strip_heredoc_quotes("<<EOF") == "<<EOF"
+
+    def test_inside_larger_command(self):
+        cmd = "git commit -m \"$(cat <<'EOF'\nmsg\nEOF\n)\""
+        result = _strip_heredoc_quotes(cmd)
+        assert "<<EOF" in result
+        assert "<<'EOF'" not in result
+
+
+class TestCollapseSubshells:
+    def test_single_subshell(self):
+        assert _collapse_subshells("echo $(whoami)") == 'echo "_subshell_"'
+
+    def test_nested_subshells(self):
+        result = _collapse_subshells("echo $(cat $(ls))")
+        assert result == 'echo "_subshell_"'
+
+    def test_no_subshell(self):
+        assert _collapse_subshells("echo hello") == "echo hello"
+
+    def test_multiple_subshells(self):
+        result = _collapse_subshells("$(a) && $(b)")
+        assert result == '"_subshell_" && "_subshell_"'
+
+    def test_operators_inside_subshell_hidden(self):
+        result = _collapse_subshells("git commit -m $(cat <<EOF a && b EOF)")
+        assert "&&" not in result
+
+
+# ── heredoc integration ──────────────────────────────────────────
+
+
+class TestHeredocCommands:
+    """Verify that heredoc commit patterns are parsed correctly."""
+
+    def test_unquoted_delimiter(self):
+        cmd = 'git commit -m "$(cat <<EOF\nCommit message.\nEOF\n)"'
+        result = _extract_commands(cmd)
+        assert len(result) >= 1
+        assert result[0].startswith("git ")
+
+    def test_quoted_delimiter(self):
+        cmd = "git commit -m \"$(cat <<'EOF'\nCommit message.\nEOF\n)\""
+        result = _extract_commands(cmd)
+        assert len(result) >= 1
+        assert result[0].startswith("git ")
+
+    def test_pipe_in_message_body(self):
+        cmd = "git commit -m \"$(cat <<'EOF'\nFix build | test pipeline\nEOF\n)\""
+        result = _extract_commands(cmd)
+        assert any(c.startswith("git ") for c in result)
+
+    def test_semicolons_in_message_body(self):
+        cmd = "git commit -m \"$(cat <<'EOF'\nFix: init; cleanup; teardown\nEOF\n)\""
+        result = _extract_commands(cmd)
+        assert any(c.startswith("git ") for c in result)
+
+    def test_ampersand_in_message_body(self):
+        cmd = "git commit -m \"$(cat <<'EOF'\nFix build && add tests\nEOF\n)\""
+        result = _extract_commands(cmd)
+        assert any(c.startswith("git ") for c in result)
+
+    def test_multiline_message(self):
+        cmd = "git commit -m \"$(cat <<'EOF'\n## Summary\n- Fix build | pipeline\n- Tests && coverage\nEOF\n)\""
+        result = _extract_commands(cmd)
+        assert any(c.startswith("git ") for c in result)
+
+
+class TestHeredocRegexFallback:
+    """Verify the regex fallback handles heredoc content safely."""
+
+    def test_pipe_not_split(self):
+        cmd = "git commit -m \"$(cat <<'EOF'\nFix | test\nEOF\n)\""
+        result = _extract_commands_regex(cmd)
+        assert len(result) == 1
+        assert result[0].startswith("git ")
+
+    def test_ampersand_not_split(self):
+        cmd = "git commit -m \"$(cat <<'EOF'\nFix && test\nEOF\n)\""
+        result = _extract_commands_regex(cmd)
+        assert len(result) == 1
+        assert result[0].startswith("git ")
+
+    def test_real_compound_still_splits(self):
+        result = _extract_commands_regex("git add -A && git commit -m 'msg'")
+        assert len(result) == 2
+
+
+class TestHeredocCheckCommand:
+    """End-to-end: heredoc commit passes the full allowlist."""
+
+    @staticmethod
+    def _git_rules():
+        return RuleSet(
+            default_reason="not allowed",
+            deny=[],
+            allow=[
+                Rule(name="git", patterns=[re.compile(r"^git\b")]),
+                Rule(name="cat", patterns=[re.compile(r"^cat\b")]),
+            ],
+        )
+
+    def test_simple_heredoc_allowed(self):
+        cmd = "git commit -m \"$(cat <<'EOF'\nFix stuff\nEOF\n)\""
+        allowed, _ = check_command(cmd, self._git_rules())
+        assert allowed is True
+
+    def test_heredoc_with_operators_allowed(self):
+        cmd = "git commit -m \"$(cat <<'EOF'\nFix build && add | tests; done\nEOF\n)\""
+        allowed, _ = check_command(cmd, self._git_rules())
         assert allowed is True
