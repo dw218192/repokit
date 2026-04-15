@@ -595,6 +595,60 @@ def registered_tool_deps() -> list[str]:
     return sorted(seen)
 
 
+_PROJECT_TOOL_DIRS: list[str] = []
+
+
+def ensure_project_tools_on_path(project_tool_dirs: list[str]) -> list[str]:
+    """Prepend each *project_tool_dirs* entry to ``sys.path`` if not already
+    present, so PEP-420 namespace-package discovery picks up any additional
+    ``repo_tools/`` portions the caller ships.
+
+    The caller is responsible for computing the directory list.  The CLI
+    entry point does this once in :func:`cli.main`; child processes that
+    need the same discovery (e.g. MCP servers spawned by the agent
+    launcher) should receive the list from the launcher -- call
+    :func:`get_project_tool_dirs` on the parent to retrieve what was
+    registered, pass it across the process boundary, and call this on the
+    child.
+
+    Raises ``SystemExit`` with a diagnostic if a candidate contains
+    ``repo_tools/__init__.py`` -- that file breaks namespace-package merging
+    and silently hides framework tools.
+
+    Idempotent; returns the entries actually prepended to ``sys.path``.
+    """
+    import importlib
+
+    added: list[str] = []
+    for tool_dir in project_tool_dirs:
+        tool_path = Path(tool_dir)
+        if not tool_path.is_dir():
+            continue
+        bad_init = tool_path / "repo_tools" / "__init__.py"
+        if bad_init.exists():
+            logger.error(
+                f"Remove {bad_init} -- it breaks namespace package merging "
+                f"and hides framework tools.  See README.md ~ Extending."
+            )
+            sys.exit(1)
+        if str(tool_dir) not in sys.path:
+            sys.path.insert(0, str(tool_dir))
+            added.append(str(tool_dir))
+        if tool_dir not in _PROJECT_TOOL_DIRS:
+            _PROJECT_TOOL_DIRS.append(tool_dir)
+    if added:
+        importlib.invalidate_caches()
+    return added
+
+
+def get_project_tool_dirs() -> list[str]:
+    """Return project tool dirs registered via :func:`ensure_project_tools_on_path`.
+
+    Empty in child processes that didn't receive the list from their parent.
+    """
+    return list(_PROJECT_TOOL_DIRS)
+
+
 # ── Tool Discovery ───────────────────────────────────────────────────
 
 

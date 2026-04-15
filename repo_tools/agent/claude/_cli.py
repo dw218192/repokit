@@ -156,6 +156,7 @@ def _write_plugin(
     # Repo command tools — all from the tool registry
     # Use effective_cwd so that workers in worktrees build/test their own
     # changes, not the main workspace.
+    from ...core import get_project_tool_dirs
     from ..repo_cmd import _discover_registered_tools
     registered = _discover_registered_tools()
     if registered:
@@ -165,6 +166,11 @@ def _write_plugin(
             "--config", "{}",
             "--extra-tools", json.dumps(registered),
         ]
+        project_tool_dirs = get_project_tool_dirs()
+        if project_tool_dirs:
+            repo_cmd_args.extend(
+                ["--project-tool-dirs", json.dumps(project_tool_dirs)]
+            )
         mcp_config["mcpServers"]["repo_cmd"] = {
             "type": "stdio",
             "command": posix_path(sys.executable),
