@@ -23,15 +23,28 @@ def main() -> None:
         "--extra-tools", default=None,
         help='JSON list of {"name", "description"} dicts for registered tools',
     )
+    parser.add_argument(
+        "--project-tool-dirs", default=None,
+        help="JSON list of directories to prepend to sys.path before "
+             "populating the tool registry (enables the project's "
+             "format_mcp_output filters to run against subprocess output)",
+    )
     args = parser.parse_args()
 
     root = Path(args.project_root)
     config = json.loads(args.config)
     extra = json.loads(args.extra_tools) if args.extra_tools else None
+    project_tool_dirs = (
+        json.loads(args.project_tool_dirs) if args.project_tool_dirs else []
+    )
 
-    # Populate the tool registry so _apply_output_filter can look up tools
-    from ...core import populate_registry
+    # Inject project-side repo_tools/ portions before populating so the
+    # project's BuildTool / TestTool / etc. register and their
+    # format_mcp_output filters actually run against subprocess output.
+    from ...core import ensure_project_tools_on_path, populate_registry
 
+    if project_tool_dirs:
+        ensure_project_tools_on_path(project_tool_dirs)
     populate_registry(config)
 
     schema = build_repo_run_schema(config, extra=extra)

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.29
+
+- **Agent**: Fix `repo_cmd` MCP server dropping per-tool `format_mcp_output` filters. The server previously called `populate_registry({})` without the project-side `repo_tools/` namespace portion on `sys.path`, so `get_tool("build")` returned `None` and `_apply_output_filter` fell through to return raw multi-megabyte subprocess logs. Extracted a shared `ensure_project_tools_on_path` + `get_project_tool_dirs` pair in `core.py`; the CLI registers project dirs once, the agent launcher reads them back via `get_project_tool_dirs()` and forwards them to the MCP server via a new `--project-tool-dirs` arg. No path auto-discovery; the layout assumption lives in one place (`cli.main`).
+
 ## 0.7.28
 
 - **Agent**: Fix allowlist false-denial on heredoc commit patterns (`<<'EOF'`). Normalize quoted heredoc delimiters before bashlex parsing, and collapse `$(...)` subshells in the regex fallback to prevent operators in commit message bodies from causing spurious command splits.
