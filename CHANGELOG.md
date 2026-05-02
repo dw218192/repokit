@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.0
+
+- **Agent (breaking)**: Remove the deprecated SDK backend. The `agent.backend` config key, `--backend` CLI flag, `claude-agent-sdk` dependency, and Textual TUI are gone — `CliBackend` is now the only backend. Removes `repo_tools/agent/claude/_sdk.py`, `_hooks.py`, `_base.py`, `repo_tools/agent/tui.py`, and the `sdk` feature group from `pyproject.toml`.
+- **Agent**: Gate Claude Code's `PowerShell` tool calls with the same allowlist hook as `Bash`. Adds `_extract_commands_powershell` (pygments-based splitter that respects `(...)`/`{...}` grouping and `@'…'@`/`@"…"@` here-strings), a `shell` parameter on `check_command`, a `tool_name` branch in `check_bash.py`, and a second `PreToolUse` matcher in the plugin manifest. Default allowlist gains PowerShell-specific deny rules (`Invoke-WebRequest`/`Invoke-RestMethod`/`Start-Sleep`/`pwsh`/`powershell`) and allow rules (`Get-ChildItem`, `Where-Object`, `Remove-Item` in project root, …). Adds `pygments>=2.16` dependency.
+- **Agent**: Bundle two starter Claude Code skills (`repo-tools`, `contribute-framework`) under `repo_tools/agent/skills/` and materialize them into the orchestrator's plugin directory on every session. Workers and reviewers (headless, single-purpose) are intentionally excluded.
+
 ## 0.7.29
 
 - **Agent**: Fix `repo_cmd` MCP server dropping per-tool `format_mcp_output` filters. The server previously called `populate_registry({})` without the project-side `repo_tools/` namespace portion on `sys.path`, so `get_tool("build")` returned `None` and `_apply_output_filter` fell through to return raw multi-megabyte subprocess logs. Extracted a shared `ensure_project_tools_on_path` + `get_project_tool_dirs` pair in `core.py`; the CLI registers project dirs once, the agent launcher reads them back via `get_project_tool_dirs()` and forwards them to the MCP server via a new `--project-tool-dirs` arg. No path auto-discovery; the layout assumption lives in one place (`cli.main`).

@@ -50,6 +50,12 @@ def _write_plugin(
         json.dumps(PLUGIN_MANIFEST, indent=2), encoding="utf-8",
     )
 
+    # -- bundled skills (orchestrator only) --
+    if role in (None, "orchestrator"):
+        bundled_skills = Path(__file__).resolve().parent.parent / "skills"
+        if bundled_skills.exists():
+            shutil.copytree(bundled_skills, plugin_dir / "skills", dirs_exist_ok=True)
+
     # -- hooks --
     config = tool_config or {}
     effective_cwd = agent_cwd or project_root
@@ -71,12 +77,17 @@ def _write_plugin(
         *base_cmd, "approve_mcp", "--debug-log", debug_log.as_posix(),
     ])
 
+    check_command_str = shlex.join(check_bash_args)
     hook_events: dict = {
         "PreToolUse": [
             {
                 "matcher": "Bash",
-                "hooks": [{"type": "command", "command": shlex.join(check_bash_args)}],
-            }
+                "hooks": [{"type": "command", "command": check_command_str}],
+            },
+            {
+                "matcher": "PowerShell",
+                "hooks": [{"type": "command", "command": check_command_str}],
+            },
         ],
         "PermissionRequest": [
             {

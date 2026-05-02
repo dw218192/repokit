@@ -10,12 +10,16 @@ import re
 
 import bashlex
 import bashlex.errors
+from pygments.lexers.shell import PowerShellLexer
+from pygments.token import Punctuation
 
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..core import logger
+
+_PS_LEX = PowerShellLexer()
 
 
 # ------------------------------------------------------------------
@@ -234,6 +238,67 @@ def _extract_commands(command: str) -> list[str]:
     return _extract_commands_regex(command)
 
 
+_PS_LEAD_CALL_RE = re.compile(r"^&\s+")
+_PS_LEAD_STOP_PARSING_RE = re.compile(r"^--%\s+")
+_PS_LEAD_ASSIGNMENT_RE = re.compile(r"^\$\w+\s*=\s*")
+
+
+def _extract_commands_powershell(command: str) -> list[str]:
+    """Split a PowerShell command into individual segments.
+
+    Uses :class:`pygments.lexers.shell.PowerShellLexer` to tokenize the
+    input.  Pygments emits single-quoted strings, double-quoted strings,
+    and ``@'…'@`` / ``@"…"@`` here-strings as single string tokens, so
+    operators inside string literals are pre-shielded.
+
+    Walks the flat token stream and splits on ``;``, ``|``, ``||``, and
+    ``&&`` at grouping-depth zero (``(...)`` and ``{...}`` tracked).
+
+    Each resulting segment has a leading call operator (``& path``),
+    stop-parsing token (``--%``), or simple assignment prefix
+    (``$var = ...``) stripped, so the first word is the actual command.
+    """
+    if not command or command.isspace():
+        return []
+    tokens = list(_PS_LEX.get_tokens(command))
+    segments: list[list[str]] = [[]]
+    depth = 0
+    i = 0
+    while i < len(tokens):
+        tok, val = tokens[i]
+        if tok is Punctuation:
+            if depth == 0:
+                if val == "&" and i + 1 < len(tokens) and tokens[i + 1] == (Punctuation, "&"):
+                    segments.append([])
+                    i += 2
+                    continue
+                if val == "|" and i + 1 < len(tokens) and tokens[i + 1] == (Punctuation, "|"):
+                    segments.append([])
+                    i += 2
+                    continue
+                if val in (";", "|"):
+                    segments.append([])
+                    i += 1
+                    continue
+            if val in ("(", "{"):
+                depth += 1
+            elif val in (")", "}"):
+                depth -= 1
+        segments[-1].append(val)
+        i += 1
+    out: list[str] = []
+    for seg in segments:
+        text = "".join(seg).strip()
+        if not text:
+            continue
+        text = _PS_LEAD_CALL_RE.sub("", text)
+        text = _PS_LEAD_STOP_PARSING_RE.sub("", text)
+        text = _PS_LEAD_ASSIGNMENT_RE.sub("", text)
+        if text:
+            out.append(text)
+    return out
+
+
 # ------------------------------------------------------------------
 # Permission check
 # ------------------------------------------------------------------
@@ -258,17 +323,25 @@ def _check_dir_constraint(dir_spec: str, project_root: Path | None, cwd: Path | 
 def check_command(
     command: str | None,
     rules: RuleSet,
+    *,
     project_root: Path | None = None,
     cwd: Path | None = None,
+    shell: str = "bash",
 ) -> tuple[bool, str]:
-    """Check a Bash command against a rule set.
+    """Check a shell command against a rule set.
+
+    *shell* selects the splitter: ``"bash"`` (bashlex) or ``"powershell"``
+    (pygments).
 
     Returns ``(allowed, reason)``.  When allowed, reason is ``""``.
     """
     if not command:
         return False, rules.default_reason
 
-    commands = _extract_commands(command)
+    if shell == "powershell":
+        commands = _extract_commands_powershell(command)
+    else:
+        commands = _extract_commands(command)
     if not commands:
         return False, rules.default_reason
 

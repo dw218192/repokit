@@ -1,7 +1,7 @@
 """Shared JSON-RPC 2.0 helpers for stdio MCP servers.
 
-All CLI-backend MCP servers share the same protocol boilerplate: initialize,
-ping, tools/list, tools/call dispatch, and a stdin read loop.  This module
+All MCP servers share the same protocol boilerplate: initialize, ping,
+tools/list, tools/call dispatch, and a stdin read loop.  This module
 extracts that into reusable building blocks.
 """
 

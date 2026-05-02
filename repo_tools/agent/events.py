@@ -54,7 +54,7 @@ def clear_subscriptions() -> None:
 
 
 def load_signal_file(path: Path) -> None:
-    """Load a subscription from a signal file (CLI backend) and delete it."""
+    """Load a subscription from a signal file and delete it."""
     if not path.exists():
         return
     try:

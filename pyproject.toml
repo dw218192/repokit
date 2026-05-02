@@ -1,18 +1,18 @@
 [project]
 name = "repokit"
-version = "0.7.29"
+version = "0.8.0"
 requires-python = ">=3.11"
 dependencies = [
     "click>=8.0",
     "pyyaml>=6.0",
     "colorama>=0.4",
     "bashlex>=0.18",
+    "pygments>=2.16",
 ]
 
 [dependency-groups]
 cpp = ["clang-format>=19.0", "clang-tidy>=19.0"]
 python = ["ruff>=0.4"]
-sdk = ["claude-agent-sdk>=0.1.0,!=0.1.49", "rich>=13.0", "textual>=1.0"]
 
 [tool.uv]
 package = false
