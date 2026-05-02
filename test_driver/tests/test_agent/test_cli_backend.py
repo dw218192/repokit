@@ -8,19 +8,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from repo_tools.agent.claude._base import ClaudeBackend
 from repo_tools.agent.claude._cli import CliBackend, _find_claude_cli, _write_plugin
 from repo_tools.agent.claude._cli import PLUGIN_MANIFEST
 from repo_tools.agent.claude._shared import ALLOWED_TOOLS, OUTPUT_SCHEMAS
-
-
-# ── Protocol conformance ─────────────────────────────────────────
-
-
-class TestProtocol:
-    def test_satisfies_protocol(self):
-        """CliBackend satisfies the ClaudeBackend protocol."""
-        assert isinstance(CliBackend(), ClaudeBackend)
 
 
 # ── _build_command tests ─────────────────────────────────────────

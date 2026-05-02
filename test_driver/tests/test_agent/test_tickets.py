@@ -797,7 +797,7 @@ class TestRequiredCriteria:
         assert texts == ["User criterion"]
 
     def test_flat_config_without_agent_key(self, project):
-        """SDK backend passes flat config (no nested 'agent' key)."""
+        """Flat config (no nested 'agent' key) is also accepted."""
         config = {"required_criteria": ["Tests pass", "No regressions"]}
         result = _tool_create_ticket(project, {
             "id": "T1", "title": "t", "description": "d",

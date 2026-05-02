@@ -19,11 +19,11 @@ import click
 
 from ..cli import _build_tool_context
 from ..core import RepoTool, ToolContext, logger
-from .claude import ClaudeBackend
+from .claude import CliBackend
 from .tickets import _ROLE_ALLOWED_TRANSITIONS, _tool_mark_criteria, _tool_reset_ticket, _tool_update_ticket
 from .worktree import ensure_worktree, remove_worktree
 
-_backend: ClaudeBackend | None = None
+_backend: CliBackend | None = None
 
 
 def _setup_file_logging(
@@ -49,12 +49,11 @@ def _setup_file_logging(
     return handler
 
 
-def _ensure_backend(args: dict[str, Any]) -> ClaudeBackend:
-    """Lazy-init the backend, respecting ``args["backend"]``."""
+def _ensure_backend() -> CliBackend:
+    """Lazy-init the backend."""
     global _backend
     if _backend is None:
-        from .claude import get_backend
-        _backend = get_backend(args.get("backend"))
+        _backend = CliBackend()
     return _backend
 
 
@@ -240,7 +239,7 @@ def _process_agent_output(
 ) -> str | None:
     """Parse structured JSON output from a headless agent and apply ticket updates.
 
-    The SDK reconstructs the same envelope format::
+    Envelope format::
 
         {"type": "result", "subtype": "success"|"error_max_turns",
          "is_error": bool, "structured_output": {...}, ...}
@@ -369,12 +368,7 @@ def _agent_run(tool_ctx: ToolContext, args: dict[str, Any]) -> str | None:
     )
     extra_rules_paths = _find_extra_rules(tool_ctx.workspace_root, tool_ctx.config)
 
-    # Headless roles (worker/reviewer) always use CLI backend — the SDK
-    # backend launches an in-process Claude Code session which cannot run
-    # nested inside another Claude Code process.
-    if role and ticket:
-        args = {**args, "backend": "cli"}
-    backend = _ensure_backend(args)
+    backend = _ensure_backend()
 
     if prompt is None:
         # Interactive mode — with event loop support
@@ -476,11 +470,6 @@ class AgentTool(RepoTool):
             help="Log hook decisions to _agent/hooks.log",
         )(cmd)
         cmd = click.option(
-            "--backend", default=None,
-            type=click.Choice(["cli", "sdk"]),
-            help="Backend to use (cli or sdk)",
-        )(cmd)
-        cmd = click.option(
             "--max-turns", default=None, type=int,
             help="Maximum turns for headless mode",
         )(cmd)
@@ -495,7 +484,6 @@ class AgentTool(RepoTool):
             "role": None,
             "ticket": None,
             "debug_hooks": False,
-            "backend": "cli",
             "max_turns": None,
             "branch": None,
         }

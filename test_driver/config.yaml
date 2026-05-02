@@ -15,7 +15,6 @@ test-cov:
 
 agent:
   debug_hooks: false
-  backend: "sdk"
   human_ticket_review: true
   events:
     test_timer:

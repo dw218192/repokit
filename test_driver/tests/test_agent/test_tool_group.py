@@ -38,7 +38,6 @@ class TestAgentHelp:
         assert result.exit_code == 0
         assert "--role" in result.output
         assert "--ticket" in result.output
-        assert "--backend" in result.output
         assert "--max-turns" in result.output
         assert "--debug-hooks" in result.output
 
@@ -72,8 +71,8 @@ class TestDefaultArgs:
     def test_defaults(self):
         tool = AgentTool()
         defaults = tool.default_args({})
-        assert defaults["backend"] == "cli"
         assert defaults["debug_hooks"] is False
         assert defaults["max_turns"] is None
         assert defaults["role"] is None
         assert defaults["ticket"] is None
+        assert "backend" not in defaults

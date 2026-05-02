@@ -1,7 +1,7 @@
-"""Ticket CRUD logic shared by both SDK and CLI backends.
+"""Ticket CRUD logic.
 
 Provides tool schemas, handler functions, validators, and role-based access
-constants.  The CLI MCP server lives in ``repo_tools.agent.mcp.tickets``.
+constants.  The MCP server lives in ``repo_tools.agent.mcp.tickets``.
 """
 
 from __future__ import annotations

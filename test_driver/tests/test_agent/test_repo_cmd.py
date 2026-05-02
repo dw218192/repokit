@@ -29,7 +29,7 @@ def test_discover_sections_with_steps():
         "test": {"steps": ['echo "hello"']},
         "build": {"steps": ["make all"]},
         "repo": {"tokens": {}},
-        "agent": {"backend": "sdk"},
+        "agent": {"max_turns": 30},
     }
     commands = _discover_repo_commands(config)
     names = [c["name"] for c in commands]

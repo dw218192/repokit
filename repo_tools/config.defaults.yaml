@@ -2,7 +2,6 @@
 # Project config.yaml overrides these; use key+ to extend lists instead of replacing.
 
 agent:
-  backend: cli
   events:
     github:
       check_failed:

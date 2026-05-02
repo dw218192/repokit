@@ -89,38 +89,26 @@ Framework tools with non-trivial logic:
 The `agent` tool launches [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions with pre-approved tools and a Bash command allowlist.
 
 ```
-./repo agent                                                # interactive orchestrator (TUI)
-./repo agent --backend cli                                  # force CLI subprocess backend
+./repo agent                                                # interactive orchestrator
 ./repo agent --role worker --ticket add-auth-hook           # headless worker (auto-worktree)
 ./repo agent --role reviewer --ticket add-auth-hook         # headless reviewer
 ```
 
-**Two backends** are available. The **CLI backend** (default) launches the `claude` binary as a subprocess with a generated plugin directory — hooks run as shell commands and MCP tools as stdio servers. The **SDK backend** (`claude-agent-sdk`) runs everything in-process and adds features not available in the CLI backend:
+The agent launches the `claude` binary as a subprocess with a generated plugin directory — hooks run as shell commands and MCP tools as stdio servers.
 
-| | CLI | SDK |
-|---|---|---|
-| Interactive UI | Claude Code's built-in terminal | Textual TUI (chat log, tool pane, ticket/task panels) |
-| Hooks | Shell subprocess commands | Async Python callbacks (in-process) |
-| MCP tools | Stdio subprocess servers | In-process `@tool` functions |
-| Event subscriptions | — | `list_events`, `subscribe_event` (pause/resume on GitHub events) |
-| Session resume | — | Session ID tracking for event-driven resume |
-
-Auto-detection prefers SDK when installed (`uv sync --group sdk`), falls back to CLI. Headless roles (worker/reviewer) always use CLI to avoid nesting.
-
-**Interactive mode** (no `--ticket`) opens an orchestrator session. With the SDK backend, this launches a **Textual TUI** with a chat log, collapsible tool call pane with syntax-highlighted arguments, ticket panel with color-coded status, task tracker, and plan approval prompt. With the CLI backend, you get Claude Code's standard terminal.
+**Interactive mode** (no `--ticket`) opens an orchestrator session in Claude Code's standard terminal.
 
 **Headless mode** (`--role` + `--ticket`) reads the ticket JSON and returns structured output. Workers and reviewers are dispatched by the orchestrator via the `dispatch_agent` MCP tool.
 
 MCP tools available to the agent (registered automatically):
 
-| Tool | Purpose | Backend |
-|---|---|---|
-| `dispatch_agent` | Spawn worker/reviewer agents for a ticket | both |
-| `repo_<name>` | Invoke any configured `./repo` subcommand | both |
-| `lint` | Run ruff / clang-tidy | both |
-| `coderabbit_review` | CodeRabbit code review | both |
-| Ticket CRUD | `list_tickets`, `get_ticket`, `create_ticket`, `update_ticket`, etc. | both |
-| `list_events`, `subscribe_event` | Pause session until a GitHub event fires | SDK only |
+| Tool | Purpose |
+|---|---|
+| `dispatch_agent` | Spawn worker/reviewer agents for a ticket |
+| `repo_<name>` | Invoke any configured `./repo` subcommand |
+| `lint` | Run ruff / clang-tidy |
+| `coderabbit_review` | CodeRabbit code review |
+| Ticket CRUD | `list_tickets`, `get_ticket`, `create_ticket`, `update_ticket`, etc. |
 
 ```
 _agent/
@@ -160,8 +148,7 @@ todo ──→ in_progress ──→ verify ──→ closed
 
 ```yaml
 agent:
-  backend: sdk                               # "cli" or "sdk" (auto-detect if omitted)
-  human_ticket_review: true                      # gate create_ticket with interactive approval (SDK)
+  human_ticket_review: true                      # gate create_ticket with interactive approval
   max_turns: 30                              # turn limit for headless agents
   prompts:                                   # appended to role prompts
     common: "Always use ruff for formatting."
@@ -240,10 +227,10 @@ clean:                    # ← config for the "clean" tool
     - "{workspace_root}/dist"
 
 agent:                    # ← config for the "agent" tool
-  backend: sdk
+  max_turns: 30
 ```
 
-Some keys ship with **framework defaults** (defined in `config.defaults.yaml`) and are active out of the box — for example `agent.backend` defaults to `"cli"` and `clean.paths` includes `__pycache__`. Keys without a default are inert until you set them in project or local config.
+Some keys ship with **framework defaults** (defined in `config.defaults.yaml`) and are active out of the box — for example `clean.paths` includes `__pycache__`. Keys without a default are inert until you set them in project or local config.
 
 Use `key+` to **extend** a default list instead of replacing it:
 
@@ -331,7 +318,6 @@ CLI flags map 1:1 to `config.yaml` fields under the tool name. Precedence: tool 
 |---|---|
 | `cpp` | clang-format, clang-tidy |
 | `python` | ruff |
-| `sdk` | claude-agent-sdk, textual, rich (in-process agent backend) |
 
 ```yaml
 repo:

@@ -1,4 +1,4 @@
-"""Shared constants used by both SDK and CLI backends."""
+"""Shared constants for the CLI backend."""
 
 from __future__ import annotations
 
