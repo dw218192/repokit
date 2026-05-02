@@ -346,6 +346,69 @@ class TestWritePlugin:
         mcp = json.loads((plugin_dir / ".mcp.json").read_text())
         assert "dispatch" not in mcp["mcpServers"]
 
+    def test_write_plugin_copies_bundled_skills_for_orchestrator(self, tmp_path):
+        """Orchestrator gets each bundled skill at plugin_dir/skills/<name>/SKILL.md."""
+        plugin_dir = tmp_path / "plugin"
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        _write_plugin(plugin_dir, rules, tmp_path, role="orchestrator")
+
+        bundled_root = Path(__file__).resolve().parents[3] / "repo_tools" / "agent" / "skills"
+        for skill_dir in bundled_root.iterdir():
+            if skill_dir.is_dir():
+                assert (plugin_dir / "skills" / skill_dir.name / "SKILL.md").is_file()
+
+    def test_write_plugin_skips_skills_for_worker(self, tmp_path):
+        """Worker role does not materialize skills."""
+        plugin_dir = tmp_path / "plugin"
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        _write_plugin(plugin_dir, rules, tmp_path, role="worker")
+
+        assert not (plugin_dir / "skills").exists()
+
+    def test_write_plugin_skips_skills_for_reviewer(self, tmp_path):
+        """Reviewer role does not materialize skills."""
+        plugin_dir = tmp_path / "plugin"
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        _write_plugin(plugin_dir, rules, tmp_path, role="reviewer")
+
+        assert not (plugin_dir / "skills").exists()
+
+    def test_write_plugin_skills_idempotent(self, tmp_path):
+        """Calling _write_plugin twice with role='orchestrator' succeeds."""
+        plugin_dir = tmp_path / "plugin"
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        _write_plugin(plugin_dir, rules, tmp_path, role="orchestrator")
+        _write_plugin(plugin_dir, rules, tmp_path, role="orchestrator")
+
+        assert (plugin_dir / "skills" / "repo-tools" / "SKILL.md").is_file()
+        assert (plugin_dir / "skills" / "contribute-framework" / "SKILL.md").is_file()
+
+    def test_bundled_skill_md_frontmatter_present(self):
+        """Every bundled SKILL.md has valid YAML frontmatter with a description."""
+        import yaml
+
+        bundled_root = Path(__file__).resolve().parents[3] / "repo_tools" / "agent" / "skills"
+        skill_files = list(bundled_root.glob("*/SKILL.md"))
+        assert skill_files, "no bundled skills found"
+
+        for skill_file in skill_files:
+            text = skill_file.read_text(encoding="utf-8")
+            assert text.startswith("---\n"), f"{skill_file} missing opening frontmatter delimiter"
+            end = text.find("\n---\n", 4)
+            assert end != -1, f"{skill_file} missing closing frontmatter delimiter"
+            frontmatter = yaml.safe_load(text[4:end])
+            assert isinstance(frontmatter, dict), f"{skill_file} frontmatter is not a mapping"
+            assert frontmatter.get("name"), f"{skill_file} missing 'name'"
+            assert frontmatter.get("description"), f"{skill_file} missing 'description'"
+
     def test_registered_tools_in_mcp_config(self, tmp_path):
         """Registered RepoTool subclasses appear in .mcp.json repo_cmd server."""
         plugin_dir = tmp_path / "plugin"
