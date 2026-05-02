@@ -194,3 +194,88 @@ class TestHookHeredoc:
         cmd = "git commit -m \"$(cat <<'EOF'\n## Summary\n- Fix build | pipeline\n- Tests && coverage\nEOF\n)\""
         output = _run_hook(cmd)
         assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
+
+
+def _run_ps(command: str, rules: Path | None = None, cwd: str = "/tmp") -> dict:
+    """Run the hook with a PowerShell-tool synthetic event and return the output."""
+    rules = rules or _rules_path()
+    event = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "PowerShell",
+        "tool_input": {"command": command},
+        "cwd": cwd,
+    }
+    result = subprocess.run(
+        [sys.executable, "-m", "repo_tools.agent.hooks.check_bash",
+         "--rules", str(rules), "--project-root", cwd],
+        input=json.dumps(event),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 2:
+        pytest.fail(f"Hook error: {result.stderr}")
+    assert result.returncode == 0, f"Hook exited {result.returncode}: {result.stderr}"
+    return json.loads(result.stdout)
+
+
+class TestPowerShellHook:
+    """PowerShell tool calls go through the same hook with the pygments splitter."""
+
+    def test_git_status_allowed(self):
+        output = _run_ps("git status")
+        assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
+
+    def test_get_childitem_allowed(self):
+        output = _run_ps("Get-ChildItem -Recurse")
+        assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
+
+    def test_invoke_webrequest_denied(self):
+        output = _run_ps("Invoke-WebRequest https://x")
+        specific = output["hookSpecificOutput"]
+        assert specific["permissionDecision"] == "deny"
+        assert "WebFetch" in specific["permissionDecisionReason"]
+
+    def test_compound_semicolon_split(self):
+        output = _run_ps("Get-ChildItem; sudo whoami")
+        specific = output["hookSpecificOutput"]
+        assert specific["permissionDecision"] == "deny"
+        # The deny must come from the sudo segment, not from a parse failure.
+        assert "elevated" in specific["permissionDecisionReason"].lower()
+
+    def test_pipeline_split(self):
+        output = _run_ps(
+            "Get-ChildItem | Where-Object {$_.Name -eq 'x'} | Select-Object Name"
+        )
+        assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
+
+    def test_andand_split_ps7(self):
+        output = _run_ps("git status && git diff")
+        assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
+
+    def test_here_string_no_split(self):
+        # Operators inside a here-string body must be ignored — they are
+        # data, not shell syntax.
+        cmd = "git commit -m @'\nCommit message.\n; rm -rf /\nMore text.\n'@"
+        output = _run_ps(cmd)
+        assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
+
+    def test_subexpr_no_split(self):
+        # `;` inside `(...)` must not split — depth tracking keeps the
+        # whole expression as a single segment under Write-Output.
+        output = _run_ps("Write-Output (Get-Date; Get-Location)")
+        assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
+
+    def test_call_operator(self):
+        # Leading `&` is the call operator and must be stripped so the
+        # path/command after it is what gets evaluated.  An absolute exe
+        # path is not in the allowlist, so this denies — but the deny
+        # comes from the path check, not from `&` being treated as a
+        # literal command name.
+        output = _run_ps("& 'C:\\bin\\tool.exe' arg")
+        assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+    def test_stop_parsing_token(self):
+        # `--%` is the PowerShell stop-parsing token and must not break
+        # command extraction.
+        output = _run_ps("git log --% --format=%H")
+        assert output["hookSpecificOutput"]["permissionDecision"] == "allow"

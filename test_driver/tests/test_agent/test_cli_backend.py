@@ -201,6 +201,24 @@ class TestWritePlugin:
         assert "PreToolUse" in hooks["hooks"]
         assert "PermissionRequest" in hooks["hooks"]
 
+    def test_bash_and_powershell_matchers_share_hook(self, tmp_path):
+        """Bash and PowerShell matchers both invoke the same check_bash command."""
+        plugin_dir = tmp_path / "plugin"
+        rules = tmp_path / "rules.toml"
+        rules.write_text('default_reason = "no"\n', encoding="utf-8")
+
+        _write_plugin(plugin_dir, rules, tmp_path)
+
+        hooks = json.loads(
+            (plugin_dir / "hooks" / "hooks.json").read_text()
+        )
+        pre_tool = hooks["hooks"]["PreToolUse"]
+        matchers = {entry["matcher"]: entry["hooks"][0]["command"] for entry in pre_tool}
+        assert "Bash" in matchers
+        assert "PowerShell" in matchers
+        assert matchers["Bash"] == matchers["PowerShell"]
+        assert "check_bash" in matchers["Bash"]
+
     def test_creates_mcp_json(self, tmp_path):
         """Creates .mcp.json with coderabbit, lint, and tickets servers."""
         plugin_dir = tmp_path / "plugin"
@@ -279,10 +297,9 @@ class TestWritePlugin:
             (plugin_dir / "hooks" / "hooks.json").read_text()
         )
         pre_tool = hooks["hooks"]["PreToolUse"]
-        # Should have Bash hook + create_ticket hook
-        assert len(pre_tool) == 2
-        ticket_hook = pre_tool[1]
-        assert ticket_hook["matcher"] == "create_ticket$"
+        # Bash + PowerShell + create_ticket
+        assert len(pre_tool) == 3
+        ticket_hook = next(e for e in pre_tool if e["matcher"] == "create_ticket$")
         cmd = ticket_hook["hooks"][0]["command"]
         assert "approve_ticket" in cmd
         assert "Must pass tests" in cmd
@@ -300,7 +317,9 @@ class TestWritePlugin:
             (plugin_dir / "hooks" / "hooks.json").read_text()
         )
         pre_tool = hooks["hooks"]["PreToolUse"]
-        assert len(pre_tool) == 1  # Only the Bash hook
+        # Bash + PowerShell, no create_ticket
+        assert len(pre_tool) == 2
+        assert all(e["matcher"] in ("Bash", "PowerShell") for e in pre_tool)
 
     def test_dispatch_in_orchestrator_mcp_config(self, tmp_path):
         """Dispatch server is included for orchestrator role."""

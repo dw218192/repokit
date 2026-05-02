@@ -71,12 +71,17 @@ def _write_plugin(
         *base_cmd, "approve_mcp", "--debug-log", debug_log.as_posix(),
     ])
 
+    check_command_str = shlex.join(check_bash_args)
     hook_events: dict = {
         "PreToolUse": [
             {
                 "matcher": "Bash",
-                "hooks": [{"type": "command", "command": shlex.join(check_bash_args)}],
-            }
+                "hooks": [{"type": "command", "command": check_command_str}],
+            },
+            {
+                "matcher": "PowerShell",
+                "hooks": [{"type": "command", "command": check_command_str}],
+            },
         ],
         "PermissionRequest": [
             {

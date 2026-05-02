@@ -12,6 +12,7 @@ from repo_tools.agent.rules import (
     _check_dir_constraint,
     _collapse_subshells,
     _extract_commands,
+    _extract_commands_powershell,
     _extract_commands_regex,
     _strip_heredoc_quotes,
     check_command,
@@ -216,6 +217,134 @@ class TestEnvPrefixExtraction:
     def test_bare_assignment_ignored(self):
         result = _extract_commands("FOO=bar")
         assert result == []
+
+
+# ── pygments-aware _extract_commands_powershell ──────────────────
+
+
+class TestExtractCommandsPowerShell:
+    """The PowerShell splitter splits at depth 0 and shields strings."""
+
+    def test_empty(self):
+        assert _extract_commands_powershell("") == []
+        assert _extract_commands_powershell("   ") == []
+
+    def test_simple_command(self):
+        assert _extract_commands_powershell("Get-ChildItem -Recurse") == ["Get-ChildItem -Recurse"]
+
+    def test_semicolon_split(self):
+        result = _extract_commands_powershell("Get-Date; Get-Location")
+        assert len(result) == 2
+        assert result[0].startswith("Get-Date")
+        assert result[1].startswith("Get-Location")
+
+    def test_pipeline_split(self):
+        result = _extract_commands_powershell("a | b | c")
+        assert len(result) == 3
+
+    def test_andand_split(self):
+        result = _extract_commands_powershell("a && b")
+        assert len(result) == 2
+
+    def test_oror_split(self):
+        result = _extract_commands_powershell("a || b")
+        assert len(result) == 2
+
+    def test_paren_depth_no_split(self):
+        # `;` inside `(...)` must not split
+        result = _extract_commands_powershell("Write-Output (Get-Date; Get-Location)")
+        assert len(result) == 1
+
+    def test_brace_depth_no_split(self):
+        # `;` inside `{...}` must not split
+        result = _extract_commands_powershell(
+            "Get-ChildItem | Where-Object {$_.Name -eq 'a'; $_.Length}"
+        )
+        assert len(result) == 2
+
+    def test_single_quote_string_shielded(self):
+        # Operators inside a single-quoted string are part of the string
+        # token and must not split.
+        result = _extract_commands_powershell("Write-Output 'a; b | c && d'")
+        assert len(result) == 1
+
+    def test_here_string_single_quoted_shielded(self):
+        cmd = "git commit -m @'\nFirst line\n; rm -rf /\nSecond line\n'@"
+        result = _extract_commands_powershell(cmd)
+        assert len(result) == 1
+        assert result[0].startswith("git commit")
+
+    def test_call_operator_stripped(self):
+        # Leading `&` (call operator) is stripped from a segment so the
+        # path/command after it is what gets evaluated.
+        result = _extract_commands_powershell("& Get-ChildItem -Recurse")
+        assert result == ["Get-ChildItem -Recurse"]
+
+    def test_stop_parsing_token_stripped(self):
+        result = _extract_commands_powershell("--% --format=%H")
+        assert result == ["--format=%H"]
+
+    def test_assignment_prefix_stripped(self):
+        result = _extract_commands_powershell("$x = Get-Date")
+        assert result == ["Get-Date"]
+
+    def test_assignment_in_compound(self):
+        # First segment is bare assignment, second is a real command.
+        result = _extract_commands_powershell("$x = 5; Get-Date")
+        # Both segments survive; the assignment-only segment becomes "5"
+        # which is harmless (deny by default if checked).
+        assert len(result) == 2
+        assert result[1] == "Get-Date"
+
+
+class TestCheckCommandShellParameter:
+    """check_command's `shell` parameter selects bash vs powershell splitter."""
+
+    def _ps_rules(self) -> RuleSet:
+        return RuleSet(
+            default_reason="no",
+            allow=[
+                Rule(name="ps_inspection", patterns=[re.compile(r"^Get\-ChildItem\b")]),
+            ],
+        )
+
+    def test_powershell_shell_uses_pygments(self):
+        # `Get-ChildItem` is allowed; bashlex would mis-tokenize the `-`
+        # but pygments correctly extracts the command.
+        allowed, _ = check_command(
+            "Get-ChildItem -Recurse",
+            self._ps_rules(),
+            shell="powershell",
+        )
+        assert allowed is True
+
+    def test_bash_shell_default(self):
+        # Default is bash splitter.
+        allowed, _ = check_command(
+            "Get-ChildItem",
+            self._ps_rules(),
+        )
+        # bashlex would still extract `Get-ChildItem` as the command name
+        # since it's a single word — both shells happen to allow this case.
+        assert allowed is True
+
+    def test_powershell_compound_denied(self):
+        rules = RuleSet(
+            default_reason="no",
+            deny=[
+                Rule(name="admin", patterns=[re.compile(r"^sudo\b")], reason="elevated"),
+            ],
+            allow=[
+                Rule(name="ps_inspection", patterns=[re.compile(r"^Get\-ChildItem\b")]),
+            ],
+        )
+        allowed, reason = check_command(
+            "Get-ChildItem; sudo whoami",
+            rules,
+            shell="powershell",
+        )
+        assert allowed is False
+        assert reason == "elevated"
 
 
 # ── override_deny ────────────────────────────────────────────────

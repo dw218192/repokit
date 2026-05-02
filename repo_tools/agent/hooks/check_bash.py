@@ -1,17 +1,18 @@
-"""Claude Code PreToolUse hook for Bash command permission checking.
+"""Claude Code PreToolUse hook for Bash and PowerShell command permission checking.
 
-Reads a PreToolUse event from stdin, checks the Bash command against
-the rules file, and outputs a hookSpecificOutput JSON decision.
+Reads a PreToolUse event from stdin, checks the command against the rules
+file, and outputs a hookSpecificOutput JSON decision.
 
-When invoked with matcher "Write" or "Edit", checks that the target
-``file_path`` is under ``--project-root`` (or a system temp dir) and
-blocks writes outside that boundary.
+The matcher dispatches on ``event["tool_name"]``:
 
-Usage (in Claude Code settings)::
+* ``Bash`` — bashlex splitter
+* ``PowerShell`` — pygments splitter
+* ``Write`` / ``Edit`` — file-path confinement check (``file_path`` must be
+  under ``--project-root`` or a system temp dir)
+* anything else — exit 2
 
-    {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
-        {"type": "command", "command": "./repo python -m repo_tools.agent.hooks.check_bash --rules <path>"}
-    ]}]}}
+Module is named ``check_bash.py`` for backwards compatibility with
+installed plugin manifests.
 
 Exit codes:
     0 — decision written to stdout (allow or deny)
@@ -83,8 +84,8 @@ def main() -> None:
         if tool_name in ("Write", "Edit"):
             file_path = event.get("tool_input", {}).get("file_path", "")
             allowed, reason = _check_file_path(file_path, project_root, tool_name_hint=tool_name)
-        else:
-            # Bash command check — requires rules file
+        elif tool_name in ("Bash", "PowerShell"):
+            shell = "powershell" if tool_name == "PowerShell" else "bash"
             rules_path = Path(args.rules) if args.rules else None
             if rules_path is None or not rules_path.exists():
                 print(f"Rules file not found: {rules_path}", file=sys.stderr)
@@ -93,7 +94,17 @@ def main() -> None:
             cwd = Path(event.get("cwd", "."))
             extra = [Path(p) for p in args.extra_rules]
             rules = load_rules(rules_path, role=args.role, extra_paths=extra)
-            allowed, reason = check_command(command, rules, project_root=project_root, cwd=cwd)
+            allowed, reason = check_command(
+                command, rules,
+                project_root=project_root, cwd=cwd, shell=shell,
+            )
+        else:
+            print(
+                f"check_bash: unsupported tool_name {tool_name!r} — "
+                "expected Bash, PowerShell, Write, or Edit",
+                file=sys.stderr,
+            )
+            sys.exit(2)
     except Exception as exc:
         print(f"check_bash error: {exc}", file=sys.stderr)
         sys.exit(2)

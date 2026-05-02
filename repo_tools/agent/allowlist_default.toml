@@ -114,3 +114,39 @@ dir = "project_root"
 [[allow]]
 name = "control_flow"
 commands = ["for", "if", "while", "case"]
+
+# ── PowerShell rules ─────────────────────────────────────────────────
+# Existing rules above also apply to PowerShell — `git`, `rm`, etc.
+# match because PS aliases (rm → Remove-Item, ls → Get-ChildItem) are
+# resolved before the regex check via segment text.
+
+[[deny]]
+name = "powershell_network_cli"
+commands = ["Invoke-WebRequest", "Invoke-RestMethod", "iwr", "irm"]
+reason = "use the WebFetch or WebSearch tools instead of CLI network commands"
+
+[[deny]]
+name = "powershell_polling"
+commands = ["Start-Sleep", "Wait-Event"]
+reason = "polling and sleep loops are not permitted — find another approach"
+
+[[deny]]
+name = "powershell_subshell"
+commands = ["pwsh", "powershell"]
+reason = "nested shells bypass the command allowlist — run commands directly instead"
+
+[[allow]]
+name = "powershell_inspection"
+commands = [
+    "Get-ChildItem", "Get-Content", "Test-Path", "Resolve-Path",
+    "Get-Location", "Get-Date", "Get-Item", "Select-String",
+    "Where-Object", "ForEach-Object", "Select-Object",
+    "Sort-Object", "Measure-Object", "Group-Object",
+    "Out-String", "Format-Table", "Format-List", "Out-Null",
+    "Set-Location", "Write-Output", "Write-Host",
+]
+
+[[allow]]
+name = "powershell_destructive_in_project"
+commands = ["Remove-Item"]
+dir = "project_root"
