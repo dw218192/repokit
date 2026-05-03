@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.1
+
+- **Core**: Add `repo.build_dir` config field (default `"build"`) and matching `{build_dir}` token. Replaces the hardcoded `_build/` path used by the `repo_run` MCP tool's log directory; logs now land at `<build_dir>/logs/mcp/`. The default `clean.paths` includes `{build_dir}/logs` so `./repo clean` removes them. **Note**: default changed from `_build` to `build` — projects that previously gitignored `_build/` should switch to `build/` (or set `repo.build_dir: _build` to keep the old path).
+
 ## 0.8.0
 
 - **Agent (breaking)**: Remove the deprecated SDK backend. The `agent.backend` config key, `--backend` CLI flag, `claude-agent-sdk` dependency, and Textual TUI are gone — `CliBackend` is now the only backend. Removes `repo_tools/agent/claude/_sdk.py`, `_hooks.py`, `_base.py`, `repo_tools/agent/tui.py`, and the `sdk` feature group from `pyproject.toml`.
