@@ -185,14 +185,30 @@ class TestResolveTokens:
             assert tokens["path_sep"] == ":"
 
     def test_resolve_tokens_workspace_paths(self, tmp_path: Path):
-        """Only workspace_root is framework-injected; build_root/logs_root are user-defined."""
+        """workspace_root and build_dir are framework-injected; build_root/logs_root are user-defined."""
         ws = tmp_path.as_posix()
         tokens = resolve_tokens(str(tmp_path), {}, {})
 
         assert tokens["workspace_root"] == ws
+        assert tokens["build_dir"] == "build"  # framework-injected default
         assert "build_root" not in tokens  # user-defined, not framework-injected
         assert "logs_root" not in tokens   # user-defined, not framework-injected
-        assert "build_dir" not in tokens   # user-defined, not framework-injected
+
+    def test_resolve_tokens_build_dir_override(self, tmp_path: Path):
+        """repo.build_dir overrides the default build_dir token."""
+        config = {"repo": {"build_dir": "out"}}
+        tokens = resolve_tokens(str(tmp_path), config, {})
+
+        assert tokens["build_dir"] == "out"
+
+    def test_resolve_tokens_build_dir_reserved(self, tmp_path: Path, capture_logs):
+        """repo.tokens.build_dir is rejected (reserved); framework default wins."""
+        config = {"repo": {"tokens": {"build_dir": "shadow"}}}
+        tokens = resolve_tokens(str(tmp_path), config, {})
+
+        assert tokens["build_dir"] == "build"
+        log_text = capture_logs.getvalue()
+        assert "build_dir" in log_text and "reserved" in log_text
 
     def test_resolve_tokens_config_tokens(self, tmp_path: Path):
         """Tokens declared in config['repo']['tokens'] appear in the result."""
@@ -217,21 +233,21 @@ class TestResolveTokens:
         assert tokens["platform"] == "linux-arm64"
         assert tokens["build_type"] == "Release"
 
-    def test_resolve_tokens_user_defined_build_dir(self, tmp_path: Path):
-        """build_dir can be defined as a cross-reference token by the user."""
+    def test_resolve_tokens_user_defined_output_dir(self, tmp_path: Path):
+        """User-defined tokens (non-reserved names) can cross-reference each other."""
         config = {"repo": {"tokens": {
             "build_root": "_build",
-            "build_dir": "{build_root}/{platform}/{build_type}",
+            "output_dir": "{build_root}/{platform}/{build_type}",
         }}}
         dims = {"platform": "linux-x64", "build_type": "Release"}
         tokens = resolve_tokens(str(tmp_path), config, dims)
 
-        assert "linux-x64" in tokens["build_dir"]
-        assert "Release" in tokens["build_dir"]
+        assert "linux-x64" in tokens["output_dir"]
+        assert "Release" in tokens["output_dir"]
 
     def test_graph_validation_catches_typo(self, tmp_path: Path):
         """A typo like {buld_root} raises KeyError."""
-        config = {"repo": {"tokens": {"build_dir": "{buld_root}/out"}}}
+        config = {"repo": {"tokens": {"output_dir": "{buld_root}/out"}}}
         with pytest.raises(KeyError, match="undefined token.*buld_root"):
             resolve_tokens(str(tmp_path), config, {})
 
