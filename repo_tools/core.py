@@ -178,7 +178,24 @@ def _builtin_tokens() -> dict[str, str]:
 
 
 # Tokens set by the framework that config.yaml must not override.
-_RESERVED_TOKENS = {"workspace_root", "repo", "framework_root", "tools_dir", "managed_dir", "cfg", "env"}
+_RESERVED_TOKENS = {"workspace_root", "repo", "framework_root", "tools_dir", "managed_dir", "build_dir", "cfg", "env"}
+
+# Default build directory (overridable via ``repo.build_dir`` in config.yaml).
+_DEFAULT_BUILD_DIR = "build"
+
+
+def resolve_build_dir(config: dict[str, Any]) -> str:
+    """Return the configured build directory (relative to workspace root).
+
+    Reads ``repo.build_dir`` from the config and falls back to ``"build"``.
+    Single-source-of-truth so framework code (e.g. MCP log paths) and the
+    ``{build_dir}`` token resolve to the same value.
+    """
+    repo_section = config.get("repo", {}) if isinstance(config, dict) else {}
+    if not isinstance(repo_section, dict):
+        return _DEFAULT_BUILD_DIR
+    value = repo_section.get("build_dir", _DEFAULT_BUILD_DIR)
+    return str(value) if value else _DEFAULT_BUILD_DIR
 
 
 def _extract_references(template: str) -> set[str]:
@@ -277,6 +294,9 @@ def resolve_tokens(
 
     # workspace_root is always set from the runtime environment
     tokens["workspace_root"] = posix_path(workspace_root)
+
+    # build_dir is reserved: derived from config (default "build")
+    tokens["build_dir"] = resolve_build_dir(config)
 
     # Dimension values override
     tokens.update(dimension_values)
