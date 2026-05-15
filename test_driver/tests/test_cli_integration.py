@@ -353,13 +353,20 @@ def test_classify_tools_distinguishes_framework_from_project():
     'tools/repo_tools/package.py' — putting every framework tool into the
     project bucket and breaking auto_register_config_tools' override semantics.
     """
+    import os
     import sys as _sys
     import types
     from pathlib import Path
     from repo_tools.core import RepoTool
+    from repo_tools import cli as cli_mod
     from repo_tools.cli import _classify_tools
 
-    framework_root = Path(__file__).resolve().parents[2]  # tools/framework/
+    # Use cli.py's __file__ to compute framework_root, mirroring exactly what
+    # the classifier does internally — os.path.abspath (no symlink resolution).
+    # When CI runs via the test_driver junction, cli.py is imported through
+    # that aliased path; the classifier's framework_root uses that aliased
+    # path too, and so must this test.
+    framework_root = Path(os.path.abspath(Path(cli_mod.__file__).parent.parent))
 
     def _make_fake_tool(module_path: Path, name: str) -> RepoTool:
         # Create a synthetic module whose __file__ points at `module_path` so the
