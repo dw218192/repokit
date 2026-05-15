@@ -340,3 +340,61 @@ def test_config_steps_override_framework_tool(make_workspace, capture_logs):
     log_text = capture_logs.getvalue()
     assert "Would run" in log_text
     assert "echo hello" in log_text
+
+
+def test_classify_tools_distinguishes_framework_from_project():
+    """Regression: a framework tool whose path happens to share a prefix with a
+    project tool dir must still classify as framework.
+
+    Real scenario that broke CI: framework lives at 'tools/framework/' and
+    project tools at 'tools/repo_tools/'. The previous classifier used
+    startswith(project_tool_dirs) with project_tool_dirs=['tools/'], which
+    matched both 'tools/framework/repo_tools/package.py' *and*
+    'tools/repo_tools/package.py' — putting every framework tool into the
+    project bucket and breaking auto_register_config_tools' override semantics.
+    """
+    import sys as _sys
+    import types
+    from pathlib import Path
+    from repo_tools.core import RepoTool
+    from repo_tools.cli import _classify_tools
+
+    framework_root = Path(__file__).resolve().parents[2]  # tools/framework/
+
+    def _make_fake_tool(module_path: Path, name: str) -> RepoTool:
+        # Create a synthetic module whose __file__ points at `module_path` so the
+        # classifier sees the realistic file location.
+        mod_name = f"fake_module_{name}"
+        mod = types.ModuleType(mod_name)
+        mod.__file__ = str(module_path)
+        _sys.modules[mod_name] = mod
+
+        class FakeTool(RepoTool):
+            pass
+        FakeTool.__module__ = mod_name
+        FakeTool.name = name  # type: ignore[assignment]
+        FakeTool.help = "fake"
+        return FakeTool()
+
+    # Two tools both named 'package':
+    #   - framework one lives under framework_root/repo_tools/
+    #   - project one lives under a sibling tools/repo_tools/
+    framework_tool = _make_fake_tool(
+        framework_root / "repo_tools" / "package.py",
+        "fw-package",
+    )
+    project_tool = _make_fake_tool(
+        framework_root.parent / "repo_tools" / "package.py",
+        "proj-package",
+    )
+
+    framework_classified, project_classified = _classify_tools(
+        [framework_tool, project_tool]
+    )
+
+    framework_names = {t.name for t in framework_classified}
+    project_names = {t.name for t in project_classified}
+    assert "fw-package" in framework_names
+    assert "proj-package" in project_names
+    assert "fw-package" not in project_names  # ← what broke before
+    assert "proj-package" not in framework_names
