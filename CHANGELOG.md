@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.3
+
+- **Core**: Un-reserve `build_dir`. Projects can now override the `{build_dir}` token via `repo.tokens.build_dir` (including templated values like `{build_root}/{platform}/{build_type}`), just like any other token. `repo.build_dir` (top-level) still works as before. `resolve_build_dir()` -- used by the MCP server for log paths -- prefers `repo.tokens.build_dir` when it's a plain string, falls back to `repo.build_dir`, then defaults to `"build"`; templated values are skipped here because MCP runs without dimension context. Fixes the v0.8.1 regression where existing projects using `build_dir` as their CMake build directory token were silently overridden with a "reserved" warning.
+
 ## 0.8.2
 
 - **CLI**: Fix framework-vs-project tool classification. The previous classifier used `startswith(project_tool_dirs)`, which misclassified every framework tool as a project tool when a `project_tool_dir` was a parent of `framework_root` (the common case: `project_tool_dirs=['tools/']` with framework at `tools/framework/`). The polluted `project_names` set then suppressed `auto_register_config_tools`' override of framework tools — so a config `package: steps:` block was silently ignored and the framework `PackageTool` ran instead, failing on the unresolved `{platform}` default token. Classifier now uses `framework_root` as the discriminator: anything under it is framework, everything else discovered via the `repo_tools` namespace package is a project portion. Extracted to a testable `_classify_tools()` helper with a regression test covering the sibling-path scenario.

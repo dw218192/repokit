@@ -178,22 +178,42 @@ def _builtin_tokens() -> dict[str, str]:
 
 
 # Tokens set by the framework that config.yaml must not override.
-_RESERVED_TOKENS = {"workspace_root", "repo", "framework_root", "tools_dir", "managed_dir", "build_dir", "cfg", "env"}
+_RESERVED_TOKENS = {"workspace_root", "repo", "framework_root", "tools_dir", "managed_dir", "cfg", "env"}
 
-# Default build directory (overridable via ``repo.build_dir`` in config.yaml).
+# Default build directory (overridable via ``repo.build_dir`` or
+# ``repo.tokens.build_dir`` in config.yaml).
 _DEFAULT_BUILD_DIR = "build"
 
 
 def resolve_build_dir(config: dict[str, Any]) -> str:
-    """Return the configured build directory (relative to workspace root).
+    """Return the configured build directory used by MCP log paths.
 
-    Reads ``repo.build_dir`` from the config and falls back to ``"build"``.
-    Single-source-of-truth so framework code (e.g. MCP log paths) and the
-    ``{build_dir}`` token resolve to the same value.
+    Resolution order:
+      1. ``repo.tokens.build_dir.value`` (if a plain string with no
+         ``{placeholder}`` references -- MCP runs without dimension context
+         and cannot expand templated values like ``{platform}``).
+      2. ``repo.build_dir`` (top-level simple-string field).
+      3. Default ``"build"``.
+
+    Projects whose ``repo.tokens.build_dir`` IS templated can still use the
+    ``{build_dir}`` token freely in other tokens; only MCP log paths fall
+    back to the default in that case.
     """
     repo_section = config.get("repo", {}) if isinstance(config, dict) else {}
     if not isinstance(repo_section, dict):
         return _DEFAULT_BUILD_DIR
+
+    tokens_section = repo_section.get("tokens", {})
+    if isinstance(tokens_section, dict):
+        token_value = tokens_section.get("build_dir")
+        raw: str = ""
+        if isinstance(token_value, dict):
+            raw = str(token_value.get("value", ""))
+        elif token_value is not None:
+            raw = str(token_value)
+        if raw and "{" not in raw:
+            return raw
+
     value = repo_section.get("build_dir", _DEFAULT_BUILD_DIR)
     return str(value) if value else _DEFAULT_BUILD_DIR
 
@@ -295,8 +315,11 @@ def resolve_tokens(
     # workspace_root is always set from the runtime environment
     tokens["workspace_root"] = posix_path(workspace_root)
 
-    # build_dir is reserved: derived from config (default "build")
-    tokens["build_dir"] = resolve_build_dir(config)
+    # build_dir defaults to the resolved MCP-log path (typically "build") when
+    # the project didn't set ``repo.tokens.build_dir`` directly. Projects can
+    # override with a templated value -- token expansion handles the rest.
+    if "build_dir" not in tokens:
+        tokens["build_dir"] = resolve_build_dir(config)
 
     # Dimension values override
     tokens.update(dimension_values)
