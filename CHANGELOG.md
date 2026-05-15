@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.2
+
+- **CLI**: Fix framework-vs-project tool classification. The previous classifier used `startswith(project_tool_dirs)`, which misclassified every framework tool as a project tool when a `project_tool_dir` was a parent of `framework_root` (the common case: `project_tool_dirs=['tools/']` with framework at `tools/framework/`). The polluted `project_names` set then suppressed `auto_register_config_tools`' override of framework tools — so a config `package: steps:` block was silently ignored and the framework `PackageTool` ran instead, failing on the unresolved `{platform}` default token. Classifier now uses `framework_root` as the discriminator: anything under it is framework, everything else discovered via the `repo_tools` namespace package is a project portion. Extracted to a testable `_classify_tools()` helper with a regression test covering the sibling-path scenario.
+
 ## 0.8.1
 
 - **Core**: Add `repo.build_dir` config field (default `"build"`) and matching `{build_dir}` token. Replaces the hardcoded `_build/` path used by the `repo_run` MCP tool's log directory; logs now land at `<build_dir>/logs/mcp/`. The default `clean.paths` includes `{build_dir}/logs` so `./repo clean` removes them. **Note**: default changed from `_build` to `build` — projects that previously gitignored `_build/` should switch to `build/` (or set `repo.build_dir: _build` to keep the old path).

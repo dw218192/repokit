@@ -33,6 +33,33 @@ def _resolve_tools(framework_tools: list[RepoTool], project_tools: list[RepoTool
     return sorted(by_name.values(), key=lambda t: t.name)
 
 
+def _classify_tools(
+    all_tools: list[RepoTool],
+) -> tuple[list[RepoTool], list[RepoTool]]:
+    """Split discovered tools into (framework, project) by file location.
+
+    Anything whose source file lives under framework_root is a framework tool;
+    everything else discovered via the repo_tools namespace package is a
+    project portion. Using framework_root as the discriminator (rather than
+    checking against project_tool_dirs) avoids a class of misclassification
+    bugs when a project_tool_dir is a parent of framework_root — e.g.
+    project_tool_dirs=['tools/'] with framework at 'tools/framework/', which
+    previously caused every framework tool to be classified as a project tool.
+    """
+    framework_root = os.path.abspath(Path(__file__).parent.parent)
+    framework_prefix = framework_root + os.sep
+    framework_tools: list[RepoTool] = []
+    project_tools: list[RepoTool] = []
+    for t in all_tools:
+        mod = sys.modules.get(t.__class__.__module__)
+        mod_file = getattr(mod, "__file__", "") or ""
+        if mod_file and os.path.abspath(mod_file).startswith(framework_prefix):
+            framework_tools.append(t)
+        else:
+            project_tools.append(t)
+    return framework_tools, project_tools
+
+
 # ── Dimension Tokens → Click Options ────────────────────────────────
 
 
@@ -230,17 +257,7 @@ def _build_cli(
         list(rt_pkg.__path__), rt_pkg.__name__
     )
 
-    # Separate into framework vs project tools based on file location
-    framework_tools: list[RepoTool] = []
-    project_tools: list[RepoTool] = []
-    project_prefixes = tuple(os.path.abspath(d) for d in (project_tool_dirs or []))
-    for t in all_tools:
-        mod = sys.modules.get(t.__class__.__module__)
-        mod_file = getattr(mod, "__file__", "") or ""
-        if project_prefixes and os.path.abspath(mod_file).startswith(project_prefixes):
-            project_tools.append(t)
-        else:
-            framework_tools.append(t)
+    framework_tools, project_tools = _classify_tools(all_tools)
 
     tools = _resolve_tools(framework_tools, project_tools)
 
