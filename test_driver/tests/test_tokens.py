@@ -201,14 +201,12 @@ class TestResolveTokens:
 
         assert tokens["build_dir"] == "out"
 
-    def test_resolve_tokens_build_dir_reserved(self, tmp_path: Path, capture_logs):
-        """repo.tokens.build_dir is rejected (reserved); framework default wins."""
+    def test_resolve_tokens_build_dir_via_tokens_section(self, tmp_path: Path):
+        """repo.tokens.build_dir overrides the default just like any token."""
         config = {"repo": {"tokens": {"build_dir": "shadow"}}}
         tokens = resolve_tokens(str(tmp_path), config, {})
 
-        assert tokens["build_dir"] == "build"
-        log_text = capture_logs.getvalue()
-        assert "build_dir" in log_text and "reserved" in log_text
+        assert tokens["build_dir"] == "shadow"
 
     def test_resolve_tokens_config_tokens(self, tmp_path: Path):
         """Tokens declared in config['repo']['tokens'] appear in the result."""
