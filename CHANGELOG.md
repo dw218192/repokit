@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.4
+
+- **Core (breaking)**: MCP log paths now derive from `build_root` instead of `build_dir`. The `repo_run` MCP tool resolved its log directory from `build_dir`, but a templated `build_dir` (e.g. `{build_root}/{platform}/{build_type}`) cannot be expanded without a dimension context, so it silently fell back to a flat `build/` directory at the workspace root. MCP logs are not per-platform/per-build-type artifacts anyway. `resolve_build_dir()` is replaced by `resolve_build_root()`, which reads `repo.tokens.build_root` -- conventionally `{workspace_root}/<dir>`, carrying no dimension dependency -- and returns the workspace-relative segment; logs now land at `<build_root>/logs/mcp/`. The `repo.build_dir` top-level config field (the v0.8.1 escape hatch) is removed -- projects configure the build root via `repo.tokens.build_root` like any other token. The `build_dir` token still defaults to `"build"` when a project declares no `repo.tokens.build_dir`.
+
 ## 0.8.3
 
 - **Core**: Un-reserve `build_dir`. Projects can now override the `{build_dir}` token via `repo.tokens.build_dir` (including templated values like `{build_root}/{platform}/{build_type}`), just like any other token. `repo.build_dir` (top-level) still works as before. `resolve_build_dir()` -- used by the MCP server for log paths -- prefers `repo.tokens.build_dir` when it's a plain string, falls back to `repo.build_dir`, then defaults to `"build"`; templated values are skipped here because MCP runs without dimension context. Fixes the v0.8.1 regression where existing projects using `build_dir` as their CMake build directory token were silently overridden with a "reserved" warning.
