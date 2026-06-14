@@ -94,6 +94,7 @@ class InitTool(RepoTool):
         self._generate_config_template(ctx.workspace_root, framework_root)
         self._generate_ci_template(ctx.workspace_root)
         self._generate_claude_template(ctx.workspace_root, framework_root)
+        self._generate_agent_surface(ctx.workspace_root, framework_root, ctx.config)
 
     @staticmethod
     def _generate_config_template(workspace_root: Path, framework_root: Path) -> None:
@@ -128,6 +129,25 @@ class InitTool(RepoTool):
             config_name_path = framework_root / "_managed" / "config_name"
             config_name_path.parent.mkdir(parents=True, exist_ok=True)
             config_name_path.write_text(alt_name, encoding="utf-8")
+
+    @staticmethod
+    def _generate_agent_surface(workspace_root: Path, framework_root: Path, config: dict) -> None:
+        """Generate the agent-config surface (plugin, runner, .mcp.json, settings).
+
+        Shares the generation helper with ``./repo generate``. Unlike that command,
+        init treats an adoption-guard refusal as a **warning** (not a hard exit) so
+        the rest of init still completes.
+        """
+        from .agent import generate as gen
+
+        result = gen.generate_surface(workspace_root, framework_root, config)
+        for target in result.written:
+            print(f"Generated {target}")
+        for target, reason in result.refused:
+            print(
+                f"WARNING: skipped {target} (not repokit-managed): {reason}",
+                file=sys.stderr,
+            )
 
     @staticmethod
     def _generate_ci_template(workspace_root: Path) -> None:
