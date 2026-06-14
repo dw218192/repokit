@@ -2,7 +2,7 @@
 
 Usage::
 
-    python -m repo_tools.agent.hooks check_bash --rules <path> ...
+    python -m repo_tools.agent.hooks adr_immutable [--debug-log <path>]
 """
 
 from __future__ import annotations
@@ -29,20 +29,14 @@ def write_log(log_path: Path, command: str, decision: str, reason: str = "") -> 
 def main() -> None:
     """Dispatch to the correct hook subcommand."""
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
-        print("Usage: python -m repo_tools.agent.hooks check_bash [args...]", file=sys.stderr)
+        print("Usage: python -m repo_tools.agent.hooks adr_immutable [args...]", file=sys.stderr)
         sys.exit(2)
 
     subcommand = sys.argv[1]
     # Remove the subcommand from argv so the sub-module's argparse sees the right args
     sys.argv = [sys.argv[0]] + sys.argv[2:]
 
-    if subcommand == "check_bash":
-        from .check_bash import main as sub_main
-    elif subcommand == "approve_mcp":
-        from .approve_mcp import main as sub_main
-    elif subcommand == "approve_ticket":
-        from .approve_ticket import main as sub_main
-    elif subcommand == "adr_immutable":
+    if subcommand == "adr_immutable":
         from .adr_immutable import main as sub_main
     else:
         print(f"Unknown subcommand: {subcommand!r}", file=sys.stderr)
