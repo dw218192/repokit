@@ -3,4 +3,5 @@
 
 clean:
   paths:
+    - "{workspace_root}/{build_dir}/logs"
     - "{workspace_root}/**/__pycache__"

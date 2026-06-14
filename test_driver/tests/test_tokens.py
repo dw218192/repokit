@@ -15,6 +15,7 @@ from repo_tools.core import (
     _RESERVED_TOKENS,
     _extract_references,
     _validate_token_graph,
+    resolve_build_root,
     resolve_tokens,
 )
 
@@ -185,14 +186,45 @@ class TestResolveTokens:
             assert tokens["path_sep"] == ":"
 
     def test_resolve_tokens_workspace_paths(self, tmp_path: Path):
-        """Only workspace_root is framework-injected; build_root/logs_root are user-defined."""
+        """workspace_root and build_dir are framework-injected; build_root/logs_root are user-defined."""
         ws = tmp_path.as_posix()
         tokens = resolve_tokens(str(tmp_path), {}, {})
 
         assert tokens["workspace_root"] == ws
+        assert tokens["build_dir"] == "build"  # framework-injected default
         assert "build_root" not in tokens  # user-defined, not framework-injected
         assert "logs_root" not in tokens   # user-defined, not framework-injected
-        assert "build_dir" not in tokens   # user-defined, not framework-injected
+
+    def test_resolve_tokens_build_dir_via_tokens_section(self, tmp_path: Path):
+        """repo.tokens.build_dir overrides the default just like any token."""
+        config = {"repo": {"tokens": {"build_dir": "shadow"}}}
+        tokens = resolve_tokens(str(tmp_path), config, {})
+
+        assert tokens["build_dir"] == "shadow"
+
+
+class TestResolveBuildRoot:
+    """resolve_build_root() -- MCP log directory derivation (dimension-free)."""
+
+    def test_default_when_no_build_root(self):
+        """No build_root token declared -> "build"."""
+        assert resolve_build_root({}) == "build"
+        assert resolve_build_root({"repo": {"tokens": {}}}) == "build"
+
+    def test_strips_workspace_root_prefix(self):
+        """build_root "{workspace_root}/_build" -> workspace-relative "_build"."""
+        config = {"repo": {"tokens": {"build_root": {"value": "{workspace_root}/_build"}}}}
+        assert resolve_build_root(config) == "_build"
+
+    def test_plain_string_build_root(self):
+        """A non-dict token value is accepted."""
+        config = {"repo": {"tokens": {"build_root": "out"}}}
+        assert resolve_build_root(config) == "out"
+
+    def test_templated_build_root_falls_back(self):
+        """A build_root referencing a dimension token is unusable -> "build"."""
+        config = {"repo": {"tokens": {"build_root": {"value": "{workspace_root}/{platform}/b"}}}}
+        assert resolve_build_root(config) == "build"
 
     def test_resolve_tokens_config_tokens(self, tmp_path: Path):
         """Tokens declared in config['repo']['tokens'] appear in the result."""
@@ -217,21 +249,21 @@ class TestResolveTokens:
         assert tokens["platform"] == "linux-arm64"
         assert tokens["build_type"] == "Release"
 
-    def test_resolve_tokens_user_defined_build_dir(self, tmp_path: Path):
-        """build_dir can be defined as a cross-reference token by the user."""
+    def test_resolve_tokens_user_defined_output_dir(self, tmp_path: Path):
+        """User-defined tokens (non-reserved names) can cross-reference each other."""
         config = {"repo": {"tokens": {
             "build_root": "_build",
-            "build_dir": "{build_root}/{platform}/{build_type}",
+            "output_dir": "{build_root}/{platform}/{build_type}",
         }}}
         dims = {"platform": "linux-x64", "build_type": "Release"}
         tokens = resolve_tokens(str(tmp_path), config, dims)
 
-        assert "linux-x64" in tokens["build_dir"]
-        assert "Release" in tokens["build_dir"]
+        assert "linux-x64" in tokens["output_dir"]
+        assert "Release" in tokens["output_dir"]
 
     def test_graph_validation_catches_typo(self, tmp_path: Path):
         """A typo like {buld_root} raises KeyError."""
-        config = {"repo": {"tokens": {"build_dir": "{buld_root}/out"}}}
+        config = {"repo": {"tokens": {"output_dir": "{buld_root}/out"}}}
         with pytest.raises(KeyError, match="undefined token.*buld_root"):
             resolve_tokens(str(tmp_path), config, {})
 

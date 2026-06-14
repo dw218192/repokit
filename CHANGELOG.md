@@ -10,6 +10,22 @@ The repokit modernization (ADR-1/2/3): repokit stops driving Claude as a subproc
 - **Agent (breaking)**: Demolish the driver-era machinery — removes the `agent` CLI command and its subprocess backend (`tool.py`, the `claude/` backend), the dispatch tool (`dispatch.py`, `mcp/dispatch.py`), headless mode + structured `OUTPUT_SCHEMAS`, the ticket FSM/ledger (`tickets.py`, `mcp/tickets.py`, the `approve_ticket` hook), the custom Bash/PowerShell allowlist (`rules.py`, `allowlist_default.toml`, the `check_bash`/`approve_mcp` hooks, the `roles=` filter), the CodeRabbit integration (`coderabbit.py`, `mcp/coderabbit.py`), the interactive-dispatch plumbing (`events.py`, `worktree.py`), and the role prompts. The surviving core is the repo-tooling MCP (`lint`, `repo_cmd` + `mcp/_jsonrpc.py`) plus the generation layer. ~7,800 LOC removed.
 - **Docs**: Add the modernization design set — ADR-1 (driver→equipment), ADR-2 (workflow integrity / anti-cheating), ADR-3 (native permissions) and the `workflow` / `generation` / `review-gates` / `demolition-sequence` specs + roadmap.
 
+## 0.8.4
+
+- **Core (breaking)**: MCP log paths now derive from `build_root` instead of `build_dir`. The `repo_run` MCP tool resolved its log directory from `build_dir`, but a templated `build_dir` (e.g. `{build_root}/{platform}/{build_type}`) cannot be expanded without a dimension context, so it silently fell back to a flat `build/` directory at the workspace root. MCP logs are not per-platform/per-build-type artifacts anyway. `resolve_build_dir()` is replaced by `resolve_build_root()`, which reads `repo.tokens.build_root` -- conventionally `{workspace_root}/<dir>`, carrying no dimension dependency -- and returns the workspace-relative segment; logs now land at `<build_root>/logs/mcp/`. The `repo.build_dir` top-level config field (the v0.8.1 escape hatch) is removed -- projects configure the build root via `repo.tokens.build_root` like any other token. The `build_dir` token still defaults to `"build"` when a project declares no `repo.tokens.build_dir`.
+
+## 0.8.3
+
+- **Core**: Un-reserve `build_dir`. Projects can now override the `{build_dir}` token via `repo.tokens.build_dir` (including templated values like `{build_root}/{platform}/{build_type}`), just like any other token. `repo.build_dir` (top-level) still works as before. `resolve_build_dir()` -- used by the MCP server for log paths -- prefers `repo.tokens.build_dir` when it's a plain string, falls back to `repo.build_dir`, then defaults to `"build"`; templated values are skipped here because MCP runs without dimension context. Fixes the v0.8.1 regression where existing projects using `build_dir` as their CMake build directory token were silently overridden with a "reserved" warning.
+
+## 0.8.2
+
+- **CLI**: Fix framework-vs-project tool classification. The previous classifier used `startswith(project_tool_dirs)`, which misclassified every framework tool as a project tool when a `project_tool_dir` was a parent of `framework_root` (the common case: `project_tool_dirs=['tools/']` with framework at `tools/framework/`). The polluted `project_names` set then suppressed `auto_register_config_tools`' override of framework tools — so a config `package: steps:` block was silently ignored and the framework `PackageTool` ran instead, failing on the unresolved `{platform}` default token. Classifier now uses `framework_root` as the discriminator: anything under it is framework, everything else discovered via the `repo_tools` namespace package is a project portion. Extracted to a testable `_classify_tools()` helper with a regression test covering the sibling-path scenario.
+
+## 0.8.1
+
+- **Core**: Add `repo.build_dir` config field (default `"build"`) and matching `{build_dir}` token. Replaces the hardcoded `_build/` path used by the `repo_run` MCP tool's log directory; logs now land at `<build_dir>/logs/mcp/`. The default `clean.paths` includes `{build_dir}/logs` so `./repo clean` removes them. **Note**: default changed from `_build` to `build` — projects that previously gitignored `_build/` should switch to `build/` (or set `repo.build_dir: _build` to keep the old path).
+
 ## 0.8.0
 
 - **Agent (breaking)**: Remove the deprecated SDK backend. The `agent.backend` config key, `--backend` CLI flag, `claude-agent-sdk` dependency, and Textual TUI are gone — `CliBackend` is now the only backend. Removes `repo_tools/agent/claude/_sdk.py`, `_hooks.py`, `_base.py`, `repo_tools/agent/tui.py`, and the `sdk` feature group from `pyproject.toml`.

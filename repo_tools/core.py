@@ -180,6 +180,46 @@ def _builtin_tokens() -> dict[str, str]:
 # Tokens set by the framework that config.yaml must not override.
 _RESERVED_TOKENS = {"workspace_root", "repo", "framework_root", "tools_dir", "managed_dir", "cfg", "env"}
 
+# Default build directory: the build_dir token's fallback, and the MCP-log
+# build-root fallback when a project declares no usable build_root token.
+_DEFAULT_BUILD_DIR = "build"
+
+
+def resolve_build_root(config: dict[str, Any]) -> str:
+    """Return the workspace-relative build-root directory for MCP log output.
+
+    The MCP server runs without a dimension context, so it cannot expand a
+    templated ``build_dir`` (one referencing ``{platform}`` / ``{build_type}``).
+    ``build_root`` carries no such dependency -- by convention it is
+    ``{workspace_root}/<dir>`` -- so MCP log paths derive from it instead.
+
+    Returns the path segment beneath the workspace root (e.g. ``_build``), or
+    ``"build"`` when no usable ``repo.tokens.build_root`` is declared.
+    """
+    repo_section = config.get("repo", {}) if isinstance(config, dict) else {}
+    if not isinstance(repo_section, dict):
+        return _DEFAULT_BUILD_DIR
+
+    tokens_section = repo_section.get("tokens", {})
+    if not isinstance(tokens_section, dict):
+        return _DEFAULT_BUILD_DIR
+
+    token_value = tokens_section.get("build_root")
+    raw: str = ""
+    if isinstance(token_value, dict):
+        raw = str(token_value.get("value", ""))
+    elif token_value is not None:
+        raw = str(token_value)
+
+    # build_root is conventionally "{workspace_root}/<dir>"; strip the
+    # workspace_root placeholder to get a workspace-relative segment.
+    raw = raw.replace("{workspace_root}/", "").strip("/")
+    # A remaining placeholder means build_root references a dimension or other
+    # token with no value outside a build context -- not usable for MCP paths.
+    if not raw or "{" in raw:
+        return _DEFAULT_BUILD_DIR
+    return raw
+
 
 def _extract_references(template: str) -> set[str]:
     """Return the set of token names referenced by ``{name}`` placeholders.
@@ -277,6 +317,12 @@ def resolve_tokens(
 
     # workspace_root is always set from the runtime environment
     tokens["workspace_root"] = posix_path(workspace_root)
+
+    # build_dir defaults to "build" when the project declares no
+    # repo.tokens.build_dir. Projects may override with any value, templated
+    # or not -- token expansion handles the rest.
+    if "build_dir" not in tokens:
+        tokens["build_dir"] = _DEFAULT_BUILD_DIR
 
     # Dimension values override
     tokens.update(dimension_values)

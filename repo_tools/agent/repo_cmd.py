@@ -59,6 +59,7 @@ def call_repo_run(
     args: dict[str, Any],
     *,
     workspace_root: Path,
+    build_root: str = "build",
 ) -> dict[str, Any]:
     """Execute ``./repo <subcommand>`` via subprocess.
 
@@ -94,7 +95,7 @@ def call_repo_run(
     records = _parse_records(proc.stdout or "", proc.stderr or "")
 
     # Write full output to a log file so filtered MCP output can reference it
-    log_dir = workspace_root / "_build" / "logs" / "mcp"
+    log_dir = workspace_root / build_root / "logs" / "mcp"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / f"{subcommand}.log"
     try:
@@ -199,14 +200,21 @@ def build_repo_run_handler(
     extra: list[dict[str, str]] | None = None,
 ) -> tuple[str, Any]:
     """Build a single ``repo_run`` handler that dispatches by command name."""
+    from ..core import resolve_build_root
+
     all_cmds = _merge_commands(_discover_repo_commands(config), extra)
     known = {c["name"] for c in all_cmds}
+    build_root = resolve_build_root(config)
 
     def handler(args: dict[str, Any]) -> dict[str, Any]:
         command = args.get("command", "")
         if command not in known:
             return {"isError": True, "text": f"Unknown command: {command!r}"}
-        result = call_repo_run(command, args, workspace_root=workspace_root)
+        result = call_repo_run(
+            command, args,
+            workspace_root=workspace_root,
+            build_root=build_root,
+        )
         return _apply_output_filter(command, result)
 
     return ("repo_run", handler)
