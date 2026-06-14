@@ -42,6 +42,8 @@ def main() -> None:
         from .approve_mcp import main as sub_main
     elif subcommand == "approve_ticket":
         from .approve_ticket import main as sub_main
+    elif subcommand == "adr_immutable":
+        from .adr_immutable import main as sub_main
     else:
         print(f"Unknown subcommand: {subcommand!r}", file=sys.stderr)
         sys.exit(2)

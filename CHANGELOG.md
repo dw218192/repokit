@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.0
+
+- **Agent (generation)**: Add a standalone generation layer (`repo_tools/agent/generate.py` + `./repo generate`) that statically emits the agent-config surface, replacing the runtime `_write_plugin`. Emits a skills-directory plugin under `.claude/skills/repokit/` (manifest, the `spike` skill, and the `spec-gate`/`impl-gate` reviewer personas compiled from tool-neutral canonical descriptors), the spec-driven workflow runner at `.claude/workflows/repokit-work-item.js`, `.mcp.json` (in-file merge; `lint` + `repo_cmd` survivors only), and `.claude/settings.json` (native `permissions.deny` for `docs/adr/**` + `_managed/**`, plus the ADR-immutability hook). Regeneration is gated by a `_managed/manifest.json` staleness cache (missing / stale / hand-edited / framework-version-bump → regenerate), with an adoption guard that refuses pre-existing un-managed files. Implements ADR-1/ADR-2/ADR-3 and the `generation`/`review-gates`/`workflow` specs.
+- **Agent (hooks)**: Add the `adr_immutable` PreToolUse hook denying `Write`/`Edit` to an `accepted` ADR (handles both fenced YAML and bare-`Status:` frontmatter).
+- **Docs**: Add the modernization design set — ADR-1 (driver→equipment), ADR-2 (workflow integrity / anti-cheating), ADR-3 (native permissions) and the `workflow` / `generation` / `review-gates` / `demolition-sequence` specs + roadmap.
+
+This is the inception foundation, authored directly per ADR-2's inception clause; the new path is stood up *beside* the driver-era machinery, which is not yet removed (that is the dogfooded demolition).
+
 ## 0.8.0
 
 - **Agent (breaking)**: Remove the deprecated SDK backend. The `agent.backend` config key, `--backend` CLI flag, `claude-agent-sdk` dependency, and Textual TUI are gone — `CliBackend` is now the only backend. Removes `repo_tools/agent/claude/_sdk.py`, `_hooks.py`, `_base.py`, `repo_tools/agent/tui.py`, and the `sdk` feature group from `pyproject.toml`.
