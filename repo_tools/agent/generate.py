@@ -464,6 +464,28 @@ def gitignore_entries() -> list[str]:
     ]
 
 
+def generate_surface(project_root: Path, framework_root: Path, config: dict) -> GenResult:
+    """Generate the agent-config surface and gitignore its build output.
+
+    The shared entry point behind both `./repo generate` (GenerateTool) and
+    `./repo init` (InitTool): render the artifact set, then gitignore the
+    generated build output (not ``.mcp.json`` — the in-file-merge exception).
+    Returns the :class:`GenResult`; the CALLER decides how to react to refusals
+    (``./repo generate`` exits 1; ``init`` warns and continues), so this helper
+    never exits the process itself.
+    """
+    from ..gitignore import patch_gitignore
+
+    ctx = make_context(project_root, framework_root, config)
+    result = generate(ctx)
+    patch_gitignore(
+        project_root / ".gitignore",
+        entries=gitignore_entries(),
+        marker="# repokit-generated",
+    )
+    return result
+
+
 def make_context(project_root: Path, framework_root: Path, config: dict) -> GenContext:
     """Build a :class:`GenContext` for a `./repo`-invoked generation."""
     return GenContext(

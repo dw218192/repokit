@@ -17,7 +17,6 @@ from typing import Any
 import click
 
 from ..core import RepoTool, ToolContext, log_section, logger
-from ..gitignore import patch_gitignore
 from . import generate as gen
 
 
@@ -36,16 +35,15 @@ class GenerateTool(RepoTool):
 
     def execute(self, ctx: ToolContext, args: dict[str, Any]) -> None:
         framework_root = Path(ctx.tokens["framework_root"])
-        gctx = gen.make_context(ctx.workspace_root, framework_root, ctx.config)
-        artifacts = gen.build_artifacts(gctx)
 
         if args.get("dry_run"):
+            gctx = gen.make_context(ctx.workspace_root, framework_root, ctx.config)
             with log_section("Generation targets (dry run)"):
-                for art in artifacts:
+                for art in gen.build_artifacts(gctx):
                     logger.info(f"{art.target}  ({', '.join(art.sources)})")
             return
 
-        result = gen.generate(gctx, artifacts)
+        result = gen.generate_surface(ctx.workspace_root, framework_root, ctx.config)
 
         with log_section("Generating agent-config surface"):
             for target in result.written:
@@ -54,13 +52,6 @@ class GenerateTool(RepoTool):
                 logger.debug(f"up-to-date {target}")
             for target, reason in result.refused:
                 logger.error(f"refused   {target}: {reason}")
-
-        # Gitignore the build output (not .mcp.json — see gitignore_entries).
-        patch_gitignore(
-            ctx.workspace_root / ".gitignore",
-            entries=gen.gitignore_entries(),
-            marker="# repokit-generated",
-        )
 
         if not result.ok:
             logger.error(

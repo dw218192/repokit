@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import textwrap
 from unittest.mock import MagicMock, patch
@@ -414,6 +415,50 @@ class TestInitTool:
         tool = InitTool()
         # Should not raise even if venv/pyproject don't exist
         tool.execute(init_ctx, {"clean": True})
+
+
+# ── Agent-config surface generation (init mission shift) ─────────────────────
+# Module-level so the frozen acceptance criteria address them as
+# `test_init.py::test_init_generates_agent_surface` (no class in the node id).
+
+
+@patch("repo_tools.init._is_local_venv", return_value=True)
+@patch("repo_tools._bootstrap.subprocess.run")
+@patch("repo_tools._bootstrap.find_uv", return_value="/bin/uv")
+def test_init_generates_agent_surface(_uv, mock_run, _venv, init_ctx):
+    """IMS-2: init emits the agent-config surface (plugin, runner, .mcp.json, settings)."""
+    mock_run.return_value = MagicMock(returncode=0)
+    InitTool().execute(init_ctx, {})
+
+    ws = init_ctx.workspace_root
+    assert (ws / ".mcp.json").exists()
+    assert (ws / ".claude" / "settings.json").exists()
+    assert (ws / ".claude" / "skills" / "repokit" / ".claude-plugin" / "plugin.json").exists()
+    assert (ws / ".claude" / "workflows" / "repokit-work-item.js").exists()
+
+
+@patch("repo_tools.init._is_local_venv", return_value=True)
+@patch("repo_tools._bootstrap.subprocess.run")
+@patch("repo_tools._bootstrap.find_uv", return_value="/bin/uv")
+def test_init_adoption_guard_warns(_uv, mock_run, _venv, init_ctx, capsys):
+    """IMS-3: a pre-existing un-managed .claude/settings.json is refused with a
+    warning — init does not raise, does not clobber it, and still runs the rest."""
+    mock_run.return_value = MagicMock(returncode=0)
+    ws = init_ctx.workspace_root
+    settings = ws / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text('{"mine": true}', encoding="utf-8")
+
+    # Must NOT raise SystemExit (unlike `./repo generate`).
+    InitTool().execute(init_ctx, {})
+
+    # The hand-authored file is left untouched.
+    assert json.loads(settings.read_text(encoding="utf-8")) == {"mine": True}
+    # The refusal is surfaced as a warning on stderr.
+    assert "settings.json" in capsys.readouterr().err
+    # The remaining init steps still ran.
+    assert (ws / "config.yaml").exists()
+    assert (ws / "CLAUDE.md").exists()
 
 
 # ── Config template generation ──────────────────────────────────────────────
