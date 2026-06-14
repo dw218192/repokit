@@ -1,3 +1,17 @@
+> # ⚠️ Archived — superseded by pixi + a GitHub template
+>
+> **repokit is no longer maintained.** As of 2026-06-14 this project is archived
+> by team decision. Its role — per-repo tooling, environment bootstrapping, and
+> keeping a coding agent honest about a repo — is **completely superseded by
+> [pixi](https://pixi.sh)** (environment + task management) **plus a GitHub
+> project template** (scaffolding). New projects should use those instead.
+>
+> The v0.9.0 "equipment Claude loads" modernization (generation layer + native
+> Claude plugin) shipped and is preserved in history, but will not be developed
+> further. The content below is retained for reference only.
+
+---
+
 # Repokit
 
 Repo tooling framework consumed as a git submodule. Provides a unified `./repo` CLI configured per-project via `config.yaml`.

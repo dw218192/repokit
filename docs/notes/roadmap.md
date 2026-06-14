@@ -1,5 +1,11 @@
 # Roadmap — Repokit Modernization
 
+> **ARCHIVED (2026-06-14).** All work items below shipped in v0.9.0 (inception
+> infra → demolition → init mission shift), each dogfooded through the gated
+> workflow. The project is then **archived by team decision — completely
+> superseded by [pixi](https://pixi.sh) + a GitHub project template.** No further
+> work is planned; this note is retained for reference.
+
 General-purpose planning note (ungated). Detailed design lives in `docs/spec/`.
 
 ## Thesis
